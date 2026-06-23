@@ -109,4 +109,111 @@ public sealed class SkillSystemTests
         Assert.Equal(SkillCastFailureReason.TagRequirementFailed, blocked.FailureReason);
         Assert.Equal("Gameplay tag query did not match.", blocked.Message);
     }
+
+    [Fact]
+    public void Behavior_tree_skill_waits_then_applies_buff()
+    {
+        using var scene = new Scene("battle");
+        scene.Systems.Add(new BehaviorTreeUpdateSystem());
+
+        var caster = scene.CreateEntity();
+        var target = scene.CreateEntity();
+        var buff = new BuffDefinition
+        {
+            Id = "rooted",
+            Duration = TimeSpan.FromSeconds(1),
+        };
+        var skill = new SkillDefinition
+        {
+            Id = "binding_roots",
+            ExecutionTree = new BehaviorTreeDefinition
+            {
+                Root = new BehaviorNodeDefinition
+                {
+                    Type = BehaviorNodeTypes.Sequence,
+                    Children =
+                    {
+                        new BehaviorNodeDefinition
+                        {
+                            Type = BehaviorNodeTypes.Wait,
+                            Duration = TimeSpan.FromSeconds(0.5),
+                        },
+                        new BehaviorNodeDefinition
+                        {
+                            Type = BehaviorNodeTypes.Action,
+                            ActionKey = BehaviorActionKeys.ApplyBuff,
+                            Buff = buff,
+                        },
+                    },
+                },
+            },
+        };
+
+        SkillManager.Learn(caster, skill);
+
+        var result = SkillManager.TryCast(scene, caster, "binding_roots", target);
+
+        Assert.True(result.Succeeded);
+        Assert.False(BuffManager.Has(target, "rooted"));
+
+        scene.Update(0.25, 0.25);
+
+        Assert.False(BuffManager.Has(target, "rooted"));
+
+        scene.Update(0.25, 0.25);
+
+        Assert.True(BuffManager.Has(target, "rooted"));
+    }
+
+    [Fact]
+    public void Behavior_tree_skill_uses_registered_presentation_actions()
+    {
+        var calls = new List<string>();
+        var actions = new BehaviorActionRegistry()
+            .Register("play_animation", new DelegateBehaviorAction(_ =>
+            {
+                calls.Add("animation");
+                return BehaviorActionStatus.Success;
+            }))
+            .Register("play_fx", new DelegateBehaviorAction(_ =>
+            {
+                calls.Add("fx");
+                return BehaviorActionStatus.Success;
+            }));
+
+        using var scene = new Scene("battle");
+        var caster = scene.CreateEntity();
+        var target = scene.CreateEntity();
+        var skill = new SkillDefinition
+        {
+            Id = "slash",
+            ExecutionTree = new BehaviorTreeDefinition
+            {
+                Root = new BehaviorNodeDefinition
+                {
+                    Type = BehaviorNodeTypes.Sequence,
+                    Children =
+                    {
+                        new BehaviorNodeDefinition
+                        {
+                            Type = BehaviorNodeTypes.Action,
+                            ActionKey = "play_animation",
+                        },
+                        new BehaviorNodeDefinition
+                        {
+                            Type = BehaviorNodeTypes.Action,
+                            ActionKey = "play_fx",
+                        },
+                    },
+                },
+            },
+        };
+
+        SkillManager.Learn(caster, skill);
+
+        var result = SkillManager.TryCast(scene, caster, "slash", target, behaviorActions: actions);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["animation", "fx"], calls);
+    }
 }

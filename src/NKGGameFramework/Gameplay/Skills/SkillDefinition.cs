@@ -36,6 +36,8 @@ public sealed class SkillDefinition
 
     public List<SkillEffectDefinition> Effects { get; init; } = [];
 
+    public BehaviorTreeDefinition? ExecutionTree { get; init; }
+
     public TimeSpan GetCooldown(int level)
     {
         return GetLeveledValue(Cooldowns, level, TimeSpan.Zero);

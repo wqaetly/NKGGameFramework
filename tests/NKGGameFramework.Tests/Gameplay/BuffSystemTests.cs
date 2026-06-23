@@ -122,4 +122,57 @@ public sealed class BuffSystemTests
         Assert.False(applied);
         Assert.Equal("Gameplay tag query did not match.", failureReason);
     }
+
+    [Fact]
+    public void Buff_execution_tree_runs_inside_buff_lifetime()
+    {
+        var calls = new List<string>();
+        var actions = new BehaviorActionRegistry()
+            .Register("record", new DelegateBehaviorAction(context =>
+            {
+                calls.Add($"{context.BuffInstance?.Definition.Id}:{context.Request}");
+                return BehaviorActionStatus.Success;
+            }));
+
+        using var scene = new Scene("battle");
+        scene.Systems.Add(new BuffUpdateSystem(behaviorActions: actions));
+
+        var source = scene.CreateEntity();
+        var target = scene.CreateEntity();
+        var definition = new BuffDefinition
+        {
+            Id = "delayed_mark",
+            Duration = TimeSpan.FromSeconds(1),
+            ExecutionTree = new BehaviorTreeDefinition
+            {
+                Root = new BehaviorNodeDefinition
+                {
+                    Type = BehaviorNodeTypes.Sequence,
+                    Children =
+                    {
+                        new BehaviorNodeDefinition
+                        {
+                            Type = BehaviorNodeTypes.Wait,
+                            Duration = TimeSpan.FromSeconds(0.25),
+                        },
+                        new BehaviorNodeDefinition
+                        {
+                            Type = BehaviorNodeTypes.Action,
+                            ActionKey = "record",
+                        },
+                    },
+                },
+            },
+        };
+
+        BuffManager.Apply(source, target, definition);
+
+        scene.Update(0.1, 0.1);
+
+        Assert.Empty(calls);
+
+        scene.Update(0.15, 0.15);
+
+        Assert.Equal(["delayed_mark:Start"], calls);
+    }
 }

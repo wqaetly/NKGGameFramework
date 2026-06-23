@@ -80,6 +80,8 @@ public sealed class BuffDefinition
 
     public List<string> EventKeys { get; init; } = [];
 
+    public BehaviorTreeDefinition? ExecutionTree { get; init; }
+
     public double GetValue(int level, double fallback = 0)
     {
         if (ValuesByLevel.Count == 0)

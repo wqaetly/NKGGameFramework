@@ -8,4 +8,5 @@ TestResults/
 coverage/
 .dotnet/
 .dotnet10/
+.dotnet-install.ps1
 references/

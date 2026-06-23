@@ -41,7 +41,8 @@ public static class SkillManager
         string skillId,
         Entity target,
         SkillEffectRegistry? effects = null,
-        ISkillCostPolicy? costPolicy = null)
+        ISkillCostPolicy? costPolicy = null,
+        BehaviorActionRegistry? behaviorActions = null)
     {
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentException.ThrowIfNullOrWhiteSpace(skillId);
@@ -92,17 +93,41 @@ public static class SkillManager
         }
 
         effects ??= SkillEffectRegistry.CreateDefault();
-        var resolvedEffects = new List<(ISkillEffect Effect, SkillEffectDefinition Definition)>(slot.Definition.Effects.Count);
-        foreach (var effectDefinition in slot.Definition.Effects)
+        behaviorActions ??= BehaviorActionRegistry.CreateDefault(effects);
+
+        if (slot.Definition.ExecutionTree is null)
         {
-            if (!effects.TryResolve(effectDefinition.Key, out var skillEffect))
+            var resolvedEffects = new List<(ISkillEffect Effect, SkillEffectDefinition Definition)>(slot.Definition.Effects.Count);
+            foreach (var effectDefinition in slot.Definition.Effects)
             {
-                return Fail(scene, caster, target, skillId, SkillCastFailureReason.MissingEffect, effectDefinition.Key);
+                if (!effects.TryResolve(effectDefinition.Key, out var skillEffect))
+                {
+                    return Fail(scene, caster, target, skillId, SkillCastFailureReason.MissingEffect, effectDefinition.Key);
+                }
+
+                resolvedEffects.Add((skillEffect, effectDefinition));
             }
 
-            resolvedEffects.Add((skillEffect, effectDefinition));
+            return TryPayAndExecuteLegacy(scene, caster, target, skillId, slot, costPolicy, resolvedEffects);
         }
 
+        if (!slot.Definition.ExecutionTree.TryValidate(behaviorActions, out var missingActionKey))
+        {
+            return Fail(scene, caster, target, skillId, SkillCastFailureReason.MissingEffect, missingActionKey);
+        }
+
+        return TryPayAndStartBehaviorTree(scene, caster, target, skillId, slot, costPolicy, behaviorActions);
+    }
+
+    private static SkillCastResult TryPayAndExecuteLegacy(
+        Scene scene,
+        Entity caster,
+        Entity target,
+        string skillId,
+        SkillSlot slot,
+        ISkillCostPolicy? costPolicy,
+        List<(ISkillEffect Effect, SkillEffectDefinition Definition)> resolvedEffects)
+    {
         costPolicy ??= AllowAllSkillCostPolicy.Instance;
         var costContext = new SkillCostContext(scene, caster, target, slot);
         if (!costPolicy.CanPay(costContext, out var reason))
@@ -117,6 +142,33 @@ public static class SkillManager
         {
             effect.Execute(executionContext, effectDefinition);
         }
+
+        slot.StartCooldown();
+        scene.Events.Publish(new SkillCastSucceeded(caster.ToRef(), target.ToRef(), skillId, slot.Level));
+        return new SkillCastResult(true);
+    }
+
+    private static SkillCastResult TryPayAndStartBehaviorTree(
+        Scene scene,
+        Entity caster,
+        Entity target,
+        string skillId,
+        SkillSlot slot,
+        ISkillCostPolicy? costPolicy,
+        BehaviorActionRegistry behaviorActions)
+    {
+        costPolicy ??= AllowAllSkillCostPolicy.Instance;
+        var costContext = new SkillCostContext(scene, caster, target, slot);
+        if (!costPolicy.CanPay(costContext, out var reason))
+        {
+            return Fail(scene, caster, target, skillId, SkillCastFailureReason.CostRejected, reason);
+        }
+
+        costPolicy.Pay(costContext);
+
+        var behaviorContext = new BehaviorTreeContext(scene, caster, target, slot);
+        var instance = slot.Definition.ExecutionTree!.CreateInstance(behaviorActions, behaviorContext);
+        BehaviorTreeManager.Start(caster, instance);
 
         slot.StartCooldown();
         scene.Events.Publish(new SkillCastSucceeded(caster.ToRef(), target.ToRef(), skillId, slot.Level));

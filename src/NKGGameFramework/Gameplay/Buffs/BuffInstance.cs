@@ -39,6 +39,8 @@ public sealed class BuffInstance
 
     public object? UserState { get; set; }
 
+    internal BehaviorTreeInstance? ExecutionTreeInstance { get; set; }
+
     internal bool PendingRefresh { get; private set; }
 
     internal void Refresh(int stacks)

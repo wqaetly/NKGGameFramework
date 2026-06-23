@@ -77,7 +77,7 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 
 ## Gameplay
 
-Gameplay 是从 `NKGMobaBasedOnET` 的技能系统、Buff 系统，以及 UE 5.7 `GameplayTags` 运行时语义抽取出的引擎无关业务运行时。参考仓库中的 ET `Unit`、`Room`、行为树、Odin Inspector、Unity 资源和 FairyGUI 代码不进入主包；UE 的 Editor、ini 导入、重定向、网络压缩索引和反射宏也不进入主包。主包只保留可复用的状态机、数据定义、标签匹配、扩展注册和 ECS 驱动方式。
+Gameplay 是从 `NKGMobaBasedOnET` 的技能系统、Buff 系统、NPBehave 行为树语义，以及 UE 5.7 `GameplayTags` / 行为树运行时语义抽取出的引擎无关业务运行时。参考仓库中的 ET `Unit`、`Room`、Odin Inspector、Unity 资源、NodeEditor/FairyGUI 工具链和具体 MOBA 业务动作不进入主包；UE 的 UObject、Editor、ini 导入、重定向、网络压缩索引和反射宏也不进入主包。主包只保留可复用的状态机、数据定义、标签匹配、行为树调度、扩展注册和 ECS 驱动方式。
 
 GameplayTag 运行时包含：
 
@@ -90,19 +90,28 @@ GameplayTag 运行时包含：
 - `IGameplayTagAsset` / `EntityGameplayTagAsset`：对齐 UE `IGameplayTagAssetInterface` 的 owned tags 查询语义，提供 `HasMatchingGameplayTag`、`HasAllMatchingGameplayTags` 和 `HasAnyMatchingGameplayTags`。
 - `GameplayTagComponent`：ECS 实体可挂基础标签；`GameplayTagUtility.GetOwnedTags` 会合并实体基础标签和激活 Buff 授予的标签。
 
+BehaviorTree 运行时包含：
+
+- `BehaviorTreeDefinition` / `BehaviorNodeDefinition`：引擎无关行为树数据定义，支持 Sequence、Selector、Parallel、Wait、WaitUntilStopped、Action、Repeater 和黑板条件节点。
+- `BehaviorTreeInstance`：运行时实例使用 execution request 队列泵推进节点开始、取消和完成，避免 NKGMoba NPBehave 中长同步 Action 链可能导致的递归调用栈过深。
+- `BehaviorBlackboard`：黑板值变化通过 observer 触发节点重评估，借鉴 UE `BlackboardComponent` observer 和 `BehaviorTreeComponent` branch evaluation 的事件驱动思路，不轮询整棵树。
+- `BehaviorObserverStops`：覆盖 Self、LowerPriority、Both、ImmediateRestart 等中断语义，用于黑板条件变化时中断自身或低优先级分支。
+- `BehaviorActionRegistry` / `IBehaviorAction`：业务动作以 key 注册。主包内置 `apply_buff` 和 `apply_skill_effects`，动画、特效、音频、碰撞体、Timeline 等引擎动作由 Adapter 或业务层注册。
+- `BehaviorTreeComponent` / `BehaviorTreeUpdateSystem`：技能等实体级行为树通过 ECS 系统推进。系统先收集实例、退出 query 后更新，再回到 query 清理完成实例，避免 action 执行期间发生结构变化。
+
 Buff 运行时包含：
 
-- `BuffDefinition`：Buff 数据块，包含唯一标识、来源技能、目标选择、正负面类型、伤害标签、可见性、同步标记、持续时间、叠层数量、刷新策略、授予标签、Required/Blocked 标签 gate 和 source/target `GameplayTagQuery` gate。
-- `BuffInstance` / `BuffCollectionComponent`：实体上的运行时 Buff 列表，记录来源、目标、等级、层数、剩余时间和状态。
+- `BuffDefinition`：Buff 数据块，包含唯一标识、来源技能、目标选择、正负面类型、伤害标签、可见性、同步标记、持续时间、叠层数量、刷新策略、授予标签、Required/Blocked 标签 gate、source/target `GameplayTagQuery` gate 和可选 `ExecutionTree`。
+- `BuffInstance` / `BuffCollectionComponent`：实体上的运行时 Buff 列表，记录来源、目标、等级、层数、剩余时间、状态和 Buff 生命周期内的行为树实例。
 - `BuffManager`：添加、刷新、查询和标记移除 Buff。默认按 `BuffDefinition.Id` 合并层数；`UniquePerSource` 可按来源实体隔离实例，避免参考仓库里同 ID 不同来源互相覆盖的问题。
-- `BuffUpdateSystem`：ECS 系统，按帧推进 `Waiting -> Running/Forever -> Finished` 生命周期，触发 `IBuffEffect` 的 apply、refresh、update、remove 回调。
+- `BuffUpdateSystem`：ECS 系统，按帧推进 `Waiting -> Running/Forever -> Finished` 生命周期，触发 `IBuffEffect` 的 apply、refresh、update、remove 回调，并在 Buff 生命周期内启动/更新/取消 `ExecutionTree`。
 - `BuffEffectRegistry`：注册具体 Buff 行为。属性修改、伤害、治疗、动画、特效、材质替换等都可以作为 effect 注册；涉及引擎对象的 effect 应放在 Adapter 或业务项目。
 
 Skill 运行时包含：
 
-- `SkillDefinition`：技能基础信息、等级 CD、消耗、释放模式、标签、Required/Blocked 标签 gate 和 caster/target `GameplayTagQuery` gate。
+- `SkillDefinition`：技能基础信息、等级 CD、消耗、释放模式、标签、Required/Blocked 标签 gate、caster/target `GameplayTagQuery` gate 和可选 `ExecutionTree`。
 - `SkillBookComponent` / `SkillSlot`：实体上的技能书、等级和 CD 状态。
-- `SkillManager`：学习技能、释放校验、标签 gate、消耗策略、执行技能效果和发布释放事件。
+- `SkillManager`：学习技能、释放校验、标签 gate、消耗策略、执行旧式同步 `SkillEffect` 或启动行为树，并发布释放事件。
 - `SkillCooldownSystem`：按帧推进技能 CD。
 - `SkillEffectRegistry`：注册技能效果。默认 `apply_buff` 效果把技能释放映射到 `BuffManager.Apply`。
 
