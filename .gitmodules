@@ -1,0 +1,4 @@
+[submodule "externals/odin-serializer"]
+	path = externals/odin-serializer
+	url = https://github.com/wqaetly/OdinSerializerForNetCore.git
+	branch = nkg/net10-standalone
