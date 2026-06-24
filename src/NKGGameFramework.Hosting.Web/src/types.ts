@@ -131,3 +131,23 @@ export interface GameDebugMutationResult {
   succeeded: boolean;
   message: string;
 }
+
+export type GameDebugControlCommand = 'play' | 'pause' | 'step';
+
+export interface GameDebugControlRequest {
+  command: GameDebugControlCommand;
+  stepCount?: number | null;
+}
+
+export interface GameDebugControlState {
+  isPaused: boolean;
+  pendingStepCount: number;
+  revision: number;
+  lastCommand: string | null;
+}
+
+export interface GameDebugControlResult {
+  succeeded: boolean;
+  message: string;
+  state: GameDebugControlState;
+}

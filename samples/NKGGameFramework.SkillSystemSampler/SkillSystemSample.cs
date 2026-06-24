@@ -6,11 +6,12 @@ namespace NKGGameFramework.SkillSystemSampler;
 
 internal static class SkillSystemSample
 {
-    public static void Run()
+    public static World Run()
     {
         SampleLog.Write("技能系统示例开始");
 
-        using var scene = new Scene("skill-sampler");
+        var world = new World("skill-system-sampler");
+        var scene = world.CreateScene("skill-sampler");
         var burning = SampleDefinitions.CreateBurningBuff();
         var skillActions = SampleRegistries.CreateSkillBehaviorActions();
         var buffActions = SampleRegistries.CreateBuffBehaviorActions();
@@ -41,6 +42,7 @@ internal static class SkillSystemSample
             : "无";
         SampleLog.Write($"最终敌人生命={finalHealth}，灼烧={finalBurn}");
         SampleLog.Write("技能系统示例结束");
+        return world;
     }
 
     private static void RunCasts(Scene scene, Entity caster, Entity enemy, BehaviorActionRegistry skillActions)

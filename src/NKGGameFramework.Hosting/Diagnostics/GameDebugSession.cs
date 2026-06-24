@@ -1,4 +1,5 @@
 using NKGGameFramework.Core;
+using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
@@ -63,7 +64,9 @@ public sealed class GameDebugSession
     {
         lock (_gate)
         {
-            return _runtimeContexts.ToArray();
+            return _runtimeContexts.Count > 0
+                ? _runtimeContexts.ToArray()
+                : GameDebugRuntimeRegistry.GetRuntimeContexts();
         }
     }
 
@@ -71,7 +74,9 @@ public sealed class GameDebugSession
     {
         lock (_gate)
         {
-            return _worlds.ToArray();
+            return _worlds.Count > 0
+                ? _worlds.ToArray()
+                : GameDebugRuntimeRegistry.GetWorlds();
         }
     }
 

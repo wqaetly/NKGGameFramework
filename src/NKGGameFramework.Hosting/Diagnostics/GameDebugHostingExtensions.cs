@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NKGGameFramework.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -20,6 +21,7 @@ public static class GameDebugHostingExtensions
         }
 
         services.TryAddSingleton<GameDebugSession>();
+        services.TryAddSingleton(GameDebugController.Shared);
         services.TryAddSingleton<IGameDebugComponentValueSerializer, OdinGameDebugComponentValueSerializer>();
         services.TryAddSingleton<IGameDebugSnapshotProvider, GameDebugSnapshotProvider>();
         services.TryAddSingleton<IGameDebugMutationHandler, GameDebugMutationHandler>();
@@ -42,6 +44,14 @@ public static class GameDebugHostingExtensions
 
         group.MapGet("/snapshot", (IGameDebugSnapshotProvider snapshots) =>
             Results.Json(snapshots.Capture(), GameDebugJson.Options));
+
+        group.MapGet("/control", (GameDebugController control) =>
+            Results.Json(control.GetState(), GameDebugJson.Options));
+
+        group.MapPost("/control", (
+            GameDebugControlRequest request,
+            GameDebugController control) =>
+            Results.Json(control.Execute(request), GameDebugJson.Options));
 
         group.MapPost("/mutations", (
             GameDebugMutationRequest request,

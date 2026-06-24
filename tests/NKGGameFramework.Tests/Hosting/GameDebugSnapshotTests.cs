@@ -1,13 +1,47 @@
 using Microsoft.Extensions.Options;
 using NKGGameFramework.Core;
+using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
 using NKGGameFramework.Gameplay;
 using NKGGameFramework.Hosting.Diagnostics;
 
 namespace NKGGameFramework.Tests.Hosting;
 
+[Collection(GameDebugRegistryCollection.Name)]
 public sealed class GameDebugSnapshotTests
 {
+    [Fact]
+    public void Capture_discovers_runtime_and_world_without_session_registration()
+    {
+        GameDebugRuntimeRegistry.Clear();
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var world = new World("auto-debug-world");
+            var scene = world.CreateScene("battle");
+            var entity = scene.CreateEntity()
+                .Add(new PositionComponent(12, 34));
+            var snapshots = new GameDebugSnapshotProvider(
+                new GameDebugSession(),
+                new OdinGameDebugComponentValueSerializer());
+
+            var snapshot = snapshots.Capture();
+
+            Assert.Contains(snapshot.Runtimes, runtimeSnapshot => runtimeSnapshot.IsDisposed is false);
+            var worldSnapshot = Assert.Single(
+                snapshot.Worlds,
+                worldSnapshot => worldSnapshot.Name == world.Name);
+            var sceneSnapshot = Assert.Single(worldSnapshot.Scenes);
+            Assert.Equal(scene.Name, sceneSnapshot.Name);
+            Assert.Contains(sceneSnapshot.Entities, entitySnapshot => entitySnapshot.Id == entity.Id.Value);
+        }
+        finally
+        {
+            GameDebugRuntimeRegistry.Clear();
+        }
+    }
+
     [Fact]
     public void Capture_includes_runtime_world_components_skills_and_buffs()
     {

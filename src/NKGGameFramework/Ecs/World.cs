@@ -1,4 +1,5 @@
 using NKGGameFramework.Core;
+using NKGGameFramework.Diagnostics;
 
 namespace NKGGameFramework.Ecs;
 
@@ -10,6 +11,7 @@ public sealed class World : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         Name = name;
+        GameDebugRuntimeRegistry.Register(this);
     }
 
     public string Name { get; }
@@ -61,5 +63,6 @@ public sealed class World : IDisposable
         }
 
         _scenes.Clear();
+        GameDebugRuntimeRegistry.Unregister(this);
     }
 }

@@ -1,4 +1,11 @@
-import type { GameDebugMutationRequest, GameDebugMutationResult, GameDebugSnapshot } from './types';
+import type {
+  GameDebugControlRequest,
+  GameDebugControlResult,
+  GameDebugControlState,
+  GameDebugMutationRequest,
+  GameDebugMutationResult,
+  GameDebugSnapshot,
+} from './types';
 
 const apiBase = import.meta.env.VITE_NKG_DEBUG_API_BASE ?? '';
 
@@ -33,6 +40,42 @@ export async function postDebugMutation(
 
   if (!response.ok) {
     throw new Error(`Mutation request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchDebugControl(signal?: AbortSignal): Promise<GameDebugControlState> {
+  const response = await fetch(`${apiBase}/_nkg/debug/control`, {
+    signal,
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Control request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function postDebugControl(
+  request: GameDebugControlRequest,
+  signal?: AbortSignal,
+): Promise<GameDebugControlResult> {
+  const response = await fetch(`${apiBase}/_nkg/debug/control`, {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Control request failed: ${response.status} ${response.statusText}`);
   }
 
   return response.json();

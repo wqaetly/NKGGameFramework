@@ -5,20 +5,23 @@ import {
   Bug,
   Clock3,
   Cpu,
+  Pause,
+  Play,
   RefreshCw,
   Search,
   Shield,
+  SkipForward,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
   Zap,
 } from 'lucide-react';
-import { fetchDebugSnapshot, postDebugMutation } from './api';
+import { fetchDebugControl, fetchDebugSnapshot, postDebugControl, postDebugMutation } from './api';
 import type {
   BuffDebugSnapshot,
   ComponentDebugSnapshot,
   ComponentValueDebugSnapshot,
   EntityDebugSnapshot,
+  GameDebugControlCommand,
+  GameDebugControlState,
   GameDebugSnapshot,
   RuntimeContextDebugSnapshot,
   SceneDebugSnapshot,
@@ -48,7 +51,7 @@ export function App() {
   const [snapshot, setSnapshot] = useState<GameDebugSnapshot | null>(null);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [control, setControl] = useState<GameDebugControlState | null>(null);
   const [query, setQuery] = useState('');
   const [selection, setSelection] = useState<SceneSelection | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
@@ -71,20 +74,25 @@ export function App() {
     }
   }, []);
 
+  const refreshControl = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const next = await fetchDebugControl(signal);
+      setControl(next);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === 'AbortError') {
+        return;
+      }
+
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
+    void refreshControl(controller.signal);
     return () => controller.abort();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!autoRefresh) {
-      return;
-    }
-
-    const timer = window.setInterval(() => void refresh(), 1000);
-    return () => window.clearInterval(timer);
-  }, [autoRefresh, refresh]);
+  }, [refresh, refreshControl]);
 
   const scenes = useMemo(() => flattenScenes(snapshot), [snapshot]);
   const activeSceneEntry = useMemo(
@@ -146,6 +154,23 @@ export function App() {
     [activeSceneEntry, refresh],
   );
 
+  const executeControl = useCallback(
+    async (command: GameDebugControlCommand) => {
+      const result = await postDebugControl({
+        command,
+        stepCount: command === 'step' ? 1 : null,
+      });
+
+      if (!result.succeeded) {
+        setError(result.message);
+        return;
+      }
+
+      setControl(result.state);
+    },
+    [],
+  );
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -168,11 +193,30 @@ export function App() {
           <button
             className="icon-button"
             type="button"
-            onClick={() => setAutoRefresh((value) => !value)}
-            title="Toggle auto refresh"
+            onClick={() => void executeControl('play')}
+            title="Play"
           >
-            {autoRefresh ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
-            Auto
+            <Play size={17} />
+            Play
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => void executeControl('pause')}
+            title="Pause"
+          >
+            <Pause size={17} />
+            Pause
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => void executeControl('step')}
+            title="Step frame"
+          >
+            <SkipForward size={17} />
+            Step
+            {control?.pendingStepCount ? <b>{control.pendingStepCount}</b> : null}
           </button>
           <button className="primary-button" type="button" onClick={() => void refresh()}>
             <RefreshCw size={17} className={loadState === 'loading' ? 'spin' : undefined} />

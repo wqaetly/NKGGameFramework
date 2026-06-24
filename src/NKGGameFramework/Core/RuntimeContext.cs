@@ -1,3 +1,5 @@
+using NKGGameFramework.Diagnostics;
+
 namespace NKGGameFramework.Core;
 
 public interface IRuntimeContext : IGameLoop, IDisposable
@@ -29,6 +31,7 @@ public sealed class RuntimeContext : IRuntimeContext
     public RuntimeContext(IEventBus? events = null)
     {
         Events = events ?? new EventBus();
+        GameDebugRuntimeRegistry.Register(this);
     }
 
     public IEventBus Events { get; }
@@ -131,6 +134,7 @@ public sealed class RuntimeContext : IRuntimeContext
         _updateModules.Clear();
         Events.Clear();
         _disposed = true;
+        GameDebugRuntimeRegistry.Unregister(this);
     }
 
     public void Dispose()

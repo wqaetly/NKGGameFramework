@@ -14,7 +14,6 @@ src/
     Async/
     Serialization/
   NKGGameFramework.Hosting/
-    Server/
     Diagnostics/
   NKGGameFramework.Hosting.Web/
   NKGGameFramework.Adapter.Unity/
@@ -56,7 +55,7 @@ Rules:
 - `NKGGameFramework` 直接引用 Odin standalone Net10 项目，作为项目通用序列化底座。
 - `NKGGameFramework` 直接引用 UniTask NuGet 包，作为项目通用 async/await awaitable 底座。
 - `Adapter.Unity` / `Adapter.Godot` 引用主包，主包不反向引用 Adapter。
-- `NKGGameFramework.Hosting` 是可选 ASP.NET Core 宿主包，用于 Server tick 和 Web Debug Inspector，不进入主包。
+- `NKGGameFramework.Hosting` 是可选 ASP.NET Core 调试宿主包，用于 Web Debug Inspector，不进入主包。
 - `NKGGameFramework.Hosting.Web` 是 React/Vite 调试面板源码，通过 `/_nkg/debug/*` HTTP API 读取快照。
 - Unity/Godot/YooAsset/HybridCLR/Luban 等引擎或生成管线依赖只能出现在 Adapter 的实际引擎实现包中，不能出现在主包。
 - ASP.NET Core、React、Vite 等宿主和工具链依赖只能出现在 Hosting/Web 包中，不能出现在主包。
@@ -90,15 +89,20 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 
 ## Hosting
 
-Hosting 层提供不绑定具体游戏引擎的宿主工具：
+调试链路提供不绑定具体游戏引擎的调试宿主工具：
 
-- `ServerGameLoop`：驱动 `RuntimeContext.Update` 和 `World.Update`，方便 Server 或工具进程统一 tick。
+- `GameDebugRuntimeRegistry`：主框架自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`，让 Web Debug 在没有宿主手动注册时也能发现运行态对象。
+- `GameDebugHost`：框架自带的本地 Debug Host，负责启动 ASP.NET Core 传输层并暴露 Web Debug 所需的 `/_nkg/debug/*` HTTP API。
 - `GameDebugSession`：注册一个或多个 `RuntimeContext` / `World`。
 - `GameDebugSnapshotProvider`：从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件原始值序列化为 Odin JSON payload。
 - `GameDebugMutationHandler`：接收某个 entity/component 的 Odin JSON payload，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
-- `MapNkgGameDebugEndpoints`：以 ASP.NET Core Minimal API 暴露 `/_nkg/debug/health`、`/_nkg/debug/snapshot` 和 `/_nkg/debug/mutations`。
+- `MapNkgGameDebugEndpoints`：以 ASP.NET Core Minimal API 暴露 `/_nkg/debug/health`、`/_nkg/debug/snapshot`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`。
 
 React/Vite 面板放在 `NKGGameFramework.Hosting.Web`，保持前端依赖与 .NET 核心编译解耦；没有 Node 环境时仍可构建和测试核心框架与 Hosting 包。
+
+`GameDebugSession.Register(...)` 只用于显式限定调试范围；没有显式注册时，Hosting 默认读取框架 registry 自动发现的运行态对象。
+已有 ASP.NET Core 宿主可以直接使用 `AddNkgGameDebugging()` 和 `MapNkgGameDebugEndpoints()` 复用同一套协议端点；非 ASP.NET 宿主可由框架自带 `GameDebugHost` 提供本地传输入口。
+`GameDebugHostAutoStart` 支持通过 `NKG_DEBUG_HOST=1` 在开发环境自动启动；`NKG_DEBUG_HOST_URL`、`NKG_DEBUG_HOST_PREFIX` 和 `NKG_DEBUG_HOST_MUTATIONS` 可覆盖默认监听地址、路由前缀和 mutation 开关。
 
 ## Gameplay
 

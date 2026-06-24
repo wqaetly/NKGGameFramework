@@ -147,32 +147,44 @@ Skill/Buff 定义支持 `Required*Tags` / `Blocked*Tags` gate，也支持 `Gamep
 
 ## Web Debug Inspector
 
-`NKGGameFramework.Hosting` 是可选调试宿主包，包含：
+调试链路包含：
 
-- `ServerGameLoop`：Server/工具进程可复用的 Runtime + World tick 驱动。
+- `GameDebugRuntimeRegistry`：主框架自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`，Web Debug 默认从这里发现可调试运行态。
+- `GameDebugHost`：框架自带的本地 Debug Host，启动后直接暴露 Web Debug 所需的 `/_nkg/debug/*` HTTP API。
 - `GameDebugSession`：注册需要观察的 `RuntimeContext` 和 `World`。
-- `MapNkgGameDebugEndpoints`：暴露 `/_nkg/debug/health` 和 `/_nkg/debug/snapshot`。
+- `MapNkgGameDebugEndpoints`：暴露 `/_nkg/debug/health`、`/_nkg/debug/snapshot`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`。
 - `GameDebugSnapshotProvider`：生成包含 modules、procedures、worlds、scenes、systems、entities、components、skills、buffs 的快照；组件原始值以 Odin JSON payload 导出。
 - `GameDebugMutationHandler`：接收组件 Odin JSON payload，按运行时组件类型反序列化后通过 ECS set 流程写回，支持通用组件值编辑。
 
-接入示例：
+默认 Debug Host 示例：
 
 ```csharp
 using NKGGameFramework.Hosting.Diagnostics;
 
-var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddNkgGameDebugging();
-
-var app = builder.Build();
-app.Services.GetRequiredService<GameDebugSession>()
-    .Register(runtimeContext)
-    .Register(world);
-
-app.MapNkgGameDebugEndpoints();
-app.Run();
+await using var debugHost = await GameDebugHost.StartAsync();
+Console.WriteLine(debugHost.BaseAddress);
 ```
 
-React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot` 和 `/_nkg/debug/mutations`，也可以通过 `NKG_DEBUG_API` 配置 Vite proxy 目标。
+开发环境也可以通过环境变量启用框架自启动：
+
+```powershell
+$env:NKG_DEBUG_HOST = "1"
+$env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5057"
+```
+
+React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`，也可以通过 `NKG_DEBUG_API` 配置 Vite proxy 目标。
+
+`GameDebugSession.Register(...)` 只用于需要显式限定调试范围的场景；默认情况下，快照接口会读取框架内置 registry 中自动发现的运行态对象。
+已有 ASP.NET Core 宿主也可以继续使用 `AddNkgGameDebugging()` 和 `MapNkgGameDebugEndpoints()` 复用同一套协议端点。
+
+`NKGGameFramework.SkillSystemSampler` 可作为外部接入冒烟用例：
+
+```powershell
+$env:NKG_DEBUG_HOST = "1"
+$env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5067"
+$env:NKG_DEBUG_SAMPLE_HOLD_SECONDS = "20"
+dotnet run --project .\samples\NKGGameFramework.SkillSystemSampler\NKGGameFramework.SkillSystemSampler.csproj
+```
 
 Runtime 异步接口统一使用 `UniTask` / `UniTask<T>`：
 
