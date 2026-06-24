@@ -47,6 +47,10 @@ type ComponentTreeNode = {
 
 type StructuredNodeChange = (path: string, nextNode: ComponentValueDebugNode) => void;
 
+const COMPONENT_NODE_WIDTH = 360;
+const COMPONENT_GROUP_NODE_WIDTH = 126;
+const COMPONENT_GROUP_NODE_HEIGHT = 28;
+
 const componentNodeTypes = {
   componentNode: memo(ComponentNode),
   componentGroup: memo(ComponentGroupNode),
@@ -246,6 +250,18 @@ function buildComponentGraph(
       id: groupId,
       type: 'componentGroup',
       position: { x: 0, y },
+      width: COMPONENT_GROUP_NODE_WIDTH,
+      height: COMPONENT_GROUP_NODE_HEIGHT,
+      initialWidth: COMPONENT_GROUP_NODE_WIDTH,
+      initialHeight: COMPONENT_GROUP_NODE_HEIGHT,
+      measured: {
+        width: COMPONENT_GROUP_NODE_WIDTH,
+        height: COMPONENT_GROUP_NODE_HEIGHT,
+      },
+      style: {
+        width: COMPONENT_GROUP_NODE_WIDTH,
+        height: COMPONENT_GROUP_NODE_HEIGHT,
+      },
       data: { label: group.label, count: group.roots.length },
       selectable: false,
       draggable: false,
@@ -298,6 +314,18 @@ function layoutComponentTree(
     id: graph.id,
     type: 'componentNode',
     position: { x: 150 + depth * 430, y: nodeY },
+    width: COMPONENT_NODE_WIDTH,
+    height: ownHeight,
+    initialWidth: COMPONENT_NODE_WIDTH,
+    initialHeight: ownHeight,
+    measured: {
+      width: COMPONENT_NODE_WIDTH,
+      height: ownHeight,
+    },
+    style: {
+      width: COMPONENT_NODE_WIDTH,
+      height: ownHeight,
+    },
     data: { component: tree.component, onSaveComponent, readOnly },
     draggable: false,
   });
@@ -451,6 +479,12 @@ function areFlowNodesEqual(left: ComponentGraphFlowNode, right: ComponentGraphFl
       left.type !== right.type ||
       left.position.x !== right.position.x ||
       left.position.y !== right.position.y ||
+      left.width !== right.width ||
+      left.height !== right.height ||
+      left.initialWidth !== right.initialWidth ||
+      left.initialHeight !== right.initialHeight ||
+      left.measured?.width !== right.measured?.width ||
+      left.measured?.height !== right.measured?.height ||
       left.selectable !== right.selectable ||
       left.draggable !== right.draggable) {
     return false;
