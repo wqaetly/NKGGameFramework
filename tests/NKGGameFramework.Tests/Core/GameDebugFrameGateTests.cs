@@ -90,6 +90,41 @@ public sealed class GameDebugFrameGateTests
         }
     }
 
+    [Fact]
+    public void Runtime_context_runs_frame_ending_callbacks_before_published_callbacks()
+    {
+        GameDebugFramePublisher.Shared.Reset();
+        var value = 0;
+        var publishedValue = 0;
+
+        void OnFrameEnding(GameDebugFrameInfo _)
+        {
+            value = 1;
+        }
+
+        void OnFramePublished(GameDebugFrameInfo _)
+        {
+            publishedValue = value;
+        }
+
+        GameDebugFramePublisher.Shared.FrameEnding += OnFrameEnding;
+        GameDebugFramePublisher.Shared.FramePublished += OnFramePublished;
+        try
+        {
+            using var context = new RuntimeContext();
+
+            context.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+
+            Assert.Equal(1, publishedValue);
+        }
+        finally
+        {
+            GameDebugFramePublisher.Shared.FrameEnding -= OnFrameEnding;
+            GameDebugFramePublisher.Shared.FramePublished -= OnFramePublished;
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
     private sealed class CountingModule : Module, IUpdateModule
     {
         public int UpdateCount { get; private set; }

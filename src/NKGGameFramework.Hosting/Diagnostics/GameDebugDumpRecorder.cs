@@ -87,10 +87,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
             _frames.FramePublished += OnFramePublished;
         }
 
-        CaptureFrame(
-            recording,
-            new GameDebugFrameInfo(0, "recording-start", 0, DateTimeOffset.UtcNow));
-
         return new GameDebugDumpRecordingResult(
             true,
             "Debug dump recording started.",
@@ -114,16 +110,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
             _recording = null;
             _frames.FramePublished -= OnFramePublished;
         }
-
-        var lastFrame = recording.LastFrameNumber;
-        CaptureFrame(
-            recording,
-            new GameDebugFrameInfo(
-                recording.FrameCount,
-                "recording-stop",
-                lastFrame,
-                DateTimeOffset.UtcNow),
-            allowDetached: true);
 
         var endedAt = DateTimeOffset.UtcNow;
         var frames = recording.SnapshotFrames();
@@ -170,8 +156,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
     private void CaptureFrame(
         ActiveDumpRecording recording,
-        GameDebugFrameInfo frame,
-        bool allowDetached = false)
+        GameDebugFrameInfo frame)
     {
         var message = new GameDebugSnapshotMessage(
             frame,
@@ -180,7 +165,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
         lock (_gate)
         {
-            if (ReferenceEquals(_recording, recording) || allowDetached)
+            if (ReferenceEquals(_recording, recording))
             {
                 recording.AddFrame(message);
             }
@@ -268,8 +253,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
         public int FrameCount => _frames.Count;
 
         public int DroppedFrameCount { get; private set; }
-
-        public long LastFrameNumber => _frames.Count > 0 ? _frames.Last().Frame.Frame : 0;
 
         public void AddFrame(GameDebugSnapshotMessage message)
         {

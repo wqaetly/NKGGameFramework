@@ -18,6 +18,7 @@ public sealed class GameDebugHostTests
     public async Task Host_serves_snapshot_from_framework_registry()
     {
         GameDebugRuntimeRegistry.Clear();
+        GameDebugFramePublisher.Shared.Reset();
 
         try
         {
@@ -34,13 +35,18 @@ public sealed class GameDebugHostTests
             {
                 BaseAddress = host.BaseAddress,
             };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var frame = 0;
 
-            var message = await client.GetFromJsonAsync<GameDebugSnapshotMessage>(
+            var message = await GetSnapshotAfterRuntimeFrameAsync(
+                client,
                 "/_nkg/debug/snapshot",
-                JsonOptions);
+                () => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame)),
+                timeout.Token);
 
             Assert.NotNull(message);
-            Assert.Equal("snapshot", message.Frame.Source);
+            Assert.Equal(nameof(RuntimeContext), message.Frame.Source);
+            Assert.True(message.Frame.Frame >= 1);
             Assert.Contains(message.Snapshot.Runtimes, runtimeSnapshot => runtimeSnapshot.IsDisposed is false);
             var worldSnapshot = Assert.Single(
                 message.Snapshot.Worlds,
@@ -52,6 +58,7 @@ public sealed class GameDebugHostTests
         finally
         {
             GameDebugRuntimeRegistry.Clear();
+            GameDebugFramePublisher.Shared.Reset();
         }
     }
 
@@ -164,6 +171,88 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
+    public async Task Host_mutations_apply_at_runtime_frame_boundary()
+    {
+        GameDebugRuntimeRegistry.Clear();
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var world = new World("mutation-boundary-world");
+            var scene = world.CreateScene("battle");
+            var entity = scene.CreateEntity()
+                .Add(new PositionComponent(12, 34));
+            await using var host = await GameDebugHost.StartAsync(options =>
+            {
+                options.Url = "http://127.0.0.1:0";
+                options.EnableMutations = true;
+            });
+            using var client = new HttpClient
+            {
+                BaseAddress = host.BaseAddress,
+            };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var valueSerializer = new OdinGameDebugComponentValueSerializer();
+            var componentType = typeof(PositionComponent);
+            var mutation = new GameDebugMutationRequest(
+                world.Name,
+                scene.Name,
+                entity.Id.Value,
+                entity.Version,
+                componentType.FullName!,
+                componentType.Assembly.GetName().Name!,
+                valueSerializer.Serialize(new PositionComponent(99, 34)));
+
+            var mutationTask = PostMutationAsync(client, mutation, timeout.Token);
+            await Task.Delay(50, timeout.Token);
+
+            Assert.False(mutationTask.IsCompleted);
+            Assert.Equal(12, entity.Get<PositionComponent>().X);
+
+            var frame = 0;
+            for (var attempt = 0; attempt < 10 && !mutationTask.IsCompleted; attempt++)
+            {
+                runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame));
+                await Task.Delay(10, timeout.Token);
+            }
+
+            var result = await mutationTask.WaitAsync(timeout.Token);
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(99, entity.Get<PositionComponent>().X);
+
+            var snapshot = await GetSnapshotAfterRuntimeFrameAsync(
+                client,
+                CreateSnapshotPath(
+                    world,
+                    scene,
+                    includePayload: true,
+                    includeStructured: true,
+                    entityId: entity.Id.Value),
+                () => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame)),
+                timeout.Token);
+            var snapshotScene = FindSceneSnapshot(snapshot.Snapshot, world, scene);
+            var snapshotEntity = Assert.Single(snapshotScene.Entities);
+            var snapshotComponent = Assert.Single(
+                snapshotEntity.Components,
+                component => component.Type.Name == nameof(PositionComponent));
+            var structured = snapshotComponent.Value.Structured;
+
+            Assert.NotNull(structured);
+            var x = FindChild(structured!, nameof(PositionComponent.X));
+            Assert.Equal(99, double.Parse(x.Value!, CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            GameDebugRuntimeRegistry.Clear();
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public async Task Host_snapshot_requests_observe_framework_changes_after_each_runtime_frame()
     {
         GameDebugRuntimeRegistry.Clear();
@@ -186,15 +275,17 @@ public sealed class GameDebugHostTests
             {
                 BaseAddress = host.BaseAddress,
             };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var frame = 0;
 
-            for (var frame = 1; frame <= 3; frame++)
+            for (var iteration = 0; iteration < 3; iteration++)
             {
-                runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame));
-
-                var summary = await client.GetFromJsonAsync<GameDebugSnapshotMessage>(
+                var summary = await GetSnapshotAfterRuntimeFrameAsync(
+                    client,
                     CreateSnapshotPath(world, scene, includePayload: false, includeStructured: false),
-                    JsonOptions);
-                var summaryScene = FindSceneSnapshot(summary?.Snapshot, world, scene);
+                    () => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame)),
+                    timeout.Token);
+                var summaryScene = FindSceneSnapshot(summary.Snapshot, world, scene);
                 var positionStore = Assert.Single(
                     summaryScene.ComponentStores,
                     store => store.Type.Name == nameof(PositionComponent));
@@ -205,20 +296,22 @@ public sealed class GameDebugHostTests
                     trackedSummary.Components,
                     component => component.Type.Name == nameof(PositionComponent));
 
-                Assert.Equal(frame + 1, summaryScene.EntityCount);
-                Assert.Equal(frame + 1, positionStore.Count);
+                Assert.Equal((int)summary.Frame.Frame + 1, summaryScene.EntityCount);
+                Assert.Equal((int)summary.Frame.Frame + 1, positionStore.Count);
                 Assert.Null(trackedSummaryComponent.Value.Payload);
                 Assert.Null(trackedSummaryComponent.Value.Structured);
 
-                var detail = await client.GetFromJsonAsync<GameDebugSnapshotMessage>(
+                var detail = await GetSnapshotAfterRuntimeFrameAsync(
+                    client,
                     CreateSnapshotPath(
                         world,
                         scene,
                         includePayload: true,
                         includeStructured: true,
                         entityId: tracked.Id.Value),
-                    JsonOptions);
-                var detailScene = FindSceneSnapshot(detail?.Snapshot, world, scene);
+                    () => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame)),
+                    timeout.Token);
+                var detailScene = FindSceneSnapshot(detail.Snapshot, world, scene);
                 var trackedDetail = Assert.Single(detailScene.Entities);
                 var trackedDetailComponent = Assert.Single(
                     trackedDetail.Components,
@@ -230,8 +323,8 @@ public sealed class GameDebugHostTests
 
                 Assert.NotNull(x.Value);
                 Assert.NotNull(y.Value);
-                Assert.Equal(frame, double.Parse(x.Value!, CultureInfo.InvariantCulture));
-                Assert.Equal(frame * 10, double.Parse(y.Value!, CultureInfo.InvariantCulture));
+                Assert.Equal((double)detail.Frame.Frame, double.Parse(x.Value!, CultureInfo.InvariantCulture));
+                Assert.Equal(detail.Frame.Frame * 10, double.Parse(y.Value!, CultureInfo.InvariantCulture));
             }
         }
         finally
@@ -274,10 +367,6 @@ public sealed class GameDebugHostTests
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var reader = new StreamReader(stream);
 
-            var initial = await ReadSseDataAsync<GameDebugSnapshotMessage>(reader, timeout.Token);
-            Assert.Equal("initial", initial.Frame.Source);
-            Assert.Equal(1, FindSceneSnapshot(initial.Snapshot, world, scene).EntityCount);
-
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
 
             var pushed = await ReadSseDataAsync<GameDebugSnapshotMessage>(reader, timeout.Token);
@@ -288,7 +377,7 @@ public sealed class GameDebugHostTests
 
             Assert.Equal(nameof(RuntimeContext), pushed.Frame.Source);
             Assert.Equal(1, pushed.Frame.Frame);
-            Assert.True(pushed.Frame.Sequence > initial.Frame.Sequence);
+            Assert.True(pushed.Frame.Sequence > 0);
             Assert.Equal(2, pushedScene.EntityCount);
             Assert.Equal(2, positionStore.Count);
             Assert.False(pushed.Control.IsPaused);
@@ -332,9 +421,6 @@ public sealed class GameDebugHostTests
             response.EnsureSuccessStatusCode();
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var reader = new StreamReader(stream);
-
-            var initial = await ReadSseDataAsync<GameDebugSnapshotMessage>(reader, timeout.Token);
-            Assert.Equal("initial", initial.Frame.Source);
 
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
@@ -390,7 +476,7 @@ public sealed class GameDebugHostTests
             Assert.NotNull(start);
             Assert.True(start.Succeeded);
             Assert.True(start.State.IsRecording);
-            Assert.True(start.State.FrameCount >= 1);
+            Assert.Equal(0, start.State.FrameCount);
 
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
@@ -409,11 +495,11 @@ public sealed class GameDebugHostTests
             Assert.Equal("nkg.debug.dump", stop.Dump.Format);
             Assert.Equal(1, stop.Dump.Version);
             Assert.Equal(600, stop.Dump.MaxFrames);
-            Assert.True(stop.Dump.Frames.Count >= 4);
-            Assert.Contains(stop.Dump.Frames, frame => frame.Frame.Source == nameof(RuntimeContext));
+            Assert.Equal(2, stop.Dump.Frames.Count);
+            Assert.All(stop.Dump.Frames, frame => Assert.Equal(nameof(RuntimeContext), frame.Frame.Source));
 
             var lastFrame = stop.Dump.Frames[^1];
-            Assert.Equal("recording-stop", lastFrame.Frame.Source);
+            Assert.Equal(2, lastFrame.Frame.Frame);
             Assert.Contains(
                 lastFrame.Snapshot.Worlds,
                 worldSnapshot => worldSnapshot.Name == world.Name);
@@ -457,7 +543,7 @@ public sealed class GameDebugHostTests
             var start = recorder.Execute(new GameDebugDumpRecordingRequest("start", "bounded-window-test"));
             Assert.True(start.Succeeded);
             Assert.Equal(3, start.State.MaxFrames);
-            Assert.Equal(1, start.State.FrameCount);
+            Assert.Equal(0, start.State.FrameCount);
 
             for (var frame = 1; frame <= 5; frame++)
             {
@@ -467,7 +553,7 @@ public sealed class GameDebugHostTests
             var recording = recorder.GetState();
             Assert.True(recording.IsRecording);
             Assert.Equal(3, recording.FrameCount);
-            Assert.Equal(3, recording.DroppedFrameCount);
+            Assert.Equal(2, recording.DroppedFrameCount);
 
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
             savedPath = stop.State.LastDumpPath;
@@ -475,11 +561,11 @@ public sealed class GameDebugHostTests
             Assert.True(stop.Succeeded);
             Assert.NotNull(stop.Dump);
             Assert.Equal(3, stop.Dump.MaxFrames);
-            Assert.Equal(4, stop.Dump.DroppedFrameCount);
+            Assert.Equal(2, stop.Dump.DroppedFrameCount);
             Assert.Equal(3, stop.Dump.Frames.Count);
-            Assert.Equal(4, stop.Dump.Frames[0].Frame.Frame);
-            Assert.Equal(5, stop.Dump.Frames[1].Frame.Frame);
-            Assert.Equal("recording-stop", stop.Dump.Frames[2].Frame.Source);
+            Assert.Equal(3, stop.Dump.Frames[0].Frame.Frame);
+            Assert.Equal(4, stop.Dump.Frames[1].Frame.Frame);
+            Assert.Equal(5, stop.Dump.Frames[2].Frame.Frame);
         }
         finally
         {
@@ -632,6 +718,44 @@ public sealed class GameDebugHostTests
     private static ComponentValueDebugNode FindChild(ComponentValueDebugNode node, string name)
     {
         return Assert.Single(node.Children, child => child.Name == name);
+    }
+
+    private static async Task<GameDebugSnapshotMessage> GetSnapshotAfterRuntimeFrameAsync(
+        HttpClient client,
+        string path,
+        Action advanceFrame,
+        CancellationToken cancellationToken)
+    {
+        var request = client.GetFromJsonAsync<GameDebugSnapshotMessage>(
+            path,
+            JsonOptions,
+            cancellationToken);
+        for (var attempt = 0; attempt < 10 && !request.IsCompleted; attempt++)
+        {
+            advanceFrame();
+            await Task.Delay(10, cancellationToken);
+        }
+
+        return await request.WaitAsync(cancellationToken)
+            ?? throw new JsonException("The debug snapshot response was empty.");
+    }
+
+    private static async Task<GameDebugMutationResult> PostMutationAsync(
+        HttpClient client,
+        GameDebugMutationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await client.PostAsJsonAsync(
+            "/_nkg/debug/mutations",
+            request,
+            JsonOptions,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        return await response.Content.ReadFromJsonAsync<GameDebugMutationResult>(
+            JsonOptions,
+            cancellationToken)
+            ?? throw new JsonException("The debug mutation response was empty.");
     }
 
     private static async Task<T> ReadSseDataAsync<T>(StreamReader reader, CancellationToken cancellationToken)

@@ -380,13 +380,14 @@ public sealed class GameDebugHost : IAsyncDisposable
 
         if (IsGet(request, endpoint, "/snapshot"))
         {
+            var message = await CaptureSnapshotOnNextFrameAsync(
+                CreateSnapshotCaptureOptions(request.Query),
+                cancellationToken);
             await WriteJsonAsync(
                 stream,
                 200,
                 "OK",
-                CaptureSnapshotMessage(
-                    new GameDebugFrameInfo(0, "snapshot", 0, DateTimeOffset.UtcNow),
-                    CreateSnapshotCaptureOptions(request.Query)),
+                message,
                 cancellationToken);
             return;
         }
@@ -423,11 +424,12 @@ public sealed class GameDebugHost : IAsyncDisposable
         if (IsPost(request, endpoint, "/mutations"))
         {
             var body = ReadJsonBody<GameDebugMutationRequest>(request);
+            var result = await ExecuteMutationOnNextFrameAsync(body, cancellationToken);
             await WriteJsonAsync(
                 stream,
                 200,
                 "OK",
-                ExecuteDebugOperation(() => _mutations.Execute(body)),
+                result,
                 cancellationToken);
             return;
         }
@@ -463,6 +465,70 @@ public sealed class GameDebugHost : IAsyncDisposable
             cancellationToken);
     }
 
+    private async UniTask<GameDebugSnapshotMessage> CaptureSnapshotOnNextFrameAsync(
+        GameDebugSnapshotCaptureOptions captureOptions,
+        CancellationToken cancellationToken)
+    {
+        var completion = new UniTaskCompletionSource<GameDebugSnapshotMessage>();
+
+        void OnFramePublished(GameDebugFrameInfo info)
+        {
+            _frames.FramePublished -= OnFramePublished;
+            try
+            {
+                completion.TrySetResult(CaptureSnapshotMessage(info, captureOptions));
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        }
+
+        _frames.FramePublished += OnFramePublished;
+        using var cancellationRegistration = cancellationToken.Register(() =>
+            completion.TrySetException(new OperationCanceledException(cancellationToken)));
+        try
+        {
+            return await completion.Task;
+        }
+        finally
+        {
+            _frames.FramePublished -= OnFramePublished;
+        }
+    }
+
+    private async UniTask<GameDebugMutationResult> ExecuteMutationOnNextFrameAsync(
+        GameDebugMutationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var completion = new UniTaskCompletionSource<GameDebugMutationResult>();
+
+        void OnFrameEnding(GameDebugFrameInfo info)
+        {
+            _frames.FrameEnding -= OnFrameEnding;
+            try
+            {
+                completion.TrySetResult(ExecuteDebugOperation(() => _mutations.Execute(request)));
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        }
+
+        _frames.FrameEnding += OnFrameEnding;
+        using var cancellationRegistration = cancellationToken.Register(() =>
+            completion.TrySetException(new OperationCanceledException(cancellationToken)));
+        try
+        {
+            return await completion.Task;
+        }
+        finally
+        {
+            _frames.FrameEnding -= OnFrameEnding;
+        }
+    }
+
     private async UniTask StreamSnapshotsAsync(
         NetworkStream stream,
         IReadOnlyDictionary<string, string> query,
@@ -491,14 +557,6 @@ public sealed class GameDebugHost : IAsyncDisposable
         _frames.FramePublished += OnFramePublished;
         try
         {
-            await WriteServerSentEventAsync(
-                stream,
-                "snapshot",
-                CaptureSnapshotMessage(
-                    new GameDebugFrameInfo(0, "initial", 0, DateTimeOffset.UtcNow),
-                    captureOptions),
-                cancellationToken);
-
             await foreach (var message in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 await WriteServerSentEventAsync(stream, "snapshot", message, cancellationToken);

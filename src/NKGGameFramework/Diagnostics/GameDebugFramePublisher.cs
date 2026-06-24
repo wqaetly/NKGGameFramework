@@ -12,12 +12,15 @@ public sealed class GameDebugFramePublisher
 
     private long _sequence;
 
+    public event Action<GameDebugFrameInfo>? FrameEnding;
+
     public event Action<GameDebugFrameInfo>? FramePublished;
 
     internal void Publish(string source, long frame)
     {
-        var handlers = FramePublished;
-        if (handlers is null)
+        var endingHandlers = FrameEnding;
+        var publishedHandlers = FramePublished;
+        if (endingHandlers is null && publishedHandlers is null)
         {
             return;
         }
@@ -27,6 +30,17 @@ public sealed class GameDebugFramePublisher
             source,
             frame,
             DateTimeOffset.UtcNow);
+
+        InvokeHandlers(endingHandlers, info);
+        InvokeHandlers(publishedHandlers, info);
+    }
+
+    private static void InvokeHandlers(Action<GameDebugFrameInfo>? handlers, GameDebugFrameInfo info)
+    {
+        if (handlers is null)
+        {
+            return;
+        }
 
         foreach (Action<GameDebugFrameInfo> handler in handlers.GetInvocationList())
         {
