@@ -124,7 +124,6 @@ export function App() {
   const [selection, setSelection] = useState<SceneSelection | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [entityDetails, setEntityDetails] = useState<Record<string, EntityDebugSnapshot>>({});
-  const [loadingEntityKey, setLoadingEntityKey] = useState<string | null>(null);
   const [dockRevision, setDockRevision] = useState(0);
   const [frameStream, setFrameStream] = useState(readStoredFrameStream);
   const [dump, setDump] = useState<GameDebugDumpDocument | null>(null);
@@ -221,8 +220,9 @@ export function App() {
   }, [commitSnapshotMessage]);
 
   const loadEntityDetail = useCallback(async (
-    entry: SceneEntry,
-    entityOverview: EntityDebugSnapshot,
+    worldName: string,
+    sceneName: string,
+    entityId: number,
     detailKey: string,
     signal?: AbortSignal,
   ) => {
@@ -231,24 +231,23 @@ export function App() {
     }
 
     entityDetailLoadKeyRef.current = detailKey;
-    setLoadingEntityKey(detailKey);
 
     try {
       const detailMessage = await fetchDebugSnapshotMessage(signal, {
-        worldName: entry.world.name,
-        sceneName: entry.scene.name,
-        entityId: entityOverview.id,
+        worldName,
+        sceneName,
+        entityId,
         includePayload: true,
         includeStructured: true,
       });
       const entity = findEntityDetail(
         detailMessage.snapshot,
-        entry.world.name,
-        entry.scene.name,
-        entityOverview.id,
+        worldName,
+        sceneName,
+        entityId,
       );
       if (!entity) {
-        throw new Error(`Entity #${entityOverview.id} was not found in the debug snapshot.`);
+        throw new Error(`Entity #${entityId} was not found in the debug snapshot.`);
       }
 
       if (dumpModeRef.current) {
@@ -266,9 +265,6 @@ export function App() {
       if (entityDetailLoadKeyRef.current === detailKey) {
         entityDetailLoadKeyRef.current = null;
       }
-      setLoadingEntityKey((current) => (
-        current === detailKey ? null : current
-      ));
     }
   }, [commitEntityDetail]);
 
@@ -304,6 +300,8 @@ export function App() {
     [scenes, selection],
   );
   const activeScene = activeSceneEntry?.scene ?? null;
+  const activeWorldName = activeSceneEntry?.world.name ?? null;
+  const activeSceneName = activeSceneEntry?.scene.name ?? null;
 
   useEffect(() => {
     if (!selection && scenes[0]) {
@@ -323,23 +321,22 @@ export function App() {
 
     return filteredEntities.find((entity) => entity.id === selectedEntityId) ?? filteredEntities[0];
   }, [filteredEntities, selectedEntityId]);
+  const selectedEntityOverviewId = selectedEntityOverview?.id ?? null;
   const selectedEntityDetailKey = useMemo(
-    () => activeSceneEntry && selectedEntityOverview
+    () => activeWorldName && activeSceneName && selectedEntityOverviewId !== null
       ? createEntityDetailKey(
-          activeSceneEntry.world.name,
-          activeSceneEntry.scene.name,
-          selectedEntityOverview.id,
+          activeWorldName,
+          activeSceneName,
+          selectedEntityOverviewId,
         )
       : null,
-    [activeSceneEntry, selectedEntityOverview],
+    [activeSceneName, activeWorldName, selectedEntityOverviewId],
   );
   const selectedEntity = selectedEntityDetailKey
     ? entityDetails[selectedEntityDetailKey] ?? selectedEntityOverview
     : selectedEntityOverview;
-  const selectedEntityLoading = !dumpMode && (
-    selectedEntityDetailKey === loadingEntityKey
-    || (selectedEntity !== null && !hasComponentValueDetails(selectedEntity))
-  );
+  const selectedEntityHasDetails = selectedEntity !== null && hasComponentValueDetails(selectedEntity);
+  const selectedEntityLoading = !dumpMode && selectedEntity !== null && !selectedEntityHasDetails;
 
   useEffect(() => {
     activeSceneEntryRef.current = activeSceneEntry;
@@ -381,8 +378,19 @@ export function App() {
       const entry = activeSceneEntryRef.current;
       const entityOverview = selectedEntityOverviewRef.current;
       const detailKey = selectedEntityDetailKeyRef.current;
-      if (entry && entityOverview && detailKey && entityDetailsRef.current[detailKey]) {
-        void loadEntityDetail(entry, entityOverview, detailKey);
+      if (
+        entry &&
+        entityOverview &&
+        detailKey &&
+        entityDetailsRef.current[detailKey] &&
+        entityDetailLoadKeyRef.current !== detailKey
+      ) {
+        void loadEntityDetail(
+          entry.world.name,
+          entry.scene.name,
+          entityOverview.id,
+          detailKey,
+        );
       }
     };
 
@@ -423,7 +431,12 @@ export function App() {
   }, [selectedEntityOverview, selectedEntityId]);
 
   useEffect(() => {
-    if (!activeSceneEntry || !selectedEntityOverview || !selectedEntityDetailKey) {
+    if (
+      !activeWorldName ||
+      !activeSceneName ||
+      selectedEntityOverviewId === null ||
+      !selectedEntityDetailKey
+    ) {
       return;
     }
 
@@ -433,14 +446,22 @@ export function App() {
 
     const controller = new AbortController();
     void loadEntityDetail(
-      activeSceneEntry,
-      selectedEntityOverview,
+      activeWorldName,
+      activeSceneName,
+      selectedEntityOverviewId,
       selectedEntityDetailKey,
       controller.signal,
     );
 
     return () => controller.abort();
-  }, [activeSceneEntry, entityDetails, loadEntityDetail, selectedEntityDetailKey, selectedEntityOverview]);
+  }, [
+    activeSceneName,
+    activeWorldName,
+    entityDetails,
+    loadEntityDetail,
+    selectedEntityDetailKey,
+    selectedEntityOverviewId,
+  ]);
 
   const totals = useMemo(() => summarize(snapshot), [snapshot]);
 

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using NKGGameFramework.Core;
 using NKGGameFramework.Ecs;
 using NKGGameFramework.Gameplay;
@@ -6,6 +8,8 @@ namespace NKGGameFramework.Hosting.Diagnostics;
 
 public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
 {
+    private static readonly JsonSerializerOptions SummaryJsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly GameDebugSession _session;
     private readonly IGameDebugComponentValueSerializer _componentValueSerializer;
 
@@ -144,11 +148,131 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
             components
                 .Select(component => new ComponentDebugSnapshot(
                     DebugSnapshotTypeNames.Create(component.ComponentType),
-                    _componentValueSerializer.Serialize(component.Value, valueOptions),
+                    CaptureComponentValue(component, valueOptions),
                     CaptureComponentGraph(component.ComponentType, componentTypes)))
                 .ToArray(),
             CaptureSkills(components),
             CaptureBuffs(components));
+    }
+
+    private ComponentValueDebugSnapshot CaptureComponentValue(
+        EcsComponentDebugView component,
+        GameDebugComponentValueSerializationOptions valueOptions)
+    {
+        return component.Value is BuffCollectionComponent buffCollection
+            ? CaptureBuffCollectionComponentValue(buffCollection, valueOptions)
+            : _componentValueSerializer.Serialize(component.Value, valueOptions);
+    }
+
+    private static ComponentValueDebugSnapshot CaptureBuffCollectionComponentValue(
+        BuffCollectionComponent component,
+        GameDebugComponentValueSerializationOptions valueOptions)
+    {
+        var buffSummaries = component.Buffs
+            .OrderBy(static buff => buff.Definition.Id, StringComparer.Ordinal)
+            .Select(static buff => new BuffCollectionBuffValueDebugSummary(
+                buff.Definition.Id,
+                buff.Definition.DisplayName,
+                buff.Level,
+                buff.Stacks,
+                buff.State.ToString(),
+                buff.Definition.Kind.ToString(),
+                buff.Definition.EffectKey,
+                buff.RemainingDuration?.TotalSeconds))
+            .ToArray();
+        var activeCount = buffSummaries.Count(static buff => !StringComparer.Ordinal.Equals(buff.State, BuffState.Finished.ToString()));
+        var summary = new BuffCollectionValueDebugSummary(component.Count, activeCount, buffSummaries);
+
+        return new ComponentValueDebugSnapshot(
+            "debug-summary",
+            valueOptions.IncludePayload ? JsonSerializer.Serialize(summary, SummaryJsonOptions) : null,
+            Error: null,
+            valueOptions.IncludeStructured ? CreateBuffCollectionStructuredValue(summary) : null);
+    }
+
+    private static ComponentValueDebugNode CreateBuffCollectionStructuredValue(BuffCollectionValueDebugSummary summary)
+    {
+        return CreateObjectNode(
+            name: null,
+            typeof(BuffCollectionComponent),
+            editable: false,
+            [
+                CreateIntegerNode(nameof(BuffCollectionValueDebugSummary.Count), summary.Count),
+                CreateIntegerNode(nameof(BuffCollectionValueDebugSummary.ActiveCount), summary.ActiveCount),
+                new ComponentValueDebugNode
+                {
+                    Kind = "list",
+                    Name = nameof(BuffCollectionValueDebugSummary.Buffs),
+                    Type = DebugSnapshotTypeNames.Create(typeof(IReadOnlyList<BuffCollectionBuffValueDebugSummary>)),
+                    Editable = false,
+                    Children = summary.Buffs
+                        .Select((buff, index) => CreateBuffStructuredValue($"[{index}]", buff))
+                        .ToArray(),
+                    ElementType = DebugSnapshotTypeNames.Create(typeof(BuffCollectionBuffValueDebugSummary)),
+                },
+            ]);
+    }
+
+    private static ComponentValueDebugNode CreateBuffStructuredValue(
+        string name,
+        BuffCollectionBuffValueDebugSummary buff)
+    {
+        return CreateObjectNode(
+            name,
+            typeof(BuffCollectionBuffValueDebugSummary),
+            editable: false,
+            [
+                CreateStringNode(nameof(BuffCollectionBuffValueDebugSummary.Id), buff.Id),
+                CreateStringNode(nameof(BuffCollectionBuffValueDebugSummary.DisplayName), buff.DisplayName ?? string.Empty),
+                CreateIntegerNode(nameof(BuffCollectionBuffValueDebugSummary.Level), buff.Level),
+                CreateIntegerNode(nameof(BuffCollectionBuffValueDebugSummary.Stacks), buff.Stacks),
+                CreateStringNode(nameof(BuffCollectionBuffValueDebugSummary.State), buff.State),
+                CreateStringNode(nameof(BuffCollectionBuffValueDebugSummary.Kind), buff.Kind),
+                CreateStringNode(nameof(BuffCollectionBuffValueDebugSummary.EffectKey), buff.EffectKey),
+                CreateStringNode(
+                    nameof(BuffCollectionBuffValueDebugSummary.RemainingDurationSeconds),
+                    buff.RemainingDurationSeconds?.ToString("0.###", CultureInfo.InvariantCulture) ?? string.Empty),
+            ]);
+    }
+
+    private static ComponentValueDebugNode CreateObjectNode(
+        string? name,
+        Type type,
+        bool editable,
+        IReadOnlyList<ComponentValueDebugNode> children)
+    {
+        return new ComponentValueDebugNode
+        {
+            Kind = "object",
+            Name = name,
+            Type = DebugSnapshotTypeNames.Create(type),
+            Editable = editable,
+            Children = children,
+        };
+    }
+
+    private static ComponentValueDebugNode CreateIntegerNode(string name, int value)
+    {
+        return new ComponentValueDebugNode
+        {
+            Kind = "integer",
+            Name = name,
+            Type = DebugSnapshotTypeNames.Create(typeof(int)),
+            Editable = false,
+            Value = value.ToString(CultureInfo.InvariantCulture),
+        };
+    }
+
+    private static ComponentValueDebugNode CreateStringNode(string name, string value)
+    {
+        return new ComponentValueDebugNode
+        {
+            Kind = "string",
+            Name = name,
+            Type = DebugSnapshotTypeNames.Create(typeof(string)),
+            Editable = false,
+            Value = value,
+        };
     }
 
     private static bool MatchesWorld(World world, GameDebugSnapshotCaptureOptions options)
@@ -260,4 +384,19 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
             .Order(StringComparer.Ordinal)
             .ToArray();
     }
+
+    private sealed record BuffCollectionValueDebugSummary(
+        int Count,
+        int ActiveCount,
+        IReadOnlyList<BuffCollectionBuffValueDebugSummary> Buffs);
+
+    private sealed record BuffCollectionBuffValueDebugSummary(
+        string Id,
+        string? DisplayName,
+        int Level,
+        int Stacks,
+        string State,
+        string Kind,
+        string EffectKey,
+        double? RemainingDurationSeconds);
 }

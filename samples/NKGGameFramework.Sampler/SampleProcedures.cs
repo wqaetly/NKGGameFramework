@@ -47,9 +47,9 @@ internal sealed class GameplayProcedure(SampleGame game) : ProcedureBase
         game.UpdateBattle(in time);
         game.Log($"玩法帧={game.Frame}");
 
-        if (game.Frame >= game.Config.MaxFrames)
+        if (game.Frame == game.Config.MaxFrames)
         {
-            ChangeProcedure<SaveProcedure>(fsm);
+            game.SaveSnapshot();
         }
     }
 }

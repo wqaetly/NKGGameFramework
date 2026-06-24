@@ -129,6 +129,24 @@ public sealed class GameDebugSnapshotTests
         Assert.Contains("damage", skill.EffectKeys);
 
         var targetSnapshot = Assert.Single(sceneSnapshot.Entities, entity => entity.Id == target.Id.Value);
+        var buffCollectionComponent = Assert.Single(
+            targetSnapshot.Components,
+            component => component.Type.Name == nameof(BuffCollectionComponent));
+        Assert.Equal("debug-summary", buffCollectionComponent.Value.Format);
+        Assert.Null(buffCollectionComponent.Value.Error);
+        Assert.NotNull(buffCollectionComponent.Value.Payload);
+        Assert.True(buffCollectionComponent.Value.Payload!.Length < 2048);
+
+        var buffCollectionValue = buffCollectionComponent.Value.Structured;
+        Assert.NotNull(buffCollectionValue);
+        Assert.Equal("object", buffCollectionValue!.Kind);
+        Assert.False(buffCollectionValue.Editable);
+        Assert.Equal("1", FindChild(buffCollectionValue, "Count").Value);
+        Assert.Equal("1", FindChild(buffCollectionValue, "ActiveCount").Value);
+        var buffCollectionEntries = FindChild(buffCollectionValue, "Buffs");
+        Assert.Equal("list", buffCollectionEntries.Kind);
+        Assert.Single(buffCollectionEntries.Children);
+
         var buff = Assert.Single(targetSnapshot.Buffs);
         Assert.Equal("burn", buff.Id);
         Assert.Equal("Burn", buff.DisplayName);

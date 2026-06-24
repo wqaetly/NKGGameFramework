@@ -191,12 +191,12 @@ React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求
 `GameDebugSession.Register(...)` 只用于需要显式限定调试范围的场景；默认情况下，快照接口会读取框架内置 registry 中自动发现的运行态对象。
 宿主游戏只需要启动 `GameDebugHost` 或使用 `GameDebugHostAutoStart`，不需要接入额外 Web 框架。
 
-`NKGGameFramework.SkillSystemSampler` 可作为外部接入冒烟用例：
+两个 sample 都可作为 Web Debug 手动体验用例。运行后进程会持续推进 Runtime 帧，按任意键退出：
 
 ```powershell
 $env:NKG_DEBUG_HOST = "1"
 $env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5067"
-$env:NKG_DEBUG_SAMPLE_HOLD_SECONDS = "20"
+dotnet run --project .\samples\NKGGameFramework.Sampler\NKGGameFramework.Sampler.csproj
 dotnet run --project .\samples\NKGGameFramework.SkillSystemSampler\NKGGameFramework.SkillSystemSampler.csproj
 ```
 

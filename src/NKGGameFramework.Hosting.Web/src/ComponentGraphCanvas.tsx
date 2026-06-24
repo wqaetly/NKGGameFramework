@@ -119,19 +119,25 @@ export function ComponentGraphCanvas({
 
 function useStableComponents(components: ComponentDebugSnapshot[]) {
   const previousByIdRef = useRef<Map<string, ComponentDebugSnapshot>>(new Map());
+  const previousComponentsRef = useRef<ComponentDebugSnapshot[]>([]);
 
   return useMemo(() => {
     const previousById = previousByIdRef.current;
+    const previousComponents = previousComponentsRef.current;
     const nextById = new Map<string, ComponentDebugSnapshot>();
-    const stableComponents = components.map((component) => {
+    const nextComponents = components.map((component) => {
       const graph = getComponentGraph(component);
       const previous = previousById.get(graph.id);
       const stable = previous ? stabilizeComponentSnapshot(previous, component) : component;
       nextById.set(graph.id, stable);
       return stable;
     });
+    const stableComponents = areReferenceArraysEqual(nextComponents, previousComponents)
+      ? previousComponents
+      : nextComponents;
 
     previousByIdRef.current = nextById;
+    previousComponentsRef.current = stableComponents;
     return stableComponents;
   }, [components]);
 }
@@ -143,9 +149,15 @@ function useStableGraphElements(graph: {
   const previousRef = useRef<{
     nodesById: Map<string, ComponentGraphFlowNode>;
     edgesById: Map<string, Edge>;
+    nodes: ComponentGraphFlowNode[];
+    edges: Edge[];
+    result: { nodes: ComponentGraphFlowNode[]; edges: Edge[] };
   }>({
     nodesById: new Map(),
     edgesById: new Map(),
+    nodes: [],
+    edges: [],
+    result: { nodes: [], edges: [] },
   });
 
   return useMemo(() => {
@@ -168,9 +180,27 @@ function useStableGraphElements(graph: {
       edgesById.set(stableEdge.id, stableEdge);
       return stableEdge;
     });
+    const stableNodes = areReferenceArraysEqual(nodes, previous.nodes)
+      ? previous.nodes
+      : nodes;
+    const stableEdges = areReferenceArraysEqual(edges, previous.edges)
+      ? previous.edges
+      : edges;
 
-    previousRef.current = { nodesById, edgesById };
-    return { nodes, edges };
+    if (stableNodes === previous.nodes && stableEdges === previous.edges) {
+      previousRef.current = {
+        nodesById,
+        edgesById,
+        nodes: previous.nodes,
+        edges: previous.edges,
+        result: previous.result,
+      };
+      return previous.result;
+    }
+
+    const result = { nodes: stableNodes, edges: stableEdges };
+    previousRef.current = { nodesById, edgesById, nodes: stableNodes, edges: stableEdges, result };
+    return result;
   }, [graph]);
 }
 
@@ -454,6 +484,10 @@ function areFlowEdgesEqual(left: Edge, right: Edge) {
   );
 }
 
+function areReferenceArraysEqual<T>(left: readonly T[], right: readonly T[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function areComponentGraphsEqual(left: ReturnType<typeof getComponentGraph>, right: ReturnType<typeof getComponentGraph>) {
   return (
     left.id === right.id &&
@@ -540,6 +574,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
   const [saving, setSaving] = useState(false);
   const graph = getComponentGraph(component);
   const initial = component.type.name.trim().charAt(0).toUpperCase() || '?';
+  const canSave = !readOnly && component.value.format === 'odin-json' && component.value.error === null;
 
   useEffect(() => {
     setDraftPayload(formatComponentValue(component.value));
@@ -589,7 +624,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
         <button
           className="mini-button"
           type="button"
-          disabled={readOnly || saving || component.value.error !== null}
+          disabled={!canSave || saving}
           onClick={async () => {
             setSaving(true);
             try {

@@ -7,4 +7,5 @@ internal static class SampleConstants
     public const string ProjectileCountKey = "fireball.projectile_count";
     public const int MaxProjectiles = 3;
     public const double FrameDelta = 0.1;
+    public const double DemoLoopSeconds = 8.0;
 }

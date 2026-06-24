@@ -1,10 +1,11 @@
+using NKGGameFramework.Core;
 using NKGGameFramework.Hosting.Diagnostics;
 
 namespace NKGGameFramework.SkillSystemSampler;
 
 internal static class Program
 {
-    private const string HoldSecondsVariable = "NKG_DEBUG_SAMPLE_HOLD_SECONDS";
+    private static readonly TimeSpan FrameDelay = TimeSpan.FromMilliseconds(100);
 
     public static async Task Main()
     {
@@ -14,28 +15,30 @@ internal static class Program
             SampleLog.Write($"Web Debug Host={debugHost.BaseAddress}");
         }
 
-        using var world = SkillSystemSample.Run();
-
-        if (debugHost is not null)
+        try
         {
-            var holdSeconds = ReadHoldSeconds();
-            if (holdSeconds > 0)
+            using var sample = SkillSystemSample.Start();
+            SampleLog.Write("按任意键结束示例。");
+
+            var exitKey = WaitForExitKeyAsync();
+            var time = GameFrameTime.Zero;
+            while (!exitKey.IsCompleted)
             {
-                SampleLog.Write($"Web Debug Host hold {holdSeconds:0.##}s for external debug requests.");
-                await Task.Delay(TimeSpan.FromSeconds(holdSeconds));
+                time = GameFrameTime.Advance(time, FrameDelay, FrameDelay);
+                sample.Update(in time);
+                await Task.Delay(FrameDelay);
             }
+
+            await exitKey;
+        }
+        finally
+        {
+            await GameDebugHostAutoStart.StopAsync();
         }
     }
 
-    private static double ReadHoldSeconds()
+    private static Task<ConsoleKeyInfo> WaitForExitKeyAsync()
     {
-        var value = Environment.GetEnvironmentVariable(HoldSecondsVariable);
-        return double.TryParse(
-            value,
-            System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture,
-            out var seconds)
-            ? seconds
-            : 10;
+        return Task.Run(() => Console.ReadKey(intercept: true));
     }
 }

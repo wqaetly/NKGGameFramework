@@ -6,6 +6,8 @@ public interface IRuntimeContext : IGameLoop, IDisposable
 {
     IEventBus Events { get; }
 
+    IGameTimer Timers { get; }
+
     GameFrameTime Time { get; }
 
     T RegisterModule<T>(T module)
@@ -24,17 +26,22 @@ public sealed class RuntimeContext : IRuntimeContext
 {
     private readonly Dictionary<Type, Module> _modulesByConcreteType = [];
     private readonly List<Module> _modules = [];
+    private readonly GameTimer _timers;
     private bool _disposed;
     private bool _updateListDirty;
     private List<IUpdateModule> _updateModules = [];
 
-    public RuntimeContext(IEventBus? events = null)
+    public RuntimeContext(IEventBus? events = null, GameTimer? timers = null)
     {
         Events = events ?? new EventBus();
+        _timers = timers ?? new GameTimer();
+        Timers = _timers;
         GameDebugRuntimeRegistry.Register(this);
     }
 
     public IEventBus Events { get; }
+
+    public IGameTimer Timers { get; }
 
     public GameFrameTime Time { get; private set; } = GameFrameTime.Zero;
 
@@ -107,6 +114,7 @@ public sealed class RuntimeContext : IRuntimeContext
 
         RebuildUpdateListIfNeeded();
         Time = time;
+        _timers.Advance(in time);
 
         foreach (var module in _updateModules)
         {
@@ -138,6 +146,7 @@ public sealed class RuntimeContext : IRuntimeContext
         _modules.Clear();
         _modulesByConcreteType.Clear();
         _updateModules.Clear();
+        _timers.Clear();
         Events.Clear();
         _disposed = true;
         GameDebugRuntimeRegistry.Unregister(this);

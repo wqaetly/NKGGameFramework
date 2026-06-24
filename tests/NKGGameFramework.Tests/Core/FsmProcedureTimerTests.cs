@@ -1,3 +1,4 @@
+using NKGGameFramework.Async;
 using NKGGameFramework.Core;
 
 namespace NKGGameFramework.Core.Tests;
@@ -74,6 +75,105 @@ public sealed class FsmProcedureTimerTests
 
         Assert.Equal(11, timer.Tick);
         Assert.Equal(TimeSpan.FromSeconds(1), timer.Elapsed);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void TimerCanCancelScheduledCallbacks()
+    {
+        using var context = new RuntimeContext();
+        var count = 0;
+
+        var timerId = context.Timers.Schedule(TimeSpan.FromSeconds(1), () => count++);
+
+        Assert.True(context.Timers.HasTimer(timerId));
+        Assert.True(context.Timers.Cancel(timerId));
+        Assert.False(context.Timers.HasTimer(timerId));
+
+        context.Update(1, 1);
+
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task TimerDelayAsyncCompletesWhenTimerAdvances()
+    {
+        using var context = new RuntimeContext();
+        var completed = false;
+        var delay = AwaitDelayAsync();
+
+        context.Update(0.4, 0.4);
+        Assert.False(completed);
+
+        context.Update(0.6, 0.6);
+
+        await delay;
+        Assert.True(completed);
+
+        async Task AwaitDelayAsync()
+        {
+            await GameAsync.Delay(context.Timers, TimeSpan.FromSeconds(1));
+            completed = true;
+        }
+    }
+
+    [Fact]
+    public async Task TimerDelayAsyncIsCanceledWhenTimerIsCleared()
+    {
+        using var context = new RuntimeContext();
+        var delay = GameAsync.Delay(context.Timers, TimeSpan.FromSeconds(1));
+
+        context.Timers.Clear();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await delay);
+    }
+
+    [Fact]
+    public async Task TimerNextFrameAsyncCompletesOnNextRuntimeFrame()
+    {
+        using var context = new RuntimeContext();
+        var completed = false;
+        var delay = AwaitNextFrameAsync();
+
+        Assert.False(completed);
+
+        context.Update(new GameFrameTime(1, TimeSpan.Zero, TimeSpan.Zero));
+
+        await delay;
+        Assert.True(completed);
+
+        async Task AwaitNextFrameAsync()
+        {
+            await GameAsync.NextFrame(context.Timers);
+            completed = true;
+        }
+    }
+
+    [Fact]
+    public void TimerSupportsRealTimeModeDuringGameplayPause()
+    {
+        using var context = new RuntimeContext();
+        var gameCount = 0;
+        var realCount = 0;
+
+        context.Timers.Schedule(TimeSpan.FromSeconds(1), () => gameCount++);
+        context.Timers.Schedule(TimeSpan.FromSeconds(1), () => realCount++, timeMode: TimerTimeMode.RealTime);
+        context.Update(new GameFrameTime(1, TimeSpan.Zero, TimeSpan.FromSeconds(1)));
+
+        Assert.Equal(0, gameCount);
+        Assert.Equal(1, realCount);
+    }
+
+    [Fact]
+    public void RuntimeContextDrivesGlobalTimer()
+    {
+        using var context = new RuntimeContext();
+        var count = 0;
+
+        context.Timers.Schedule(TimeSpan.FromSeconds(1), () => count++);
+        context.Update(0.5, 0.5);
+        context.Update(0.5, 0.5);
+
         Assert.Equal(1, count);
     }
 
