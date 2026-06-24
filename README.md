@@ -152,9 +152,11 @@ Skill/Buff 定义支持 `Required*Tags` / `Blocked*Tags` gate，也支持 `Gamep
 - `GameDebugRuntimeRegistry`：主框架自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`，Web Debug 默认从这里发现可调试运行态。
 - `GameDebugHost`：框架自带的本地 Debug Host，启动后直接暴露 Web Debug 所需的 `/_nkg/debug/*` HTTP API。
 - `GameDebugSession`：注册需要观察的 `RuntimeContext` 和 `World`。
-- `MapNkgGameDebugEndpoints`：暴露 `/_nkg/debug/health`、`/_nkg/debug/snapshot`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`。
+- `MapNkgGameDebugEndpoints`：暴露 `/_nkg/debug/health`、`/_nkg/debug/snapshot`、`/_nkg/debug/stream`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`。
 - `GameDebugSnapshotProvider`：生成包含 modules、procedures、worlds、scenes、systems、entities、components、skills、buffs 的快照；组件原始值以 Odin JSON payload 导出。
 - `GameDebugMutationHandler`：接收组件 Odin JSON payload，按运行时组件类型反序列化后通过 ECS set 流程写回，支持通用组件值编辑。
+
+完整 WebDebug、Frame Stream、组件图更新和后续时间段 dump / recorder 设计见 [docs/debug-and-dump.md](docs/debug-and-dump.md)。
 
 默认 Debug Host 示例：
 
@@ -172,7 +174,7 @@ $env:NKG_DEBUG_HOST = "1"
 $env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5057"
 ```
 
-React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`，也可以通过 `NKG_DEBUG_API` 配置 Vite proxy 目标。
+React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot`、`/_nkg/debug/stream`、`/_nkg/debug/control` 和 `/_nkg/debug/mutations`，也可以通过 `NKG_DEBUG_API` 配置 Vite proxy 目标。
 
 `GameDebugSession.Register(...)` 只用于需要显式限定调试范围的场景；默认情况下，快照接口会读取框架内置 registry 中自动发现的运行态对象。
 已有 ASP.NET Core 宿主也可以继续使用 `AddNkgGameDebugging()` 和 `MapNkgGameDebugEndpoints()` 复用同一套协议端点。

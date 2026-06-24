@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -21,10 +21,14 @@ import type {
 } from './types';
 
 type ComponentNodeData = {
-  entity: EntityDebugSnapshot;
   component: ComponentDebugSnapshot;
-  onSaveComponent: ComponentMutationExecutor;
+  onSaveComponent: ComponentNodeMutationExecutor;
 };
+
+type ComponentNodeMutationExecutor = (
+  component: ComponentDebugSnapshot,
+  value: ComponentValueDebugSnapshot,
+) => Promise<void>;
 
 type ComponentGroupNodeData = {
   label: string;
@@ -40,9 +44,11 @@ type ComponentTreeNode = {
   children: ComponentTreeNode[];
 };
 
+type StructuredNodeChange = (path: string, nextNode: ComponentValueDebugNode) => void;
+
 const componentNodeTypes = {
-  componentNode: ComponentNode,
-  componentGroup: ComponentGroupNode,
+  componentNode: memo(ComponentNode),
+  componentGroup: memo(ComponentGroupNode),
 } satisfies NodeTypes;
 
 export function ComponentGraphCanvas({
@@ -54,16 +60,27 @@ export function ComponentGraphCanvas({
   query: string;
   onSaveComponent: ComponentMutationExecutor;
 }) {
-  const graph = useMemo(
-    () => buildComponentGraph(
-      {
-        ...entity,
-        components: filterComponents(entity.components, query),
-      },
-      onSaveComponent,
-    ),
-    [entity, query, onSaveComponent],
+  const entityRef = useRef(entity);
+
+  useEffect(() => {
+    entityRef.current = entity;
+  }, [entity]);
+
+  const saveComponent = useCallback<ComponentNodeMutationExecutor>(
+    (component, value) => onSaveComponent(entityRef.current, component, value),
+    [onSaveComponent],
   );
+
+  const stableComponents = useStableComponents(entity.components);
+  const filteredComponents = useMemo(
+    () => filterComponents(stableComponents, query),
+    [stableComponents, query],
+  );
+  const rawGraph = useMemo(
+    () => buildComponentGraph(filteredComponents, saveComponent),
+    [filteredComponents, saveComponent],
+  );
+  const graph = useStableGraphElements(rawGraph);
 
   return (
     <div className="component-flow">
@@ -97,13 +114,70 @@ export function ComponentGraphCanvas({
   );
 }
 
+function useStableComponents(components: ComponentDebugSnapshot[]) {
+  const previousByIdRef = useRef<Map<string, ComponentDebugSnapshot>>(new Map());
+
+  return useMemo(() => {
+    const previousById = previousByIdRef.current;
+    const nextById = new Map<string, ComponentDebugSnapshot>();
+    const stableComponents = components.map((component) => {
+      const graph = getComponentGraph(component);
+      const previous = previousById.get(graph.id);
+      const stable = previous ? stabilizeComponentSnapshot(previous, component) : component;
+      nextById.set(graph.id, stable);
+      return stable;
+    });
+
+    previousByIdRef.current = nextById;
+    return stableComponents;
+  }, [components]);
+}
+
+function useStableGraphElements(graph: {
+  nodes: ComponentGraphFlowNode[];
+  edges: Edge[];
+}) {
+  const previousRef = useRef<{
+    nodesById: Map<string, ComponentGraphFlowNode>;
+    edgesById: Map<string, Edge>;
+  }>({
+    nodesById: new Map(),
+    edgesById: new Map(),
+  });
+
+  return useMemo(() => {
+    const previous = previousRef.current;
+    const nodesById = new Map<string, ComponentGraphFlowNode>();
+    const edgesById = new Map<string, Edge>();
+    const nodes = graph.nodes.map((node) => {
+      const previousNode = previous.nodesById.get(node.id);
+      const stableNode = previousNode && areFlowNodesEqual(previousNode, node)
+        ? previousNode
+        : node;
+      nodesById.set(stableNode.id, stableNode);
+      return stableNode;
+    });
+    const edges = graph.edges.map((edge) => {
+      const previousEdge = previous.edgesById.get(edge.id);
+      const stableEdge = previousEdge && areFlowEdgesEqual(previousEdge, edge)
+        ? previousEdge
+        : edge;
+      edgesById.set(stableEdge.id, stableEdge);
+      return stableEdge;
+    });
+
+    previousRef.current = { nodesById, edgesById };
+    return { nodes, edges };
+  }, [graph]);
+}
+
 function buildComponentGraph(
-  entity: EntityDebugSnapshot,
-  onSaveComponent: ComponentMutationExecutor,
+  components: ComponentDebugSnapshot[],
+  onSaveComponent: ComponentNodeMutationExecutor,
 ) {
   const componentById = new Map<string, ComponentTreeNode>();
 
-  for (const component of entity.components) {
+  for (const component of components) {
     const graph = getComponentGraph(component);
     componentById.set(graph.id, { component, children: [] });
   }
@@ -150,7 +224,6 @@ function buildComponentGraph(
         root,
         0,
         rootY,
-        entity,
         onSaveComponent,
         nodes,
         edges,
@@ -172,8 +245,7 @@ function layoutComponentTree(
   tree: ComponentTreeNode,
   depth: number,
   y: number,
-  entity: EntityDebugSnapshot,
-  onSaveComponent: ComponentMutationExecutor,
+  onSaveComponent: ComponentNodeMutationExecutor,
   nodes: ComponentGraphFlowNode[],
   edges: Edge[],
 ) {
@@ -190,7 +262,7 @@ function layoutComponentTree(
     id: graph.id,
     type: 'componentNode',
     position: { x: 150 + depth * 430, y: nodeY },
-    data: { entity, component: tree.component, onSaveComponent },
+    data: { component: tree.component, onSaveComponent },
     draggable: false,
   });
 
@@ -201,7 +273,6 @@ function layoutComponentTree(
       child,
       depth + 1,
       childY,
-      entity,
       onSaveComponent,
       nodes,
       edges,
@@ -278,8 +349,184 @@ function countStructuredRows(node: ComponentValueDebugNode): number {
   return 1;
 }
 
+function stabilizeComponentSnapshot(
+  previous: ComponentDebugSnapshot,
+  next: ComponentDebugSnapshot,
+): ComponentDebugSnapshot {
+  if (!areDebugTypesEqual(previous.type, next.type) ||
+      !areComponentGraphsEqual(getComponentGraph(previous), getComponentGraph(next))) {
+    return next;
+  }
+
+  if (areComponentValuesEqual(previous.value, next.value)) {
+    return previous;
+  }
+
+  const structured = stabilizeDebugNode(previous.value.structured, next.value.structured);
+  return {
+    ...next,
+    value: {
+      ...next.value,
+      structured,
+    },
+  };
+}
+
+function stabilizeDebugNode(
+  previous: ComponentValueDebugNode | null,
+  next: ComponentValueDebugNode | null,
+): ComponentValueDebugNode | null {
+  if (!previous || !next) {
+    return next;
+  }
+
+  if (!areDebugNodeScalarsEqual(previous, next) || previous.children.length !== next.children.length) {
+    return next;
+  }
+
+  let changed = false;
+  const children = next.children.map((child, index) => {
+    const stableChild = stabilizeDebugNode(previous.children[index], child);
+    if (stableChild !== previous.children[index]) {
+      changed = true;
+    }
+
+    return stableChild!;
+  });
+  const elementTemplate = stabilizeDebugNode(previous.elementTemplate, next.elementTemplate);
+  if (elementTemplate !== previous.elementTemplate) {
+    changed = true;
+  }
+
+  if (!changed) {
+    return previous;
+  }
+
+  return {
+    ...next,
+    children,
+    elementTemplate,
+  };
+}
+
+function areFlowNodesEqual(left: ComponentGraphFlowNode, right: ComponentGraphFlowNode) {
+  if (left.id !== right.id ||
+      left.type !== right.type ||
+      left.position.x !== right.position.x ||
+      left.position.y !== right.position.y ||
+      left.selectable !== right.selectable ||
+      left.draggable !== right.draggable) {
+    return false;
+  }
+
+  if (left.type === 'componentNode' && right.type === 'componentNode') {
+    return (
+      left.data.component === right.data.component &&
+      left.data.onSaveComponent === right.data.onSaveComponent
+    );
+  }
+
+  if (left.type === 'componentGroup' && right.type === 'componentGroup') {
+    return left.data.label === right.data.label && left.data.count === right.data.count;
+  }
+
+  return false;
+}
+
+function areFlowEdgesEqual(left: Edge, right: Edge) {
+  return (
+    left.id === right.id &&
+    left.source === right.source &&
+    left.sourceHandle === right.sourceHandle &&
+    left.target === right.target &&
+    left.targetHandle === right.targetHandle &&
+    left.type === right.type &&
+    left.className === right.className &&
+    left.zIndex === right.zIndex
+  );
+}
+
+function areComponentGraphsEqual(left: ReturnType<typeof getComponentGraph>, right: ReturnType<typeof getComponentGraph>) {
+  return (
+    left.id === right.id &&
+    left.parentId === right.parentId &&
+    left.group === right.group &&
+    left.order === right.order &&
+    areNullableDebugTypesEqual(left.parentType, right.parentType)
+  );
+}
+
+function areComponentValuesEqual(left: ComponentValueDebugSnapshot, right: ComponentValueDebugSnapshot) {
+  return (
+    left.format === right.format &&
+    left.payload === right.payload &&
+    left.error === right.error &&
+    areDebugNodesEqual(left.structured, right.structured)
+  );
+}
+
+function areDebugNodesEqual(
+  left: ComponentValueDebugNode | null,
+  right: ComponentValueDebugNode | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    areDebugNodeScalarsEqual(left, right) &&
+    left.children.length === right.children.length &&
+    left.children.every((child, index) => areDebugNodesEqual(child, right.children[index])) &&
+    areDebugNodesEqual(left.elementTemplate, right.elementTemplate)
+  );
+}
+
+function areDebugNodeScalarsEqual(left: ComponentValueDebugNode, right: ComponentValueDebugNode) {
+  return (
+    left.kind === right.kind &&
+    left.name === right.name &&
+    left.editable === right.editable &&
+    left.value === right.value &&
+    left.error === right.error &&
+    areDebugTypesEqual(left.type, right.type) &&
+    areNullableDebugTypesEqual(left.elementType, right.elementType) &&
+    areStringArraysEqual(left.options, right.options)
+  );
+}
+
+function areNullableDebugTypesEqual(
+  left: ComponentValueDebugNode['type'] | null,
+  right: ComponentValueDebugNode['type'] | null,
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return areDebugTypesEqual(left, right);
+}
+
+function areDebugTypesEqual(left: ComponentValueDebugNode['type'], right: ComponentValueDebugNode['type']) {
+  return (
+    left.name === right.name &&
+    left.fullName === right.fullName &&
+    left.assemblyName === right.assemblyName
+  );
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
-  const { entity, component, onSaveComponent } = data;
+  const { component, onSaveComponent } = data;
   const [draftPayload, setDraftPayload] = useState(formatComponentValue(component.value));
   const [draftNode, setDraftNode] = useState(() => cloneDebugNode(component.value.structured));
   const [saving, setSaving] = useState(false);
@@ -288,8 +535,12 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
 
   useEffect(() => {
     setDraftPayload(formatComponentValue(component.value));
-    setDraftNode(cloneDebugNode(component.value.structured));
+    setDraftNode((current) => cloneStableDebugNode(current, component.value.structured));
   }, [component.value]);
+
+  const updateDraftNode = useCallback<StructuredNodeChange>((path, nextNode) => {
+    setDraftNode((current) => current ? updateDebugNodeAtPath(current, path, nextNode) : current);
+  }, []);
 
   return (
     <div className={selected ? 'component-flow-node selected' : 'component-flow-node'}>
@@ -309,7 +560,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
       </div>
       {draftNode ? (
         <div className="component-flow-node-fields nodrag nopan">
-          <StructuredValueEditor node={draftNode} onChange={setDraftNode} />
+          <StructuredValueEditor node={draftNode} path="" onChangeNode={updateDraftNode} />
         </div>
       ) : (
         <textarea
@@ -328,7 +579,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
           onClick={async () => {
             setSaving(true);
             try {
-              await onSaveComponent(entity, component, {
+              await onSaveComponent(component, {
                 ...component.value,
                 payload: draftNode ? component.value.payload : draftPayload,
                 structured: draftNode,
@@ -356,13 +607,15 @@ function ComponentGroupNode({ data }: NodeProps<ComponentGroupFlowNode>) {
   );
 }
 
-function StructuredValueEditor({
+const StructuredValueEditor = memo(function StructuredValueEditor({
   node,
-  onChange,
+  path,
+  onChangeNode,
   depth = 0,
 }: {
   node: ComponentValueDebugNode;
-  onChange: (next: ComponentValueDebugNode) => void;
+  path: string;
+  onChangeNode: StructuredNodeChange;
   depth?: number;
 }) {
   if (node.kind === 'object') {
@@ -374,8 +627,9 @@ function StructuredValueEditor({
             <StructuredValueEditor
               key={`${child.name ?? index}:${child.type.fullName}`}
               node={child}
+              path={appendDebugNodePath(path, index)}
               depth={depth + 1}
-              onChange={(nextChild) => onChange(updateChild(node, index, nextChild))}
+              onChangeNode={onChangeNode}
             />
           ))
         ) : (
@@ -386,19 +640,21 @@ function StructuredValueEditor({
   }
 
   if (node.kind === 'list') {
-    return <ListField node={node} onChange={onChange} depth={depth} />;
+    return <ListField node={node} path={path} onChangeNode={onChangeNode} depth={depth} />;
   }
 
-  return <ScalarField node={node} onChange={onChange} />;
-}
+  return <ScalarField node={node} path={path} onChangeNode={onChangeNode} />;
+});
 
-function ListField({
+const ListField = memo(function ListField({
   node,
-  onChange,
+  path,
+  onChangeNode,
   depth,
 }: {
   node: ComponentValueDebugNode;
-  onChange: (next: ComponentValueDebugNode) => void;
+  path: string;
+  onChangeNode: StructuredNodeChange;
   depth: number;
 }) {
   const canAdd = node.editable && node.elementTemplate !== null;
@@ -411,7 +667,7 @@ function ListField({
           className="mini-button"
           type="button"
           disabled={!canAdd}
-          onClick={() => onChange(addListItem(node))}
+          onClick={() => onChangeNode(path, addListItem(node))}
         >
           Add
         </button>
@@ -421,14 +677,15 @@ function ListField({
           <div key={`${child.name ?? index}:${child.type.fullName}`} className="list-item">
             <StructuredValueEditor
               node={child}
+              path={appendDebugNodePath(path, index)}
               depth={depth + 1}
-              onChange={(nextChild) => onChange(updateChild(node, index, nextChild))}
+              onChangeNode={onChangeNode}
             />
             <button
               className="mini-button danger"
               type="button"
               disabled={!node.editable}
-              onClick={() => onChange(removeListItem(node, index))}
+              onClick={() => onChangeNode(path, removeListItem(node, index))}
             >
               Remove
             </button>
@@ -439,24 +696,26 @@ function ListField({
       )}
     </div>
   );
-}
+});
 
-function ScalarField({
+const ScalarField = memo(function ScalarField({
   node,
-  onChange,
+  path,
+  onChangeNode,
 }: {
   node: ComponentValueDebugNode;
-  onChange: (next: ComponentValueDebugNode) => void;
+  path: string;
+  onChangeNode: StructuredNodeChange;
 }) {
   const disabled = !node.editable;
 
   return (
     <label className={disabled ? 'field-row readonly' : 'field-row'}>
       <FieldHeader node={node} />
-      {renderScalarControl(node, onChange, disabled)}
+      {renderScalarControl(node, (nextNode) => onChangeNode(path, nextNode), disabled)}
     </label>
   );
-}
+});
 
 function FieldHeader({ node }: { node: ComponentValueDebugNode }) {
   return (
@@ -530,11 +789,70 @@ function cloneDebugNode(node: ComponentValueDebugNode | null) {
   return node ? (JSON.parse(JSON.stringify(node)) as ComponentValueDebugNode) : null;
 }
 
-function updateChild(node: ComponentValueDebugNode, index: number, child: ComponentValueDebugNode) {
+function cloneStableDebugNode(
+  previous: ComponentValueDebugNode | null,
+  next: ComponentValueDebugNode | null,
+): ComponentValueDebugNode | null {
+  if (!next) {
+    return null;
+  }
+
+  if (!previous ||
+      !areDebugNodeScalarsEqual(previous, next) ||
+      previous.children.length !== next.children.length) {
+    return cloneDebugNode(next);
+  }
+
+  let changed = false;
+  const children = next.children.map((child, index) => {
+    const stableChild = cloneStableDebugNode(previous.children[index], child);
+    if (stableChild !== previous.children[index]) {
+      changed = true;
+    }
+
+    return stableChild!;
+  });
+  const elementTemplate = cloneStableDebugNode(previous.elementTemplate, next.elementTemplate);
+  if (elementTemplate !== previous.elementTemplate) {
+    changed = true;
+  }
+
+  if (!changed) {
+    return previous;
+  }
+
+  return {
+    ...next,
+    children,
+    elementTemplate,
+  };
+}
+
+function appendDebugNodePath(path: string, index: number) {
+  return path ? `${path}.${index}` : String(index);
+}
+
+function updateDebugNodeAtPath(
+  node: ComponentValueDebugNode,
+  path: string,
+  nextNode: ComponentValueDebugNode,
+): ComponentValueDebugNode {
+  if (!path) {
+    return nextNode;
+  }
+
+  const [head, ...tail] = path.split('.');
+  const childIndex = Number(head);
+  if (!Number.isInteger(childIndex) || childIndex < 0 || childIndex >= node.children.length) {
+    return node;
+  }
+
   return {
     ...node,
-    children: node.children.map((candidate, candidateIndex) =>
-      candidateIndex === index ? child : candidate,
+    children: node.children.map((child, index) =>
+      index === childIndex
+        ? updateDebugNodeAtPath(child, tail.join('.'), nextNode)
+        : child,
     ),
   };
 }

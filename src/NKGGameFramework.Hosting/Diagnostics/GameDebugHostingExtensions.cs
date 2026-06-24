@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Routing;
 using NKGGameFramework.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Text.Json;
+using System.Threading.Channels;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
 
@@ -22,6 +24,7 @@ public static class GameDebugHostingExtensions
 
         services.TryAddSingleton<GameDebugSession>();
         services.TryAddSingleton(GameDebugController.Shared);
+        services.TryAddSingleton(GameDebugFramePublisher.Shared);
         services.TryAddSingleton<IGameDebugComponentValueSerializer, OdinGameDebugComponentValueSerializer>();
         services.TryAddSingleton<IGameDebugSnapshotProvider, GameDebugSnapshotProvider>();
         services.TryAddSingleton<IGameDebugMutationHandler, GameDebugMutationHandler>();
@@ -44,10 +47,17 @@ public static class GameDebugHostingExtensions
 
         group.MapGet("/snapshot", (
             HttpContext httpContext,
-            IGameDebugSnapshotProvider snapshots) =>
+            IGameDebugSnapshotProvider snapshots,
+            GameDebugController control) =>
             Results.Json(
-                snapshots.Capture(CreateSnapshotCaptureOptions(httpContext.Request.Query)),
+                CaptureSnapshotMessage(
+                    snapshots,
+                    control,
+                    new GameDebugFrameInfo(0, "snapshot", 0, DateTimeOffset.UtcNow),
+                    CreateSnapshotCaptureOptions(httpContext.Request.Query)),
                 GameDebugJson.Options));
+
+        group.MapGet("/stream", StreamSnapshotsAsync);
 
         group.MapGet("/control", (GameDebugController control) =>
             Results.Json(control.GetState(), GameDebugJson.Options));
@@ -63,6 +73,102 @@ public static class GameDebugHostingExtensions
             Results.Json(mutations.Execute(request), GameDebugJson.Options));
 
         return endpoints;
+    }
+
+    private static async Task StreamSnapshotsAsync(
+        HttpContext httpContext,
+        IGameDebugSnapshotProvider snapshots,
+        GameDebugController control,
+        GameDebugFramePublisher frames)
+    {
+        var cancellationToken = httpContext.RequestAborted;
+        var captureOptions = CreateSnapshotCaptureOptions(httpContext.Request.Query) with
+        {
+            IncludeComponentPayloads = false,
+            IncludeStructuredComponentValues = false,
+        };
+        var channel = Channel.CreateBounded<GameDebugFrameInfo>(new BoundedChannelOptions(16)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest,
+        });
+
+        void OnFramePublished(GameDebugFrameInfo info)
+        {
+            channel.Writer.TryWrite(info);
+        }
+
+        httpContext.Response.Headers.CacheControl = "no-cache";
+        httpContext.Response.Headers.Connection = "keep-alive";
+        httpContext.Response.ContentType = "text/event-stream";
+
+        frames.FramePublished += OnFramePublished;
+        try
+        {
+            await WriteSnapshotEventAsync(
+                httpContext.Response,
+                snapshots,
+                control,
+                new GameDebugFrameInfo(0, "initial", 0, DateTimeOffset.UtcNow),
+                captureOptions,
+                cancellationToken);
+
+            await foreach (var frame in channel.Reader.ReadAllAsync(cancellationToken))
+            {
+                await WriteSnapshotEventAsync(
+                    httpContext.Response,
+                    snapshots,
+                    control,
+                    frame,
+                    captureOptions,
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            frames.FramePublished -= OnFramePublished;
+            channel.Writer.TryComplete();
+        }
+    }
+
+    private static Task WriteSnapshotEventAsync(
+        HttpResponse response,
+        IGameDebugSnapshotProvider snapshots,
+        GameDebugController control,
+        GameDebugFrameInfo frame,
+        GameDebugSnapshotCaptureOptions captureOptions,
+        CancellationToken cancellationToken)
+    {
+        var message = CaptureSnapshotMessage(snapshots, control, frame, captureOptions);
+        return WriteServerSentEventAsync(response, "snapshot", message, cancellationToken);
+    }
+
+    private static GameDebugSnapshotMessage CaptureSnapshotMessage(
+        IGameDebugSnapshotProvider snapshots,
+        GameDebugController control,
+        GameDebugFrameInfo frame,
+        GameDebugSnapshotCaptureOptions captureOptions)
+    {
+        return new GameDebugSnapshotMessage(
+            frame,
+            snapshots.Capture(captureOptions),
+            control.GetState());
+    }
+
+    private static async Task WriteServerSentEventAsync(
+        HttpResponse response,
+        string eventName,
+        object value,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(value, GameDebugJson.Options);
+        await response.WriteAsync($"event: {eventName}\n", cancellationToken);
+        await response.WriteAsync($"data: {json}\n\n", cancellationToken);
+        await response.Body.FlushAsync(cancellationToken);
     }
 
     private static GameDebugSnapshotCaptureOptions CreateSnapshotCaptureOptions(IQueryCollection query)

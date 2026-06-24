@@ -1,9 +1,16 @@
+using NKGGameFramework.Diagnostics;
+
 namespace NKGGameFramework.Hosting.Diagnostics;
 
 public sealed record GameDebugSnapshot(
     DateTimeOffset CapturedAt,
     IReadOnlyList<RuntimeContextDebugSnapshot> Runtimes,
     IReadOnlyList<WorldDebugSnapshot> Worlds);
+
+public sealed record GameDebugSnapshotMessage(
+    GameDebugFrameInfo Frame,
+    GameDebugSnapshot Snapshot,
+    GameDebugControlState Control);
 
 public sealed record GameDebugSnapshotCaptureOptions
 {

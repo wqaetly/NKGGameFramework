@@ -1,10 +1,9 @@
 import type {
   GameDebugControlRequest,
   GameDebugControlResult,
-  GameDebugControlState,
   GameDebugMutationRequest,
   GameDebugMutationResult,
-  GameDebugSnapshot,
+  GameDebugSnapshotMessage,
 } from './types';
 
 const apiBase = import.meta.env.VITE_NKG_DEBUG_API_BASE ?? '';
@@ -19,10 +18,10 @@ export interface DebugSnapshotRequestOptions {
   includeStructured?: boolean;
 }
 
-export async function fetchDebugSnapshot(
+export async function fetchDebugSnapshotMessage(
   signal?: AbortSignal,
   options?: DebugSnapshotRequestOptions,
-): Promise<GameDebugSnapshot> {
+): Promise<GameDebugSnapshotMessage> {
   const url = new URL(`${apiBase}/_nkg/debug/snapshot`, window.location.origin);
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
@@ -44,6 +43,18 @@ export async function fetchDebugSnapshot(
   }
 
   return response.json();
+}
+
+export function createDebugSnapshotStream(options?: DebugSnapshotRequestOptions): EventSource {
+  const url = new URL(`${apiBase}/_nkg/debug/stream`, window.location.origin);
+  appendQuery(url, 'worldName', options?.worldName);
+  appendQuery(url, 'sceneName', options?.sceneName);
+  appendQuery(url, 'entityId', options?.entityId);
+  appendQuery(url, 'entityOffset', options?.entityOffset);
+  appendQuery(url, 'entityLimit', options?.entityLimit);
+  appendQuery(url, 'includePayload', options?.includePayload);
+  appendQuery(url, 'includeStructured', options?.includeStructured);
+  return new EventSource(toFetchUrl(url));
 }
 
 function appendQuery(url: URL, key: string, value: string | number | boolean | undefined) {
@@ -72,21 +83,6 @@ export async function postDebugMutation(
 
   if (!response.ok) {
     throw new Error(`Mutation request failed: ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-export async function fetchDebugControl(signal?: AbortSignal): Promise<GameDebugControlState> {
-  const response = await fetch(`${apiBase}/_nkg/debug/control`, {
-    signal,
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Control request failed: ${response.status} ${response.statusText}`);
   }
 
   return response.json();

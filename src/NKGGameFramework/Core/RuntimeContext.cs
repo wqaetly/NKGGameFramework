@@ -114,6 +114,7 @@ public sealed class RuntimeContext : IRuntimeContext
         }
 
         Events.DispatchQueuedEvents();
+        GameDebugFramePublisher.Shared.Publish(nameof(RuntimeContext), Time.Frame);
     }
 
     public void Update(double deltaTime, double realDeltaTime)

@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DockviewReact,
   type DockviewApi,
@@ -19,13 +19,19 @@ import {
   SkipForward,
   Sparkles,
 } from 'lucide-react';
-import { fetchDebugControl, fetchDebugSnapshot, postDebugControl, postDebugMutation } from './api';
+import {
+  createDebugSnapshotStream,
+  fetchDebugSnapshotMessage,
+  postDebugControl,
+  postDebugMutation,
+} from './api';
 import { countComponentGroups, type ComponentMutationExecutor } from './componentGraphModel';
 import type {
   ComponentStoreDebugSnapshot,
   EntityDebugSnapshot,
   GameDebugControlCommand,
   GameDebugControlState,
+  GameDebugSnapshotMessage,
   GameDebugSnapshot,
   ModuleDebugSnapshot,
   ProcedureModuleDebugSnapshot,
@@ -64,6 +70,7 @@ type DockWorkspaceModel = {
   activeScene: SceneDebugSnapshot | null;
   filteredEntities: EntityDebugSnapshot[];
   selectedEntity: EntityDebugSnapshot | null;
+  selectedEntityLoading: boolean;
   selectScene: (entry: SceneEntry) => void;
   selectEntity: (entityId: number) => void;
   onSaveComponent: ComponentMutationExecutor;
@@ -73,6 +80,16 @@ type DockPanelProps = IDockviewPanelProps<Record<string, never>>;
 
 const DOCK_LAYOUT_STORAGE_KEY = 'nkg.webdebug.layout.v3';
 const LEGACY_DOCK_LAYOUT_STORAGE_KEYS = ['nkg.webdebug.layout.v1', 'nkg.webdebug.layout.v2'];
+const FRAME_STREAM_STORAGE_KEY = 'nkg.webdebug.frameStream';
+const LEGACY_FRAME_POLLING_STORAGE_KEY = 'nkg.webdebug.framePolling';
+const LEGACY_AUTO_REFRESH_STORAGE_KEY = 'nkg.webdebug.autoRefresh';
+const DOCK_PANEL_TITLES: Record<string, string> = {
+  components: 'Components',
+  scenes: 'Scenes',
+  entities: 'Entities',
+  runtime: 'Runtime',
+  diagnostics: 'Diagnostics',
+};
 
 const ComponentGraphCanvas = lazy(() =>
   import('./ComponentGraphCanvas').then((module) => ({ default: module.ComponentGraphCanvas })),
@@ -91,21 +108,69 @@ const DockWorkspaceContext = createContext<DockWorkspaceModel | null>(null);
 export function App() {
   const [snapshot, setSnapshot] = useState<GameDebugSnapshot | null>(null);
   const [loadState, setLoadState] = useState<LoadState>('idle');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [control, setControl] = useState<GameDebugControlState | null>(null);
   const [query, setQuery] = useState('');
   const [selection, setSelection] = useState<SceneSelection | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
+  const [entityDetails, setEntityDetails] = useState<Record<string, EntityDebugSnapshot>>({});
+  const [loadingEntityKey, setLoadingEntityKey] = useState<string | null>(null);
   const [dockRevision, setDockRevision] = useState(0);
+  const [frameStream, setFrameStream] = useState(readStoredFrameStream);
+  const refreshInFlightRef = useRef(false);
+  const entityDetailLoadKeyRef = useRef<string | null>(null);
+  const activeSceneEntryRef = useRef<SceneEntry | null>(null);
+  const entityDetailsRef = useRef<Record<string, EntityDebugSnapshot>>({});
+  const selectedEntityOverviewRef = useRef<EntityDebugSnapshot | null>(null);
+  const selectedEntityDetailKeyRef = useRef<string | null>(null);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+  const commitSnapshotMessage = useCallback((
+    message: GameDebugSnapshotMessage,
+    options: { clearEntityDetails?: boolean } = {},
+  ) => {
+    setError(null);
+    setSnapshot(message.snapshot);
+    setControl(message.control);
+    if (options.clearEntityDetails) {
+      setEntityDetails({});
+    }
+    setLoadState('ready');
+  }, []);
+
+  const commitEntityDetail = useCallback((
+    message: GameDebugSnapshotMessage,
+    entity: EntityDebugSnapshot,
+    detailKey: string,
+  ) => {
+    setControl(message.control);
+    setEntityDetails((current) => ({
+      ...current,
+      [detailKey]: entity,
+    }));
+  }, []);
+
+  const refresh = useCallback(async (
+    signal?: AbortSignal,
+    options: { clearEntityDetails?: boolean } = {},
+  ) => {
+    if (refreshInFlightRef.current) {
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    setIsRefreshing(true);
     setLoadState((current) => (current === 'ready' ? current : 'loading'));
     setError(null);
 
     try {
-      const next = await fetchDebugSnapshot(signal);
-      setSnapshot(next);
-      setLoadState('ready');
+      const next = await fetchDebugSnapshotMessage(signal, {
+        includePayload: false,
+        includeStructured: false,
+      });
+      commitSnapshotMessage(next, {
+        clearEntityDetails: options.clearEntityDetails ?? true,
+      });
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
         return;
@@ -113,28 +178,65 @@ export function App() {
 
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoadState('error');
+    } finally {
+      refreshInFlightRef.current = false;
+      setIsRefreshing(false);
     }
-  }, []);
+  }, [commitSnapshotMessage]);
 
-  const refreshControl = useCallback(async (signal?: AbortSignal) => {
+  const loadEntityDetail = useCallback(async (
+    entry: SceneEntry,
+    entityOverview: EntityDebugSnapshot,
+    detailKey: string,
+    signal?: AbortSignal,
+  ) => {
+    if (entityDetailLoadKeyRef.current === detailKey) {
+      return;
+    }
+
+    entityDetailLoadKeyRef.current = detailKey;
+    setLoadingEntityKey(detailKey);
+
     try {
-      const next = await fetchDebugControl(signal);
-      setControl(next);
+      const detailMessage = await fetchDebugSnapshotMessage(signal, {
+        worldName: entry.world.name,
+        sceneName: entry.scene.name,
+        entityId: entityOverview.id,
+        includePayload: true,
+        includeStructured: true,
+      });
+      const entity = findEntityDetail(
+        detailMessage.snapshot,
+        entry.world.name,
+        entry.scene.name,
+        entityOverview.id,
+      );
+      if (!entity) {
+        throw new Error(`Entity #${entityOverview.id} was not found in the debug snapshot.`);
+      }
+
+      commitEntityDetail(detailMessage, entity, detailKey);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
         return;
       }
 
       setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      if (entityDetailLoadKeyRef.current === detailKey) {
+        entityDetailLoadKeyRef.current = null;
+      }
+      setLoadingEntityKey((current) => (
+        current === detailKey ? null : current
+      ));
     }
-  }, []);
+  }, [commitEntityDetail]);
 
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
-    void refreshControl(controller.signal);
     return () => controller.abort();
-  }, [refresh, refreshControl]);
+  }, [refresh]);
 
   const scenes = useMemo(() => flattenScenes(snapshot), [snapshot]);
   const activeSceneEntry = useMemo(
@@ -154,19 +256,106 @@ export function App() {
     [activeScene, query],
   );
 
-  const selectedEntity = useMemo(() => {
+  const selectedEntityOverview = useMemo(() => {
     if (!filteredEntities.length) {
       return null;
     }
 
     return filteredEntities.find((entity) => entity.id === selectedEntityId) ?? filteredEntities[0];
   }, [filteredEntities, selectedEntityId]);
+  const selectedEntityDetailKey = useMemo(
+    () => activeSceneEntry && selectedEntityOverview
+      ? createEntityDetailKey(
+          activeSceneEntry.world.name,
+          activeSceneEntry.scene.name,
+          selectedEntityOverview.id,
+        )
+      : null,
+    [activeSceneEntry, selectedEntityOverview],
+  );
+  const selectedEntity = selectedEntityDetailKey
+    ? entityDetails[selectedEntityDetailKey] ?? selectedEntityOverview
+    : selectedEntityOverview;
+  const selectedEntityLoading = selectedEntityDetailKey === loadingEntityKey
+    || (selectedEntity !== null && !hasComponentValueDetails(selectedEntity));
 
   useEffect(() => {
-    if (selectedEntity && selectedEntity.id !== selectedEntityId) {
-      setSelectedEntityId(selectedEntity.id);
+    activeSceneEntryRef.current = activeSceneEntry;
+  }, [activeSceneEntry]);
+
+  useEffect(() => {
+    entityDetailsRef.current = entityDetails;
+  }, [entityDetails]);
+
+  useEffect(() => {
+    selectedEntityOverviewRef.current = selectedEntityOverview;
+  }, [selectedEntityOverview]);
+
+  useEffect(() => {
+    selectedEntityDetailKeyRef.current = selectedEntityDetailKey;
+  }, [selectedEntityDetailKey]);
+
+  useEffect(() => {
+    writeStoredFrameStream(frameStream);
+  }, [frameStream]);
+
+  useEffect(() => {
+    if (!frameStream) {
+      return;
     }
-  }, [selectedEntity, selectedEntityId]);
+
+    const stream = createDebugSnapshotStream({
+      includePayload: false,
+      includeStructured: false,
+    });
+    const handleSnapshot = (event: Event) => {
+      const message = JSON.parse((event as MessageEvent<string>).data) as GameDebugSnapshotMessage;
+      commitSnapshotMessage(message);
+
+      const entry = activeSceneEntryRef.current;
+      const entityOverview = selectedEntityOverviewRef.current;
+      const detailKey = selectedEntityDetailKeyRef.current;
+      if (entry && entityOverview && detailKey && entityDetailsRef.current[detailKey]) {
+        void loadEntityDetail(entry, entityOverview, detailKey);
+      }
+    };
+
+    stream.addEventListener('snapshot', handleSnapshot);
+    stream.onerror = () => {
+      setError('Debug frame stream disconnected. Reconnecting...');
+    };
+
+    return () => {
+      stream.removeEventListener('snapshot', handleSnapshot);
+      stream.close();
+    };
+  }, [commitSnapshotMessage, frameStream, loadEntityDetail]);
+
+  useEffect(() => {
+    if (selectedEntityOverview && selectedEntityOverview.id !== selectedEntityId) {
+      setSelectedEntityId(selectedEntityOverview.id);
+    }
+  }, [selectedEntityOverview, selectedEntityId]);
+
+  useEffect(() => {
+    if (!activeSceneEntry || !selectedEntityOverview || !selectedEntityDetailKey) {
+      return;
+    }
+
+    if (entityDetails[selectedEntityDetailKey]) {
+      return;
+    }
+
+    const controller = new AbortController();
+    void loadEntityDetail(
+      activeSceneEntry,
+      selectedEntityOverview,
+      selectedEntityDetailKey,
+      controller.signal,
+    );
+
+    return () => controller.abort();
+  }, [activeSceneEntry, entityDetails, loadEntityDetail, selectedEntityDetailKey, selectedEntityOverview]);
 
   const totals = useMemo(() => summarize(snapshot), [snapshot]);
 
@@ -213,6 +402,7 @@ export function App() {
         return;
       }
 
+      setEntityDetails({});
       await refresh();
     },
     [activeSceneEntry, refresh],
@@ -227,6 +417,7 @@ export function App() {
       activeScene,
       filteredEntities,
       selectedEntity,
+      selectedEntityLoading,
       selectScene,
       selectEntity,
       onSaveComponent: executeComponentMutation,
@@ -239,6 +430,7 @@ export function App() {
       activeScene,
       filteredEntities,
       selectedEntity,
+      selectedEntityLoading,
       selectScene,
       selectEntity,
       executeComponentMutation,
@@ -310,8 +502,17 @@ export function App() {
             {control?.pendingStepCount ? <b>{control.pendingStepCount}</b> : null}
           </button>
           <button className="primary-button" type="button" onClick={() => void refresh()}>
-            <RefreshCw size={17} className={loadState === 'loading' ? 'spin' : undefined} />
+            <RefreshCw size={17} className={isRefreshing ? 'spin' : undefined} />
             Refresh
+          </button>
+          <button
+            className={frameStream ? 'icon-button active' : 'icon-button'}
+            type="button"
+            onClick={() => setFrameStream((current) => !current)}
+            title={frameStream ? 'Disconnect frame stream' : 'Subscribe to host frame stream'}
+          >
+            <Activity size={17} />
+            Frame
           </button>
           <button className="icon-button" type="button" onClick={resetDockLayout} title="Reset layout">
             <Boxes size={17} />
@@ -340,6 +541,9 @@ function DockWorkspace({ model }: { model: DockWorkspaceModel }) {
         saveDockLayout(event.api);
       }, 0);
     }
+
+    normalizeDockPanelTitles(event.api);
+    saveDockLayout(event.api);
   }, []);
 
   useEffect(() => {
@@ -433,6 +637,7 @@ function ComponentsDockPanel(_props: DockPanelProps) {
       {model.selectedEntity ? (
         <EntityDetails
           entity={model.selectedEntity}
+          isLoading={model.selectedEntityLoading}
           componentQuery={componentQuery}
           onComponentQueryChange={setComponentQuery}
           onSaveComponent={model.onSaveComponent}
@@ -512,10 +717,10 @@ function EntityTable({
   return (
     <div className="entity-table" role="table">
       <div className="entity-row head" role="row">
-        <span>ID</span>
+        <span>Id</span>
         <span>Components</span>
         <span>Groups</span>
-        <span>Ver</span>
+        <span>Version</span>
       </div>
       {entities.map((entity) => (
         <button
@@ -610,6 +815,12 @@ function applyDefaultDockSizing(api: DockviewApi) {
   api.getPanel('runtime')?.api.setSize({ width: navigationWidth });
   api.getPanel('diagnostics')?.api.setSize({ width: navigationWidth, height: diagnosticsHeight });
   api.getPanel('components')?.api.setSize({ width: mainWidth });
+}
+
+function normalizeDockPanelTitles(api: DockviewApi) {
+  for (const [panelId, title] of Object.entries(DOCK_PANEL_TITLES)) {
+    api.getPanel(panelId)?.api.setTitle(title);
+  }
 }
 
 function restoreDockLayout(api: DockviewApi) {
@@ -825,7 +1036,7 @@ function SceneDiagnostics({ scene, query }: { scene: SceneDebugSnapshot | null; 
         <SystemRows systems={scene?.systems ?? []} query={query} />
       </section>
       <section className="panel stores-panel">
-        <PanelTitle icon={<Sparkles size={14} />} title="Component Stores" />
+        <PanelTitle icon={<Sparkles size={14} />} title="ComponentStores" />
         <ComponentStoreRows stores={scene?.componentStores ?? []} query={query} />
       </section>
     </section>
@@ -891,11 +1102,13 @@ function ComponentStoreRows({ stores, query }: { stores: ComponentStoreDebugSnap
 
 function EntityDetails({
   entity,
+  isLoading,
   componentQuery,
   onComponentQueryChange,
   onSaveComponent,
 }: {
   entity: EntityDebugSnapshot;
+  isLoading: boolean;
   componentQuery: string;
   onComponentQueryChange: (value: string) => void;
   onSaveComponent: ComponentMutationExecutor;
@@ -915,7 +1128,11 @@ function EntityDetails({
       </div>
 
       <div className="component-detail-surface">
-        {entity.components.length ? (
+        {isLoading ? (
+          <div className="component-flow">
+            <div className="component-flow-empty">Loading components</div>
+          </div>
+        ) : entity.components.length ? (
           <Suspense
             fallback={
               <div className="component-flow">
@@ -946,6 +1163,26 @@ function EmptyDetails() {
   );
 }
 
+function readStoredFrameStream() {
+  try {
+    return window.localStorage.getItem(FRAME_STREAM_STORAGE_KEY) === 'true' ||
+      window.localStorage.getItem(LEGACY_FRAME_POLLING_STORAGE_KEY) === 'true' ||
+      window.localStorage.getItem(LEGACY_AUTO_REFRESH_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredFrameStream(value: boolean) {
+  try {
+    window.localStorage.setItem(FRAME_STREAM_STORAGE_KEY, String(value));
+    window.localStorage.removeItem(LEGACY_FRAME_POLLING_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_AUTO_REFRESH_STORAGE_KEY);
+  } catch {
+    // Frame stream preference is best-effort.
+  }
+}
+
 function flattenScenes(snapshot: GameDebugSnapshot | null): SceneEntry[] {
   if (!snapshot) {
     return [];
@@ -970,6 +1207,33 @@ function findActiveSceneEntry(
   return (
     scenes.find(({ world, scene }) => world.name === selection.worldName && scene.name === selection.sceneName) ??
     null
+  );
+}
+
+function createEntityDetailKey(worldName: string, sceneName: string, entityId: number) {
+  return `${worldName}\u0000${sceneName}\u0000${entityId}`;
+}
+
+function findEntityDetail(
+  snapshot: GameDebugSnapshot,
+  worldName: string,
+  sceneName: string,
+  entityId: number,
+) {
+  const world = snapshot.worlds.find((candidate) => candidate.name === worldName);
+  const scene = world?.scenes.find((candidate) => candidate.name === sceneName);
+  return scene?.entities.find((candidate) => candidate.id === entityId) ?? null;
+}
+
+function hasComponentValueDetails(entity: EntityDebugSnapshot) {
+  if (!entity.components.length) {
+    return true;
+  }
+
+  return entity.components.every((component) =>
+    component.value.payload !== null ||
+    component.value.structured !== null ||
+    component.value.error !== null,
   );
 }
 

@@ -4,6 +4,19 @@ export interface GameDebugSnapshot {
   worlds: WorldDebugSnapshot[];
 }
 
+export interface GameDebugFrameInfo {
+  sequence: number;
+  source: string;
+  frame: number;
+  capturedAt: string;
+}
+
+export interface GameDebugSnapshotMessage {
+  frame: GameDebugFrameInfo;
+  snapshot: GameDebugSnapshot;
+  control: GameDebugControlState;
+}
+
 export interface RuntimeContextDebugSnapshot {
   index: number;
   isDisposed: boolean;
