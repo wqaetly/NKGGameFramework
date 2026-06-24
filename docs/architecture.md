@@ -66,7 +66,7 @@ Core 提供：
 
 - `RuntimeContext`：可实例化模块上下文，避免全局静态污染。
 - `Module` / `IUpdateModule`：显式注册、按优先级更新、反向关闭。
-- `EventBus` / `EventModule`：强类型事件总线，支持立即派发、队列派发、重复订阅检查、异常策略和池化事件参数。
+- `EventBus`：强类型事件总线，支持立即派发、队列派发、重复订阅检查、异常策略和池化事件参数。
 - `MemoryPool<T>`：严格 double-release 检测。
 - `ObjectPool<T>`：容量、过期、优先级释放。
 - `Fsm<T>` / `ProcedureModule`：流程状态机和游戏生命周期管理。
