@@ -105,6 +105,62 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
+    public async Task Host_debug_control_commands_gate_framework_updates()
+    {
+        GameDebugController.Shared.Reset();
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            var module = runtime.RegisterModule(new CountingUpdateModule());
+            await using var host = await GameDebugHost.StartAsync(options =>
+            {
+                options.Url = "http://127.0.0.1:0";
+            });
+            using var client = new HttpClient
+            {
+                BaseAddress = host.BaseAddress,
+            };
+
+            await client.PostAsJsonAsync(
+                "/_nkg/debug/control",
+                new GameDebugControlRequest("pause"),
+                JsonOptions);
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+
+            Assert.Equal(0, module.UpdateCount);
+            Assert.Equal(0, runtime.Time.Frame);
+
+            await client.PostAsJsonAsync(
+                "/_nkg/debug/control",
+                new GameDebugControlRequest("step"),
+                JsonOptions);
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+
+            Assert.Equal(1, module.UpdateCount);
+            Assert.Equal(1, runtime.Time.Frame);
+
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
+
+            Assert.Equal(1, module.UpdateCount);
+            Assert.Equal(1, runtime.Time.Frame);
+
+            await client.PostAsJsonAsync(
+                "/_nkg/debug/control",
+                new GameDebugControlRequest("play"),
+                JsonOptions);
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
+
+            Assert.Equal(2, module.UpdateCount);
+            Assert.Equal(2, runtime.Time.Frame);
+        }
+        finally
+        {
+            GameDebugController.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public async Task AutoStart_returns_null_when_environment_is_disabled()
     {
         await GameDebugHostAutoStart.StopAsync();
@@ -149,6 +205,16 @@ public sealed class GameDebugHostTests
     }
 
     private readonly record struct PositionComponent(double X, double Y) : IComponent;
+
+    private sealed class CountingUpdateModule : Module, IUpdateModule
+    {
+        public int UpdateCount { get; private set; }
+
+        public void Update(in GameFrameTime time)
+        {
+            UpdateCount++;
+        }
+    }
 
     private sealed class EnvironmentVariableScope : IDisposable
     {

@@ -65,7 +65,7 @@ public sealed class GameDebugController
         }
     }
 
-    public bool TryConsumeFrameAdvance()
+    internal bool TryBeginRuntimeFrame()
     {
         lock (_gate)
         {

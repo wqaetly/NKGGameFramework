@@ -100,6 +100,11 @@ public sealed class RuntimeContext : IRuntimeContext
     public void Update(in GameFrameTime time)
     {
         ThrowIfDisposed();
+        if (!GameDebugController.Shared.TryBeginRuntimeFrame())
+        {
+            return;
+        }
+
         RebuildUpdateListIfNeeded();
         Time = time;
 
