@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using NKGGameFramework.Core;
 using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
@@ -192,7 +191,7 @@ public sealed class GameDebugSnapshotTests
         var valueSerializer = new OdinGameDebugComponentValueSerializer();
         var mutations = new GameDebugMutationHandler(
             session,
-            Options.Create(new GameDebugOptions()),
+            new GameDebugOptions { EnableMutations = true },
             valueSerializer);
         var componentType = typeof(PositionComponent);
 
@@ -208,6 +207,36 @@ public sealed class GameDebugSnapshotTests
         Assert.True(result.Succeeded);
         Assert.Equal(99, entity.Get<PositionComponent>().X);
         Assert.Equal(34, entity.Get<PositionComponent>().Y);
+    }
+
+    [Fact]
+    public void Mutations_are_disabled_by_default()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new PositionComponent(12, 34));
+
+        var session = new GameDebugSession().Register(world);
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var mutations = new GameDebugMutationHandler(
+            session,
+            new GameDebugOptions(),
+            valueSerializer);
+        var componentType = typeof(PositionComponent);
+
+        var result = mutations.Execute(new GameDebugMutationRequest(
+            world.Name,
+            scene.Name,
+            entity.Id.Value,
+            entity.Version,
+            componentType.FullName!,
+            componentType.Assembly.GetName().Name!,
+            valueSerializer.Serialize(new PositionComponent(99, 34))));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Debug mutations are disabled.", result.Message);
+        Assert.Equal(12, entity.Get<PositionComponent>().X);
     }
 
     [Fact]
@@ -306,7 +335,7 @@ public sealed class GameDebugSnapshotTests
         var valueSerializer = new OdinGameDebugComponentValueSerializer();
         var mutations = new GameDebugMutationHandler(
             session,
-            Options.Create(new GameDebugOptions()),
+            new GameDebugOptions { EnableMutations = true },
             valueSerializer);
         var componentType = typeof(EditableComponent);
         var value = valueSerializer.Serialize(entity.Get<EditableComponent>());
@@ -365,7 +394,7 @@ public sealed class GameDebugSnapshotTests
         var valueSerializer = new OdinGameDebugComponentValueSerializer();
         var mutations = new GameDebugMutationHandler(
             session,
-            Options.Create(new GameDebugOptions()),
+            new GameDebugOptions { EnableMutations = true },
             valueSerializer);
         var componentType = typeof(MixedComponent);
         var value = valueSerializer.Serialize(entity.Get<MixedComponent>());

@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using NKGGameFramework.Diagnostics;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
@@ -9,12 +8,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
 {
     private const string DumpFormat = "nkg.debug.dump";
     private const int DumpVersion = 1;
-
-    private static readonly GameDebugSnapshotCaptureOptions DumpCaptureOptions = new()
-    {
-        IncludeComponentPayloads = true,
-        IncludeStructuredComponentValues = true,
-    };
 
     private readonly object _gate = new();
     private readonly IGameDebugSnapshotProvider _snapshots;
@@ -30,12 +23,12 @@ public sealed class GameDebugDumpRecorder : IDisposable
         IGameDebugSnapshotProvider snapshots,
         GameDebugController control,
         GameDebugFramePublisher frames,
-        IOptions<GameDebugOptions> options)
+        GameDebugOptions options)
     {
         _snapshots = snapshots;
         _control = control;
         _frames = frames;
-        _options = options.Value;
+        _options = options;
     }
 
     public GameDebugDumpRecordingState GetState()
@@ -88,7 +81,8 @@ public sealed class GameDebugDumpRecorder : IDisposable
             var now = DateTimeOffset.UtcNow;
             recording = new ActiveDumpRecording(
                 NormalizeDumpName(name, now),
-                now);
+                now,
+                NormalizeMaxFrames(_options.DumpMaxFrames));
             _recording = recording;
             _frames.FramePublished += OnFramePublished;
         }
@@ -121,19 +115,18 @@ public sealed class GameDebugDumpRecorder : IDisposable
             _frames.FramePublished -= OnFramePublished;
         }
 
-        var lastFrame = recording.Frames.Count > 0
-            ? recording.Frames[^1].Frame.Frame
-            : 0;
+        var lastFrame = recording.LastFrameNumber;
         CaptureFrame(
             recording,
             new GameDebugFrameInfo(
-                recording.Frames.Count,
+                recording.FrameCount,
                 "recording-stop",
                 lastFrame,
                 DateTimeOffset.UtcNow),
             allowDetached: true);
 
         var endedAt = DateTimeOffset.UtcNow;
+        var frames = recording.SnapshotFrames();
         var dump = new GameDebugDumpDocument(
             DumpFormat,
             DumpVersion,
@@ -141,7 +134,9 @@ public sealed class GameDebugDumpRecorder : IDisposable
             endedAt,
             recording.StartedAt,
             endedAt,
-            recording.Frames.ToArray());
+            recording.MaxFrames,
+            recording.DroppedFrameCount,
+            frames);
         var path = SaveDump(dump);
 
         lock (_gate)
@@ -180,14 +175,14 @@ public sealed class GameDebugDumpRecorder : IDisposable
     {
         var message = new GameDebugSnapshotMessage(
             frame,
-            _snapshots.Capture(DumpCaptureOptions),
+            _snapshots.Capture(CreateDumpCaptureOptions()),
             _control.GetState());
 
         lock (_gate)
         {
             if (ReferenceEquals(_recording, recording) || allowDetached)
             {
-                recording.Frames.Add(message);
+                recording.AddFrame(message);
             }
         }
     }
@@ -207,15 +202,28 @@ public sealed class GameDebugDumpRecorder : IDisposable
             ? new GameDebugDumpRecordingState(
                 true,
                 recording.StartedAt,
-                recording.Frames.Count,
+                recording.FrameCount,
+                recording.MaxFrames,
+                recording.DroppedFrameCount,
                 _lastDumpName,
                 _lastDumpPath)
             : new GameDebugDumpRecordingState(
                 false,
                 null,
                 0,
+                NormalizeMaxFrames(_options.DumpMaxFrames),
+                0,
                 _lastDumpName,
                 _lastDumpPath);
+    }
+
+    private GameDebugSnapshotCaptureOptions CreateDumpCaptureOptions()
+    {
+        return new GameDebugSnapshotCaptureOptions
+        {
+            IncludeComponentPayloads = _options.DumpIncludeComponentPayloads,
+            IncludeStructuredComponentValues = _options.DumpIncludeStructuredComponentValues,
+        };
     }
 
     private static string NormalizeDumpName(string? name, DateTimeOffset now)
@@ -235,18 +243,48 @@ public sealed class GameDebugDumpRecorder : IDisposable
         return string.IsNullOrWhiteSpace(sanitized) ? "nkg-debug-dump" : sanitized;
     }
 
+    private static int NormalizeMaxFrames(int value)
+    {
+        return Math.Max(1, value);
+    }
+
     private sealed class ActiveDumpRecording
     {
-        public ActiveDumpRecording(string name, DateTimeOffset startedAt)
+        private readonly Queue<GameDebugSnapshotMessage> _frames = [];
+
+        public ActiveDumpRecording(string name, DateTimeOffset startedAt, int maxFrames)
         {
             Name = name;
             StartedAt = startedAt;
+            MaxFrames = maxFrames;
         }
 
         public string Name { get; }
 
         public DateTimeOffset StartedAt { get; }
 
-        public List<GameDebugSnapshotMessage> Frames { get; } = [];
+        public int MaxFrames { get; }
+
+        public int FrameCount => _frames.Count;
+
+        public int DroppedFrameCount { get; private set; }
+
+        public long LastFrameNumber => _frames.Count > 0 ? _frames.Last().Frame.Frame : 0;
+
+        public void AddFrame(GameDebugSnapshotMessage message)
+        {
+            while (_frames.Count >= MaxFrames)
+            {
+                _frames.Dequeue();
+                DroppedFrameCount++;
+            }
+
+            _frames.Enqueue(message);
+        }
+
+        public IReadOnlyList<GameDebugSnapshotMessage> SnapshotFrames()
+        {
+            return _frames.ToArray();
+        }
     }
 }

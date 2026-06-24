@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Cysharp.Threading.Tasks;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
 
@@ -14,16 +15,18 @@ internal static class GameDebugHostModuleInitializer
             return;
         }
 
-        _ = Task.Run(async () =>
+        StartAutoAsync().Forget();
+    }
+
+    private static async UniTaskVoid StartAutoAsync()
+    {
+        try
         {
-            try
-            {
-                await GameDebugHostAutoStart.TryStartFromEnvironmentAsync().ConfigureAwait(false);
-            }
-            catch
-            {
-                // Auto-start must never fail assembly load. Explicit StartAsync surfaces errors to callers.
-            }
-        });
+            await GameDebugHostAutoStart.TryStartFromEnvironmentAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // Auto-start must never fail assembly load. Explicit StartAsync surfaces errors to callers.
+        }
     }
 }

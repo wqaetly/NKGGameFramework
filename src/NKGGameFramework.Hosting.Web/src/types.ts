@@ -207,6 +207,8 @@ export interface GameDebugDumpDocument {
   createdAt: string;
   startedAt: string;
   endedAt: string;
+  maxFrames?: number;
+  droppedFrameCount?: number;
   frames: GameDebugSnapshotMessage[];
 }
 
@@ -221,6 +223,8 @@ export interface GameDebugDumpRecordingState {
   isRecording: boolean;
   startedAt: string | null;
   frameCount: number;
+  maxFrames: number;
+  droppedFrameCount: number;
   lastDumpName: string | null;
   lastDumpPath: string | null;
 }

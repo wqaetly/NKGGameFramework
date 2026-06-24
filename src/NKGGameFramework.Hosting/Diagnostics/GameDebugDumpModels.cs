@@ -7,6 +7,8 @@ public sealed record GameDebugDumpDocument(
     DateTimeOffset CreatedAt,
     DateTimeOffset StartedAt,
     DateTimeOffset EndedAt,
+    int MaxFrames,
+    int DroppedFrameCount,
     IReadOnlyList<GameDebugSnapshotMessage> Frames);
 
 public sealed record GameDebugDumpRecordingRequest(
@@ -17,6 +19,8 @@ public sealed record GameDebugDumpRecordingState(
     bool IsRecording,
     DateTimeOffset? StartedAt,
     int FrameCount,
+    int MaxFrames,
+    int DroppedFrameCount,
     string? LastDumpName,
     string? LastDumpPath);
 

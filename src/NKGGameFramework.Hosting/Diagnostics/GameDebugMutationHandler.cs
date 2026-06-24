@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
@@ -11,11 +10,11 @@ public sealed class GameDebugMutationHandler : IGameDebugMutationHandler
 
     public GameDebugMutationHandler(
         GameDebugSession session,
-        IOptions<GameDebugOptions> options,
+        GameDebugOptions options,
         IGameDebugComponentValueSerializer componentValueSerializer)
     {
         _session = session;
-        _options = options.Value;
+        _options = options;
         _componentValueSerializer = componentValueSerializer;
     }
 

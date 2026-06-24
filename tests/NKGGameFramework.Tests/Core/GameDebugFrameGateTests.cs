@@ -52,7 +52,7 @@ public sealed class GameDebugFrameGateTests
     }
 
     [Fact]
-    public void Runtime_context_step_allows_nested_world_update_once()
+    public void Runtime_context_step_allows_runtime_driven_world_update_once()
     {
         GameDebugController.Shared.Reset();
 

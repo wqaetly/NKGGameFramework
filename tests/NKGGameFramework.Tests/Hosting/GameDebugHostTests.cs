@@ -302,6 +302,60 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
+    public async Task Host_stream_snapshots_match_the_published_frame_event()
+    {
+        GameDebugRuntimeRegistry.Clear();
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var world = new World("stream-consistency-world");
+            var scene = world.CreateScene("battle");
+            var tracked = scene.CreateEntity()
+                .Add(new PositionComponent(0, 0));
+            runtime.RegisterModule(new FrameMutationModule(scene, tracked));
+            await using var host = await GameDebugHost.StartAsync(options =>
+            {
+                options.Url = "http://127.0.0.1:0";
+            });
+            using var client = new HttpClient
+            {
+                BaseAddress = host.BaseAddress,
+            };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var response = await client.GetAsync(
+                CreateStreamPath(world, scene),
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token);
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            using var reader = new StreamReader(stream);
+
+            var initial = await ReadSseDataAsync<GameDebugSnapshotMessage>(reader, timeout.Token);
+            Assert.Equal("initial", initial.Frame.Source);
+
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
+
+            var first = await ReadSseDataAsync<GameDebugSnapshotMessage>(reader, timeout.Token);
+            var second = await ReadSseDataAsync<GameDebugSnapshotMessage>(reader, timeout.Token);
+
+            Assert.Equal(1, first.Frame.Frame);
+            Assert.Equal(2, FindSceneSnapshot(first.Snapshot, world, scene).EntityCount);
+            Assert.Equal(2, second.Frame.Frame);
+            Assert.Equal(3, FindSceneSnapshot(second.Snapshot, world, scene).EntityCount);
+        }
+        finally
+        {
+            GameDebugRuntimeRegistry.Clear();
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public async Task Host_records_debug_dump_and_returns_document_on_stop()
     {
         GameDebugRuntimeRegistry.Clear();
@@ -354,6 +408,7 @@ public sealed class GameDebugHostTests
             Assert.NotNull(stop.Dump);
             Assert.Equal("nkg.debug.dump", stop.Dump.Format);
             Assert.Equal(1, stop.Dump.Version);
+            Assert.Equal(600, stop.Dump.MaxFrames);
             Assert.True(stop.Dump.Frames.Count >= 4);
             Assert.Contains(stop.Dump.Frames, frame => frame.Frame.Source == nameof(RuntimeContext));
 
@@ -375,6 +430,64 @@ public sealed class GameDebugHostTests
             }
 
             GameDebugRuntimeRegistry.Clear();
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
+    public void Dump_recorder_keeps_a_bounded_recent_frame_window()
+    {
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+        string? savedPath = null;
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var recorder = new GameDebugDumpRecorder(
+                new EmptySnapshotProvider(),
+                GameDebugController.Shared,
+                GameDebugFramePublisher.Shared,
+                new GameDebugOptions
+                {
+                    DumpMaxFrames = 3,
+                });
+
+            var start = recorder.Execute(new GameDebugDumpRecordingRequest("start", "bounded-window-test"));
+            Assert.True(start.Succeeded);
+            Assert.Equal(3, start.State.MaxFrames);
+            Assert.Equal(1, start.State.FrameCount);
+
+            for (var frame = 1; frame <= 5; frame++)
+            {
+                runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame));
+            }
+
+            var recording = recorder.GetState();
+            Assert.True(recording.IsRecording);
+            Assert.Equal(3, recording.FrameCount);
+            Assert.Equal(3, recording.DroppedFrameCount);
+
+            var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
+            savedPath = stop.State.LastDumpPath;
+
+            Assert.True(stop.Succeeded);
+            Assert.NotNull(stop.Dump);
+            Assert.Equal(3, stop.Dump.MaxFrames);
+            Assert.Equal(4, stop.Dump.DroppedFrameCount);
+            Assert.Equal(3, stop.Dump.Frames.Count);
+            Assert.Equal(4, stop.Dump.Frames[0].Frame.Frame);
+            Assert.Equal(5, stop.Dump.Frames[1].Frame.Frame);
+            Assert.Equal("recording-stop", stop.Dump.Frames[2].Frame.Source);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(savedPath) && File.Exists(savedPath))
+            {
+                File.Delete(savedPath);
+            }
+
             GameDebugController.Shared.Reset();
             GameDebugFramePublisher.Shared.Reset();
         }
@@ -452,6 +565,14 @@ public sealed class GameDebugHostTests
         public void Update(in GameFrameTime time)
         {
             UpdateCount++;
+        }
+    }
+
+    private sealed class EmptySnapshotProvider : IGameDebugSnapshotProvider
+    {
+        public GameDebugSnapshot Capture(GameDebugSnapshotCaptureOptions? options = null)
+        {
+            return new GameDebugSnapshot(DateTimeOffset.UtcNow, [], []);
         }
     }
 

@@ -4,12 +4,13 @@
 
 ## Scope
 
-Debug 能力分两层：
+Debug 能力分三层：
 
 - WebDebug：在线检查器，用于查看当前运行态、暂停/单步、按需查看实体组件值、编辑组件字段。
-- Debug Recorder / Dump：离线诊断数据，用于保留一段时间内的世界状态变化、事件、结构变化和必要的组件值。
+- Snapshot Window Dump：当前已落地的有界窗口录制，用于保留最近一段 frame snapshot 并在 Web 面板中回放。
+- Debug Recorder / Dump：后续离线诊断数据，用于保留一段时间内的世界状态变化、事件、结构变化和必要的组件值。
 
-两者共享框架层 introspection 能力，但数据粒度不同。WebDebug 以“当前状态 + 懒加载 detail”为主；Recorder 以“帧序列 + ring buffer + 可查询索引”为主。
+这些能力共享框架层 introspection 能力，但数据粒度不同。WebDebug 以“当前状态 + 懒加载 detail”为主；Snapshot Window Dump 以“最近 N 帧完整 snapshot window”为主；后续 Recorder 以“帧序列 + ring buffer + 可查询索引”为主。
 
 ## Current WebDebug Flow
 
@@ -18,10 +19,9 @@ Debug 能力分两层：
 ```mermaid
 flowchart TD
     Runtime["RuntimeContext / World created"] --> Registry["GameDebugRuntimeRegistry auto-register"]
-    HostStart["GameDebugHost / ASP.NET host starts"] --> Services["AddNkgGameDebugging"]
-    Services --> Session["GameDebugSession"]
+    HostStart["GameDebugHost starts lightweight loopback transport"] --> Session["GameDebugSession"]
     Registry --> Session
-    Session --> Endpoints["MapNkgGameDebugEndpoints"]
+    Session --> Endpoints["/_nkg/debug/* HTTP + SSE API"]
     Endpoints --> Web["Hosting.Web Debug Inspector"]
 ```
 
@@ -29,9 +29,8 @@ flowchart TD
 
 - `GameDebugRuntimeRegistry`：自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`。
 - `GameDebugSession`：显式注册或默认读取 registry 中的运行态对象。
-- `GameDebugHost`：本地 ASP.NET Core debug host。
+- `GameDebugHost`：本地轻量 debug host，内置 loopback HTTP/SSE transport。
 - `GameDebugHostAutoStart`：通过环境变量开启本地 debug host。
-- `MapNkgGameDebugEndpoints`：暴露 `/_nkg/debug/*` HTTP API。
 
 常用环境变量：
 
@@ -41,6 +40,8 @@ $env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5000"
 $env:NKG_DEBUG_HOST_PREFIX = "/_nkg/debug"
 $env:NKG_DEBUG_HOST_MUTATIONS = "1"
 ```
+
+`GameDebugHost` 使用 .NET socket async I/O，不主动把连接处理丢进 `Task.Run`；内部 accept loop、连接处理和 HTTP/SSE 读写使用 `UniTask`，公共 `StartAsync` / `TryStartFromEnvironmentAsync` 仍保留标准 `Task` 形态，方便普通 .NET 宿主调用。`GameDebugHostOptions.MaxConnections` 默认限制为 `32`。Debug 侧的 snapshot、control、mutation 和 dump 操作通过 host 内部 gate 串行执行，避免多个 Web 请求同时触碰同一批调试状态。UniTask 可以降低内部 await 链路成本，但真正跨宿主主线程读写仍需要显式 debug scheduler / Runtime 帧边界兜住。
 
 ### HTTP API
 
@@ -52,6 +53,8 @@ $env:NKG_DEBUG_HOST_MUTATIONS = "1"
 - `GET /_nkg/debug/control`
 - `POST /_nkg/debug/control`
 - `POST /_nkg/debug/mutations`
+- `GET /_nkg/debug/dump/recording`
+- `POST /_nkg/debug/dump/recording`
 
 `/_nkg/debug/snapshot` 返回 `GameDebugSnapshotMessage`，包含 `frame`、`snapshot` 和 `control`。`/_nkg/debug/stream` 通过 SSE 推送同一种 message。两者共享相同的后端 capture 终点，前端也进入同一个 summary commit 逻辑。
 
@@ -155,6 +158,7 @@ flowchart LR
     ControlPost --> Controller["GameDebugController"]
     Controller --> Gate["TryBeginRuntimeFrame"]
     Gate --> RuntimeUpdate["RuntimeContext.Update"]
+    RuntimeUpdate --> EcsUpdate["Runtime modules drive World / Scene"]
 ```
 
 控制命令：
@@ -163,7 +167,7 @@ flowchart LR
 - `pause`
 - `step`
 
-`RuntimeContext.Update` 在帧开始前通过 `GameDebugController.Shared.TryBeginRuntimeFrame()` 进入调试门控。暂停时不推进帧；step 会消费 pending step count。
+`RuntimeContext.Update` 在宿主帧开始时通过 `GameDebugController.Shared.TryBeginRuntimeFrame()` 进入调试门控。暂停时不推进 Runtime 帧；step 只消费一次 pending step count。`World.Update` / `Scene.Update` 不作为独立调试出口，它们必须由 Runtime 内的模块或系统推进。
 
 ### Refresh Modes
 
@@ -176,8 +180,8 @@ Frame Stream 的规则：
 
 - 设置写入 `localStorage`。
 - stream 连接建立后，宿主先发送一帧 `initial` summary。
-- `RuntimeContext.Update` 完成模块和事件队列更新后，通过 `GameDebugFramePublisher` 发布 frame event。
-- Hosting 收到 frame event 后捕获轻量 snapshot message，并通过 SSE 推送给 WebDebug。
+- `RuntimeContext.Update` 完成后，通过 `GameDebugFramePublisher` 发布 frame event。
+- Hosting 在 frame event callback 中立即捕获轻量 snapshot message，再通过 SSE 推送给 WebDebug。
 - stream summary 强制关闭 `payload` / `structured`，不在推送流里序列化所有组件值。
 - 若当前选中 entity 的 detail 已加载，WebDebug 收到 summary 后再按需请求该 entity detail。
 - snapshot message 携带 control 状态，Manual 和 Frame Stream 都不需要额外轮询 control。
@@ -201,7 +205,7 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant Host as Game Host
-    participant Runtime as RuntimeContext.Update
+    participant Runtime as RuntimeContext
     participant State as World / Scene / ComponentStore
     participant Publisher as GameDebugFramePublisher
     participant Stream as /_nkg/debug/stream
@@ -226,16 +230,20 @@ sequenceDiagram
     Snapshot-->>Web: commitEntityDetail
 ```
 
-`GameDebugFramePublisher` 的发布点只放在 `RuntimeContext.Update` 末尾，因为框架约定整个框架层更新入口是 `RuntimeContext`。`Scene.Update` 不直接发布 frame event，避免内部场景更新造成重复推送。
+`GameDebugFramePublisher` 的发布点只放在 `RuntimeContext.Update` 末尾。直接调用 `World.Update` 或 `Scene.Update` 不会消费 debug step，也不会发布 frame event；它们只是 Runtime 帧内部的执行细节。
 
-`/_nkg/debug/stream` 是 live UI 通道，不是最终 recorder。它使用 bounded connection buffer；WebDebug 慢时 live 显示可以丢旧 summary，但后续 `GameDebugRecorder` 才负责权威逐帧不丢。
+`/_nkg/debug/stream` 是 live UI 通道，不是最终 recorder。它使用 bounded connection buffer；WebDebug 慢时 live 显示可以丢旧 summary。当前 Snapshot Window Dump 会保留有界 recent frame window；后续 delta recorder 才负责更长时间、更低成本的权威逐帧诊断数据。
 
 当前测试覆盖这条链路：
 
 - `GameDebugHostTests.Host_stream_pushes_summary_snapshot_after_framework_frame`
+- `GameDebugHostTests.Host_stream_snapshots_match_the_published_frame_event`
 - `GameDebugHostTests.Host_snapshot_requests_observe_framework_changes_after_each_runtime_frame`
+- `GameDebugFrameGateTests.Runtime_context_update_is_skipped_while_debug_playback_is_paused`
+- `GameDebugFrameGateTests.Runtime_context_step_allows_runtime_driven_world_update_once`
 - stream 测试启动真实 `GameDebugHost`，连接 `/_nkg/debug/stream`，读取 initial event。
 - 每次 `runtime.Update(frame)` 后，测试断言 SSE 收到宿主推送的 summary snapshot。
+- 连续推进多帧后，测试断言每条 SSE snapshot 与对应 frame event 保持一致。
 - snapshot request 测试保留，用于验证 snapshot API 本身在每帧后请求时能读到最新 summary/detail。
 
 ## Component Graph Rendering
@@ -273,11 +281,37 @@ sequenceDiagram
     API-->>UI: success/failure
 ```
 
-Mutation 默认应只在开发环境开启。生产、外网和多人环境必须关闭或接入额外鉴权。
+Mutation 默认关闭。生产、外网和多人环境必须保持关闭或接入额外鉴权；本地开发可通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `NKG_DEBUG_HOST_MUTATIONS=1` 显式开启。
+
+## Snapshot Window Dump
+
+当前已落地的是有界 snapshot window，而不是最终 delta recorder：
+
+```mermaid
+flowchart TD
+    Frame["RuntimeContext.Update completed"] --> Publisher["GameDebugFramePublisher"]
+    Publisher --> Recorder["GameDebugDumpRecorder"]
+    Recorder --> Capture["Capture full snapshot message"]
+    Capture --> Window["bounded recent frame window"]
+    Window --> Stop{"stop recording?"}
+    Stop -->|yes| Json[".nkgdump.json"]
+    Json --> Web["WebDebug Dump Timeline"]
+```
+
+当前行为：
+
+- `POST /_nkg/debug/dump/recording` with `{"command":"start"}` 开始录制。
+- `POST /_nkg/debug/dump/recording` with `{"command":"stop"}` 停止录制，写出 `.nkgdump.json`，并在响应里返回 dump document。
+- `GET /_nkg/debug/dump/recording` 返回当前录制状态。
+- WebDebug 提供 Record / Stop Rec、Load Dump 和 Dump Timeline。
+- `GameDebugOptions.DumpMaxFrames` 控制最多保留多少帧，默认 `600`；超过窗口会丢弃最旧帧，并在 `droppedFrameCount` 中记录。
+- `GameDebugOptions.DumpIncludeComponentPayloads` 和 `DumpIncludeStructuredComponentValues` 控制 dump 是否包含 Odin payload 和 structured value，默认都开启，便于离线查看实体组件 detail。
+
+这个实现适合短窗口、手动触发、明确 expensive 的诊断场景。它已经避免了无限增长，但仍会在 frame event 中捕获完整 snapshot，因此不应当作为长时间后台 recorder 使用。
 
 ## Dump / Recorder Direction
 
-一段时间内的游戏状态 dump 不应设计成“后台线程直接 Odin 序列化整个 live World”。原因：
+后续长时间游戏状态 dump 不应设计成“后台线程直接 Odin 序列化整个 live World”。原因：
 
 - live World 由主线程更新，后台遍历会遇到集合修改和引用图不稳定。
 - 全量 World 对象图包含很多调试不需要的运行时对象。
@@ -400,17 +434,18 @@ flowchart LR
 - Mutation API，支持通用 component value 编辑。
 - WebDebug overview 懒加载，不在首包抓 payload / structured。
 - 选中 entity 后再抓 detail。
-- `GameDebugFramePublisher` 在 `RuntimeContext.Update` 末尾发布 frame event。
-- `/_nkg/debug/stream` 通过 SSE 推送宿主帧后的轻量 summary snapshot。
+- `GameDebugFramePublisher` 只覆盖 `RuntimeContext.Update` 帧末尾；`World.Update` 和 `Scene.Update` 由 Runtime 内部驱动，不作为 WebDebug 独立帧出口。
+- `/_nkg/debug/stream` 通过 SSE 推送宿主帧后的轻量 summary snapshot，snapshot 在 frame event callback 中捕获。
 - WebDebug `Frame` 模式通过 `EventSource` 订阅 host frame stream。
 - Component graph 稳定化，避免 Frame Stream 更新时整图重绘。
+- `/_nkg/debug/dump/recording` 支持有界 snapshot window 录制。
+- WebDebug 支持 Record / Stop Rec、Load Dump 和 Dump Timeline。
 
 待落地：
 
-- `GameDebugRecorder` ring buffer。
+- 长时间低成本 `GameDebugRecorder` delta ring buffer。
 - `Trace` / `StateIndex` / `StateDelta` / `Keyframe` / `FullWindow` 捕获模式。
 - dump 文件格式、索引和压缩。
-- WebDebug timeline / dump viewer。
 - watchlist / bookmark / assertion-triggered dump。
 
 ## Design Rules

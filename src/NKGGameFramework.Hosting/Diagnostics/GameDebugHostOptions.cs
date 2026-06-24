@@ -6,5 +6,7 @@ public sealed class GameDebugHostOptions
 
     public string EndpointPrefix { get; set; } = "/_nkg/debug";
 
-    public bool EnableMutations { get; set; } = true;
+    public bool EnableMutations { get; set; }
+
+    public int MaxConnections { get; set; } = 32;
 }
