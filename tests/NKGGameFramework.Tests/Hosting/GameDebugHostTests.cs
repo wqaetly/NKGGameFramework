@@ -302,6 +302,85 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
+    public async Task Host_records_debug_dump_and_returns_document_on_stop()
+    {
+        GameDebugRuntimeRegistry.Clear();
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+        string? savedPath = null;
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var world = new World("dump-debug-world");
+            var scene = world.CreateScene("battle");
+            var tracked = scene.CreateEntity()
+                .Add(new PositionComponent(0, 0));
+            runtime.RegisterModule(new FrameMutationModule(scene, tracked));
+            await using var host = await GameDebugHost.StartAsync(options =>
+            {
+                options.Url = "http://127.0.0.1:0";
+            });
+            using var client = new HttpClient
+            {
+                BaseAddress = host.BaseAddress,
+            };
+
+            var startResponse = await client.PostAsJsonAsync(
+                "/_nkg/debug/dump/recording",
+                new GameDebugDumpRecordingRequest("start", "host-dump-test"),
+                JsonOptions);
+            var start = await startResponse.Content.ReadFromJsonAsync<GameDebugDumpRecordingResult>(JsonOptions);
+
+            Assert.True(startResponse.IsSuccessStatusCode);
+            Assert.NotNull(start);
+            Assert.True(start.Succeeded);
+            Assert.True(start.State.IsRecording);
+            Assert.True(start.State.FrameCount >= 1);
+
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+            runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
+
+            var stopResponse = await client.PostAsJsonAsync(
+                "/_nkg/debug/dump/recording",
+                new GameDebugDumpRecordingRequest("stop"),
+                JsonOptions);
+            var stop = await stopResponse.Content.ReadFromJsonAsync<GameDebugDumpRecordingResult>(JsonOptions);
+
+            Assert.True(stopResponse.IsSuccessStatusCode);
+            Assert.NotNull(stop);
+            Assert.True(stop.Succeeded);
+            Assert.False(stop.State.IsRecording);
+            Assert.NotNull(stop.Dump);
+            Assert.Equal("nkg.debug.dump", stop.Dump.Format);
+            Assert.Equal(1, stop.Dump.Version);
+            Assert.True(stop.Dump.Frames.Count >= 4);
+            Assert.Contains(stop.Dump.Frames, frame => frame.Frame.Source == nameof(RuntimeContext));
+
+            var lastFrame = stop.Dump.Frames[^1];
+            Assert.Equal("recording-stop", lastFrame.Frame.Source);
+            Assert.Contains(
+                lastFrame.Snapshot.Worlds,
+                worldSnapshot => worldSnapshot.Name == world.Name);
+
+            savedPath = stop.State.LastDumpPath;
+            Assert.False(string.IsNullOrWhiteSpace(savedPath));
+            Assert.True(File.Exists(savedPath));
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(savedPath) && File.Exists(savedPath))
+            {
+                File.Delete(savedPath);
+            }
+
+            GameDebugRuntimeRegistry.Clear();
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public async Task AutoStart_returns_null_when_environment_is_disabled()
     {
         await GameDebugHostAutoStart.StopAsync();

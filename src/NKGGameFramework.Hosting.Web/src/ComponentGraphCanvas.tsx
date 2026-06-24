@@ -23,6 +23,7 @@ import type {
 type ComponentNodeData = {
   component: ComponentDebugSnapshot;
   onSaveComponent: ComponentNodeMutationExecutor;
+  readOnly: boolean;
 };
 
 type ComponentNodeMutationExecutor = (
@@ -55,10 +56,12 @@ export function ComponentGraphCanvas({
   entity,
   query,
   onSaveComponent,
+  readOnly = false,
 }: {
   entity: EntityDebugSnapshot;
   query: string;
   onSaveComponent: ComponentMutationExecutor;
+  readOnly?: boolean;
 }) {
   const entityRef = useRef(entity);
 
@@ -77,8 +80,8 @@ export function ComponentGraphCanvas({
     [stableComponents, query],
   );
   const rawGraph = useMemo(
-    () => buildComponentGraph(filteredComponents, saveComponent),
-    [filteredComponents, saveComponent],
+    () => buildComponentGraph(filteredComponents, saveComponent, readOnly),
+    [filteredComponents, readOnly, saveComponent],
   );
   const graph = useStableGraphElements(rawGraph);
 
@@ -174,6 +177,7 @@ function useStableGraphElements(graph: {
 function buildComponentGraph(
   components: ComponentDebugSnapshot[],
   onSaveComponent: ComponentNodeMutationExecutor,
+  readOnly: boolean,
 ) {
   const componentById = new Map<string, ComponentTreeNode>();
 
@@ -225,6 +229,7 @@ function buildComponentGraph(
         0,
         rootY,
         onSaveComponent,
+        readOnly,
         nodes,
         edges,
       );
@@ -246,6 +251,7 @@ function layoutComponentTree(
   depth: number,
   y: number,
   onSaveComponent: ComponentNodeMutationExecutor,
+  readOnly: boolean,
   nodes: ComponentGraphFlowNode[],
   edges: Edge[],
 ) {
@@ -262,7 +268,7 @@ function layoutComponentTree(
     id: graph.id,
     type: 'componentNode',
     position: { x: 150 + depth * 430, y: nodeY },
-    data: { component: tree.component, onSaveComponent },
+    data: { component: tree.component, onSaveComponent, readOnly },
     draggable: false,
   });
 
@@ -274,6 +280,7 @@ function layoutComponentTree(
       depth + 1,
       childY,
       onSaveComponent,
+      readOnly,
       nodes,
       edges,
     );
@@ -422,7 +429,8 @@ function areFlowNodesEqual(left: ComponentGraphFlowNode, right: ComponentGraphFl
   if (left.type === 'componentNode' && right.type === 'componentNode') {
     return (
       left.data.component === right.data.component &&
-      left.data.onSaveComponent === right.data.onSaveComponent
+      left.data.onSaveComponent === right.data.onSaveComponent &&
+      left.data.readOnly === right.data.readOnly
     );
   }
 
@@ -526,7 +534,7 @@ function areStringArraysEqual(left: string[], right: string[]) {
 }
 
 function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
-  const { component, onSaveComponent } = data;
+  const { component, onSaveComponent, readOnly } = data;
   const [draftPayload, setDraftPayload] = useState(formatComponentValue(component.value));
   const [draftNode, setDraftNode] = useState(() => cloneDebugNode(component.value.structured));
   const [saving, setSaving] = useState(false);
@@ -560,13 +568,19 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
       </div>
       {draftNode ? (
         <div className="component-flow-node-fields nodrag nopan">
-          <StructuredValueEditor node={draftNode} path="" onChangeNode={updateDraftNode} />
+          <StructuredValueEditor
+            node={draftNode}
+            path=""
+            onChangeNode={updateDraftNode}
+            readOnly={readOnly}
+          />
         </div>
       ) : (
         <textarea
           className="component-raw-editor nodrag nopan"
           value={draftPayload}
           onChange={(event) => setDraftPayload(event.target.value)}
+          disabled={readOnly}
           spellCheck={false}
         />
       )}
@@ -575,7 +589,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
         <button
           className="mini-button"
           type="button"
-          disabled={saving || component.value.error !== null}
+          disabled={readOnly || saving || component.value.error !== null}
           onClick={async () => {
             setSaving(true);
             try {
@@ -611,11 +625,13 @@ const StructuredValueEditor = memo(function StructuredValueEditor({
   node,
   path,
   onChangeNode,
+  readOnly,
   depth = 0,
 }: {
   node: ComponentValueDebugNode;
   path: string;
   onChangeNode: StructuredNodeChange;
+  readOnly: boolean;
   depth?: number;
 }) {
   if (node.kind === 'object') {
@@ -630,6 +646,7 @@ const StructuredValueEditor = memo(function StructuredValueEditor({
               path={appendDebugNodePath(path, index)}
               depth={depth + 1}
               onChangeNode={onChangeNode}
+              readOnly={readOnly}
             />
           ))
         ) : (
@@ -640,24 +657,34 @@ const StructuredValueEditor = memo(function StructuredValueEditor({
   }
 
   if (node.kind === 'list') {
-    return <ListField node={node} path={path} onChangeNode={onChangeNode} depth={depth} />;
+    return (
+      <ListField
+        node={node}
+        path={path}
+        onChangeNode={onChangeNode}
+        readOnly={readOnly}
+        depth={depth}
+      />
+    );
   }
 
-  return <ScalarField node={node} path={path} onChangeNode={onChangeNode} />;
+  return <ScalarField node={node} path={path} onChangeNode={onChangeNode} readOnly={readOnly} />;
 });
 
 const ListField = memo(function ListField({
   node,
   path,
   onChangeNode,
+  readOnly,
   depth,
 }: {
   node: ComponentValueDebugNode;
   path: string;
   onChangeNode: StructuredNodeChange;
+  readOnly: boolean;
   depth: number;
 }) {
-  const canAdd = node.editable && node.elementTemplate !== null;
+  const canAdd = !readOnly && node.editable && node.elementTemplate !== null;
 
   return (
     <div className="field-group list-field">
@@ -680,11 +707,12 @@ const ListField = memo(function ListField({
               path={appendDebugNodePath(path, index)}
               depth={depth + 1}
               onChangeNode={onChangeNode}
+              readOnly={readOnly}
             />
             <button
               className="mini-button danger"
               type="button"
-              disabled={!node.editable}
+              disabled={readOnly || !node.editable}
               onClick={() => onChangeNode(path, removeListItem(node, index))}
             >
               Remove
@@ -702,12 +730,14 @@ const ScalarField = memo(function ScalarField({
   node,
   path,
   onChangeNode,
+  readOnly,
 }: {
   node: ComponentValueDebugNode;
   path: string;
   onChangeNode: StructuredNodeChange;
+  readOnly: boolean;
 }) {
-  const disabled = !node.editable;
+  const disabled = readOnly || !node.editable;
 
   return (
     <label className={disabled ? 'field-row readonly' : 'field-row'}>

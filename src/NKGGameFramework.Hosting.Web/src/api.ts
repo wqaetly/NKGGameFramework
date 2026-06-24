@@ -1,6 +1,9 @@
 import type {
   GameDebugControlRequest,
   GameDebugControlResult,
+  GameDebugDumpRecordingRequest,
+  GameDebugDumpRecordingResult,
+  GameDebugDumpRecordingState,
   GameDebugMutationRequest,
   GameDebugMutationResult,
   GameDebugSnapshotMessage,
@@ -104,6 +107,44 @@ export async function postDebugControl(
 
   if (!response.ok) {
     throw new Error(`Control request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchDumpRecordingState(
+  signal?: AbortSignal,
+): Promise<GameDebugDumpRecordingState> {
+  const response = await fetch(`${apiBase}/_nkg/debug/dump/recording`, {
+    signal,
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump recording state request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function postDumpRecording(
+  request: GameDebugDumpRecordingRequest,
+  signal?: AbortSignal,
+): Promise<GameDebugDumpRecordingResult> {
+  const response = await fetch(`${apiBase}/_nkg/debug/dump/recording`, {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump recording request failed: ${response.status} ${response.statusText}`);
   }
 
   return response.json();

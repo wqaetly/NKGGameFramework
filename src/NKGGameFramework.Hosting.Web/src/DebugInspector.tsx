@@ -12,17 +12,23 @@ import {
   Boxes,
   Bug,
   Cpu,
+  Circle,
   Pause,
   Play,
   RefreshCw,
   Search,
   SkipForward,
   Sparkles,
+  Square,
+  Upload,
+  X,
 } from 'lucide-react';
 import {
   createDebugSnapshotStream,
+  fetchDumpRecordingState,
   fetchDebugSnapshotMessage,
   postDebugControl,
+  postDumpRecording,
   postDebugMutation,
 } from './api';
 import { countComponentGroups, type ComponentMutationExecutor } from './componentGraphModel';
@@ -31,6 +37,8 @@ import type {
   EntityDebugSnapshot,
   GameDebugControlCommand,
   GameDebugControlState,
+  GameDebugDumpDocument,
+  GameDebugDumpRecordingState,
   GameDebugSnapshotMessage,
   GameDebugSnapshot,
   ModuleDebugSnapshot,
@@ -71,6 +79,7 @@ type DockWorkspaceModel = {
   filteredEntities: EntityDebugSnapshot[];
   selectedEntity: EntityDebugSnapshot | null;
   selectedEntityLoading: boolean;
+  isDumpMode: boolean;
   selectScene: (entry: SceneEntry) => void;
   selectEntity: (entityId: number) => void;
   onSaveComponent: ComponentMutationExecutor;
@@ -118,12 +127,22 @@ export function App() {
   const [loadingEntityKey, setLoadingEntityKey] = useState<string | null>(null);
   const [dockRevision, setDockRevision] = useState(0);
   const [frameStream, setFrameStream] = useState(readStoredFrameStream);
+  const [dump, setDump] = useState<GameDebugDumpDocument | null>(null);
+  const [dumpFrameIndex, setDumpFrameIndex] = useState(0);
+  const [dumpPlaying, setDumpPlaying] = useState(false);
+  const [dumpRecording, setDumpRecording] = useState<GameDebugDumpRecordingState | null>(null);
+  const [dumpBusy, setDumpBusy] = useState(false);
   const refreshInFlightRef = useRef(false);
   const entityDetailLoadKeyRef = useRef<string | null>(null);
   const activeSceneEntryRef = useRef<SceneEntry | null>(null);
   const entityDetailsRef = useRef<Record<string, EntityDebugSnapshot>>({});
   const selectedEntityOverviewRef = useRef<EntityDebugSnapshot | null>(null);
   const selectedEntityDetailKeyRef = useRef<string | null>(null);
+  const dumpFileInputRef = useRef<HTMLInputElement | null>(null);
+  const dumpModeRef = useRef(false);
+  const dumpFrames = dump?.frames ?? [];
+  const dumpMode = dumpFrames.length > 0;
+  const activeDumpFrame = dumpFrames[dumpFrameIndex] ?? null;
 
   const commitSnapshotMessage = useCallback((
     message: GameDebugSnapshotMessage,
@@ -150,6 +169,19 @@ export function App() {
     }));
   }, []);
 
+  const loadDumpDocument = useCallback((nextDump: GameDebugDumpDocument) => {
+    validateDumpDocument(nextDump);
+    dumpModeRef.current = true;
+    setDump(nextDump);
+    setDumpFrameIndex(0);
+    setDumpPlaying(false);
+    setFrameStream(false);
+    setEntityDetails({});
+    commitSnapshotMessage(nextDump.frames[0], {
+      clearEntityDetails: true,
+    });
+  }, [commitSnapshotMessage]);
+
   const refresh = useCallback(async (
     signal?: AbortSignal,
     options: { clearEntityDetails?: boolean } = {},
@@ -168,6 +200,10 @@ export function App() {
         includePayload: false,
         includeStructured: false,
       });
+      if (dumpModeRef.current) {
+        return;
+      }
+
       commitSnapshotMessage(next, {
         clearEntityDetails: options.clearEntityDetails ?? true,
       });
@@ -215,6 +251,10 @@ export function App() {
         throw new Error(`Entity #${entityOverview.id} was not found in the debug snapshot.`);
       }
 
+      if (dumpModeRef.current) {
+        return;
+      }
+
       commitEntityDetail(detailMessage, entity, detailKey);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
@@ -237,6 +277,26 @@ export function App() {
     void refresh(controller.signal);
     return () => controller.abort();
   }, [refresh]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchDumpRecordingState(controller.signal)
+      .then(setDumpRecording)
+      .catch(() => {
+        // Older hosts can still serve the live inspector without dump recording.
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!activeDumpFrame) {
+      return;
+    }
+
+    commitSnapshotMessage(activeDumpFrame, {
+      clearEntityDetails: true,
+    });
+  }, [activeDumpFrame, commitSnapshotMessage]);
 
   const scenes = useMemo(() => flattenScenes(snapshot), [snapshot]);
   const activeSceneEntry = useMemo(
@@ -276,8 +336,10 @@ export function App() {
   const selectedEntity = selectedEntityDetailKey
     ? entityDetails[selectedEntityDetailKey] ?? selectedEntityOverview
     : selectedEntityOverview;
-  const selectedEntityLoading = selectedEntityDetailKey === loadingEntityKey
-    || (selectedEntity !== null && !hasComponentValueDetails(selectedEntity));
+  const selectedEntityLoading = !dumpMode && (
+    selectedEntityDetailKey === loadingEntityKey
+    || (selectedEntity !== null && !hasComponentValueDetails(selectedEntity))
+  );
 
   useEffect(() => {
     activeSceneEntryRef.current = activeSceneEntry;
@@ -300,7 +362,11 @@ export function App() {
   }, [frameStream]);
 
   useEffect(() => {
-    if (!frameStream) {
+    dumpModeRef.current = dumpMode;
+  }, [dumpMode]);
+
+  useEffect(() => {
+    if (!frameStream || dumpMode) {
       return;
     }
 
@@ -329,7 +395,26 @@ export function App() {
       stream.removeEventListener('snapshot', handleSnapshot);
       stream.close();
     };
-  }, [commitSnapshotMessage, frameStream, loadEntityDetail]);
+  }, [commitSnapshotMessage, dumpMode, frameStream, loadEntityDetail]);
+
+  useEffect(() => {
+    if (!dumpMode || !dumpPlaying) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setDumpFrameIndex((current) => {
+        if (current >= dumpFrames.length - 1) {
+          setDumpPlaying(false);
+          return current;
+        }
+
+        return current + 1;
+      });
+    }, 240);
+
+    return () => window.clearInterval(timer);
+  }, [dumpFrames.length, dumpMode, dumpPlaying]);
 
   useEffect(() => {
     if (selectedEntityOverview && selectedEntityOverview.id !== selectedEntityId) {
@@ -383,6 +468,11 @@ export function App() {
 
   const executeComponentMutation = useCallback<ComponentMutationExecutor>(
     async (entity, component, value) => {
+      if (dumpMode) {
+        setError('Dump playback is read-only.');
+        return;
+      }
+
       if (!activeSceneEntry) {
         return;
       }
@@ -405,7 +495,7 @@ export function App() {
       setEntityDetails({});
       await refresh();
     },
-    [activeSceneEntry, refresh],
+    [activeSceneEntry, dumpMode, refresh],
   );
 
   const dockModel = useMemo<DockWorkspaceModel>(
@@ -418,6 +508,7 @@ export function App() {
       filteredEntities,
       selectedEntity,
       selectedEntityLoading,
+      isDumpMode: dumpMode,
       selectScene,
       selectEntity,
       onSaveComponent: executeComponentMutation,
@@ -431,6 +522,7 @@ export function App() {
       filteredEntities,
       selectedEntity,
       selectedEntityLoading,
+      dumpMode,
       selectScene,
       selectEntity,
       executeComponentMutation,
@@ -439,6 +531,23 @@ export function App() {
 
   const executeControl = useCallback(
     async (command: GameDebugControlCommand) => {
+      if (dumpMode) {
+        if (command === 'play') {
+          setDumpFrameIndex((current) => current >= dumpFrames.length - 1 ? 0 : current);
+          setDumpPlaying(true);
+          return;
+        }
+
+        if (command === 'pause') {
+          setDumpPlaying(false);
+          return;
+        }
+
+        setDumpPlaying(false);
+        setDumpFrameIndex((current) => Math.min(current + 1, Math.max(0, dumpFrames.length - 1)));
+        return;
+      }
+
       const result = await postDebugControl({
         command,
         stepCount: command === 'step' ? 1 : null,
@@ -451,11 +560,102 @@ export function App() {
 
       setControl(result.state);
     },
-    [],
+    [dumpFrames.length, dumpMode],
   );
+
+  const selectDumpFrame = useCallback((frameIndex: number) => {
+    if (!dumpMode) {
+      return;
+    }
+
+    setDumpPlaying(false);
+    setDumpFrameIndex(Math.min(Math.max(0, frameIndex), dumpFrames.length - 1));
+  }, [dumpFrames.length, dumpMode]);
+
+  const clearDumpPlayback = useCallback(() => {
+    dumpModeRef.current = false;
+    setDump(null);
+    setDumpFrameIndex(0);
+    setDumpPlaying(false);
+    setEntityDetails({});
+  }, []);
+
+  const returnToLive = useCallback(() => {
+    clearDumpPlayback();
+    void refresh(undefined, {
+      clearEntityDetails: true,
+    });
+  }, [clearDumpPlayback, refresh]);
+
+  const openDumpFilePicker = useCallback(() => {
+    dumpFileInputRef.current?.click();
+  }, []);
+
+  const handleDumpFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    setDumpBusy(true);
+    setError(null);
+    try {
+      const parsed = JSON.parse(await file.text()) as GameDebugDumpDocument;
+      loadDumpDocument(parsed);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setDumpBusy(false);
+    }
+  }, [loadDumpDocument]);
+
+  const toggleDumpRecording = useCallback(async () => {
+    const command = dumpRecording?.isRecording ? 'stop' : 'start';
+    setDumpBusy(true);
+    setError(null);
+
+    try {
+      if (command === 'start') {
+        clearDumpPlayback();
+      }
+
+      const result = await postDumpRecording({ command });
+      setDumpRecording(result.state);
+
+      if (!result.succeeded) {
+        setError(result.message);
+        return;
+      }
+
+      if (command === 'stop') {
+        if (!result.dump) {
+          setError('Dump recording finished without a dump document.');
+          return;
+        }
+
+        loadDumpDocument(result.dump);
+      } else {
+        await refresh(undefined, {
+          clearEntityDetails: true,
+        });
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setDumpBusy(false);
+    }
+  }, [clearDumpPlayback, dumpRecording?.isRecording, loadDumpDocument, refresh]);
 
   return (
     <main className="app-shell">
+      <input
+        ref={dumpFileInputRef}
+        className="hidden-file-input"
+        type="file"
+        accept=".json,.nkgdump,.nkgdump.json,application/json"
+        onChange={(event) => void handleDumpFileChange(event)}
+      />
       <header className="topbar">
         <div className="brand">
           <Bug size={22} aria-hidden />
@@ -475,6 +675,37 @@ export function App() {
           </label>
           <button
             className="icon-button"
+            type="button"
+            onClick={openDumpFilePicker}
+            disabled={dumpBusy}
+            title="Load dump file"
+          >
+            <Upload size={17} />
+            Load Dump
+          </button>
+          <button
+            className={dumpRecording?.isRecording ? 'icon-button active recording' : 'icon-button'}
+            type="button"
+            onClick={() => void toggleDumpRecording()}
+            disabled={dumpBusy}
+            title={dumpRecording?.isRecording ? 'Stop dump recording' : 'Start dump recording'}
+          >
+            {dumpRecording?.isRecording ? <Square size={16} /> : <Circle size={16} />}
+            {dumpRecording?.isRecording ? 'Stop Rec' : 'Record'}
+          </button>
+          {dumpMode ? (
+            <button
+              className="icon-button"
+              type="button"
+              onClick={returnToLive}
+              title="Return to live host"
+            >
+              <X size={17} />
+              Live
+            </button>
+          ) : null}
+          <button
+            className={dumpPlaying ? 'icon-button active' : 'icon-button'}
             type="button"
             onClick={() => void executeControl('play')}
             title="Play"
@@ -499,9 +730,14 @@ export function App() {
           >
             <SkipForward size={17} />
             Step
-            {control?.pendingStepCount ? <b>{control.pendingStepCount}</b> : null}
+            {!dumpMode && control?.pendingStepCount ? <b>{control.pendingStepCount}</b> : null}
           </button>
-          <button className="primary-button" type="button" onClick={() => void refresh()}>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void refresh()}
+            disabled={dumpMode}
+          >
             <RefreshCw size={17} className={isRefreshing ? 'spin' : undefined} />
             Refresh
           </button>
@@ -509,6 +745,7 @@ export function App() {
             className={frameStream ? 'icon-button active' : 'icon-button'}
             type="button"
             onClick={() => setFrameStream((current) => !current)}
+            disabled={dumpMode}
             title={frameStream ? 'Disconnect frame stream' : 'Subscribe to host frame stream'}
           >
             <Activity size={17} />
@@ -520,6 +757,13 @@ export function App() {
           </button>
         </div>
       </header>
+
+      <DumpTimeline
+        dump={dump}
+        currentIndex={dumpFrameIndex}
+        isPlaying={dumpPlaying}
+        onSelectFrame={selectDumpFrame}
+      />
 
       {error ? <div className="error-banner">{error}</div> : null}
 
@@ -566,6 +810,46 @@ function DockWorkspace({ model }: { model: DockWorkspaceModel }) {
         />
       </section>
     </DockWorkspaceContext.Provider>
+  );
+}
+
+function DumpTimeline({
+  dump,
+  currentIndex,
+  isPlaying,
+  onSelectFrame,
+}: {
+  dump: GameDebugDumpDocument | null;
+  currentIndex: number;
+  isPlaying: boolean;
+  onSelectFrame: (frameIndex: number) => void;
+}) {
+  const frames = dump?.frames ?? [];
+  const current = frames[currentIndex] ?? null;
+  const disabled = frames.length === 0;
+  const max = Math.max(0, frames.length - 1);
+
+  return (
+    <section className={disabled ? 'dump-timeline disabled' : 'dump-timeline'}>
+      <div className="dump-timeline-summary">
+        <span>{dump?.name ?? 'Dump Timeline'}</span>
+        <strong>{disabled ? 'No dump' : `${currentIndex + 1} / ${frames.length}`}</strong>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={max}
+        step={1}
+        value={disabled ? 0 : currentIndex}
+        disabled={disabled}
+        onChange={(event) => onSelectFrame(Number(event.target.value))}
+      />
+      <div className="dump-timeline-frame">
+        <span>{current ? `Frame ${current.frame.frame}` : 'Frame -'}</span>
+        <span>{current ? current.frame.source : 'Idle'}</span>
+        <span>{isPlaying ? 'Playing' : current ? formatCapturedAt(current.snapshot.capturedAt) : 'Paused'}</span>
+      </div>
+    </section>
   );
 }
 
@@ -641,6 +925,7 @@ function ComponentsDockPanel(_props: DockPanelProps) {
           componentQuery={componentQuery}
           onComponentQueryChange={setComponentQuery}
           onSaveComponent={model.onSaveComponent}
+          readOnly={model.isDumpMode}
         />
       ) : (
         <EmptyDetails />
@@ -1106,12 +1391,14 @@ function EntityDetails({
   componentQuery,
   onComponentQueryChange,
   onSaveComponent,
+  readOnly,
 }: {
   entity: EntityDebugSnapshot;
   isLoading: boolean;
   componentQuery: string;
   onComponentQueryChange: (value: string) => void;
   onSaveComponent: ComponentMutationExecutor;
+  readOnly: boolean;
 }) {
   return (
     <div className="details component-details">
@@ -1144,6 +1431,7 @@ function EntityDetails({
               entity={entity}
               query={componentQuery}
               onSaveComponent={onSaveComponent}
+              readOnly={readOnly}
             />
           </Suspense>
         ) : (
@@ -1161,6 +1449,16 @@ function EmptyDetails() {
       <span>No entity</span>
     </div>
   );
+}
+
+function validateDumpDocument(dump: GameDebugDumpDocument) {
+  if (!dump || dump.format !== 'nkg.debug.dump' || dump.version !== 1) {
+    throw new Error('Unsupported debug dump file.');
+  }
+
+  if (!Array.isArray(dump.frames) || dump.frames.length === 0) {
+    throw new Error('Debug dump file does not contain frames.');
+  }
 }
 
 function readStoredFrameStream() {

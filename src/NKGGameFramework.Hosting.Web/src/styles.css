@@ -142,6 +142,10 @@ h2 {
   flex-wrap: wrap;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
 .search-field {
   display: flex;
   align-items: center;
@@ -232,10 +236,28 @@ h2 {
   color: var(--text-strong);
 }
 
+.icon-button:disabled,
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.icon-button:disabled:hover,
+.primary-button:disabled:hover {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
 .icon-button.active {
   border-color: var(--accent-2);
   background: #24252b;
   color: var(--text-strong);
+}
+
+.icon-button.recording {
+  border-color: var(--danger);
+  color: #f0a0a7;
 }
 
 .primary-button {
@@ -257,6 +279,61 @@ h2 {
   background: #2d1b1d;
   color: #f0a0a7;
   font-size: 12px;
+}
+
+.dump-timeline {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.34fr) minmax(220px, 1fr) minmax(210px, 0.4fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-3);
+}
+
+.dump-timeline.disabled {
+  opacity: 0.52;
+}
+
+.dump-timeline-summary,
+.dump-timeline-frame {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dump-timeline-summary span,
+.dump-timeline-frame span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dump-timeline-summary strong {
+  flex: 0 0 auto;
+  color: var(--text-strong);
+  font-size: 11px;
+}
+
+.dump-timeline input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.dump-timeline input[type="range"]:disabled {
+  accent-color: var(--muted-2);
+}
+
+.dump-timeline-frame {
+  justify-content: flex-end;
 }
 
 .dock-workspace {
@@ -1193,6 +1270,15 @@ button.entity-row:hover,
 
   .search-field {
     width: 100%;
+  }
+
+  .dump-timeline {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .dump-timeline-frame {
+    justify-content: flex-start;
   }
 
   .detail-heading {

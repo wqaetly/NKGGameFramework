@@ -28,6 +28,7 @@ public static class GameDebugHostingExtensions
         services.TryAddSingleton<IGameDebugComponentValueSerializer, OdinGameDebugComponentValueSerializer>();
         services.TryAddSingleton<IGameDebugSnapshotProvider, GameDebugSnapshotProvider>();
         services.TryAddSingleton<IGameDebugMutationHandler, GameDebugMutationHandler>();
+        services.TryAddSingleton<GameDebugDumpRecorder>();
         return services;
     }
 
@@ -71,6 +72,14 @@ public static class GameDebugHostingExtensions
             GameDebugMutationRequest request,
             IGameDebugMutationHandler mutations) =>
             Results.Json(mutations.Execute(request), GameDebugJson.Options));
+
+        group.MapGet("/dump/recording", (GameDebugDumpRecorder dumps) =>
+            Results.Json(dumps.GetState(), GameDebugJson.Options));
+
+        group.MapPost("/dump/recording", (
+            GameDebugDumpRecordingRequest request,
+            GameDebugDumpRecorder dumps) =>
+            Results.Json(dumps.Execute(request), GameDebugJson.Options));
 
         return endpoints;
     }
