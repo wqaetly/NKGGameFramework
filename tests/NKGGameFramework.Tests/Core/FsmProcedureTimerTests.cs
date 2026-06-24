@@ -59,6 +59,24 @@ public sealed class FsmProcedureTimerTests
         Assert.Equal(1, count);
     }
 
+    [Fact]
+    public void TimerServiceUsesDriverFrameTime()
+    {
+        var timer = new TimerService();
+        var count = 0;
+
+        timer.Schedule(TimeSpan.FromSeconds(1), () => count++);
+        var firstFrame = new GameFrameTime(10, TimeSpan.FromSeconds(0.4), TimeSpan.FromSeconds(0.5));
+        var secondFrame = new GameFrameTime(11, TimeSpan.FromSeconds(0.6), TimeSpan.FromSeconds(0.7));
+
+        timer.Update(in firstFrame);
+        timer.Update(in secondFrame);
+
+        Assert.Equal(11, timer.Tick);
+        Assert.Equal(TimeSpan.FromSeconds(1), timer.Elapsed);
+        Assert.Equal(1, count);
+    }
+
     private sealed class TestOwner;
 
     private sealed class BootState(List<string> calls) : FsmState<TestOwner>

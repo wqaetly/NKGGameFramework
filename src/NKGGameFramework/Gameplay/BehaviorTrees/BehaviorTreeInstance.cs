@@ -1,3 +1,5 @@
+using NKGGameFramework.Core;
+
 namespace NKGGameFramework.Gameplay;
 
 public sealed class BehaviorTreeInstance
@@ -38,6 +40,8 @@ public sealed class BehaviorTreeInstance
     public bool Loop { get; }
 
     public TimeSpan DeltaTime { get; private set; }
+
+    public GameFrameTime Time { get; private set; } = GameFrameTime.Zero;
 
     public bool IsComplete => Status is BehaviorTreeStatus.Succeeded or BehaviorTreeStatus.Failed or BehaviorTreeStatus.Canceled;
 
@@ -80,22 +84,24 @@ public sealed class BehaviorTreeInstance
         PumpExecutionRequests();
     }
 
-    public void Update(TimeSpan deltaTime)
+    public void Update(in GameFrameTime time)
     {
         if (Status != BehaviorTreeStatus.Running)
         {
             return;
         }
 
-        if (deltaTime < TimeSpan.Zero)
-        {
-            deltaTime = TimeSpan.Zero;
-        }
-
-        DeltaTime = deltaTime;
-        TickTimers(deltaTime);
+        Time = time;
+        DeltaTime = time.DeltaTime;
+        TickTimers(time.DeltaTime);
         TickUpdatables();
         PumpExecutionRequests();
+    }
+
+    public void Update(TimeSpan deltaTime)
+    {
+        var time = GameFrameTime.Advance(Time, deltaTime, deltaTime);
+        Update(in time);
     }
 
     internal void EnqueueExecution(Action action)

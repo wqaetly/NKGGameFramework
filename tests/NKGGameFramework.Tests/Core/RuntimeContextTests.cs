@@ -35,12 +35,38 @@ public sealed class RuntimeContextTests
         Assert.Same(module, context.GetModule<IGameplayModule>());
     }
 
+    [Fact]
+    public void UpdatePassesDriverFrameTimeToModules()
+    {
+        using var context = new RuntimeContext();
+        var module = context.RegisterModule(new FrameRecordingModule());
+        var time = new GameFrameTime(
+            42,
+            TimeSpan.FromMilliseconds(16),
+            TimeSpan.FromMilliseconds(20));
+
+        context.Update(in time);
+
+        Assert.Equal(time, context.Time);
+        Assert.Equal(time, module.LastTime);
+    }
+
     private interface IGameplayModule
     {
     }
 
     private sealed class GameplayModule : Module, IGameplayModule
     {
+    }
+
+    private sealed class FrameRecordingModule : Module, IUpdateModule
+    {
+        public GameFrameTime LastTime { get; private set; }
+
+        public void Update(in GameFrameTime time)
+        {
+            LastTime = time;
+        }
     }
 
     private sealed class PassiveModule(List<string> calls) : Module
@@ -78,7 +104,7 @@ public sealed class RuntimeContextTests
             calls.Add($"shutdown:{name}");
         }
 
-        public void Update(double deltaTime, double realDeltaTime)
+        public void Update(in GameFrameTime time)
         {
             calls.Add($"update:{name}");
         }

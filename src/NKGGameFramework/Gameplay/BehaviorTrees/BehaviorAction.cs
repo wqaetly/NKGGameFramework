@@ -1,3 +1,4 @@
+using NKGGameFramework.Core;
 using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Gameplay;
@@ -8,12 +9,12 @@ public readonly struct BehaviorActionContext
         BehaviorTreeInstance tree,
         BehaviorActionNode node,
         BehaviorActionRequest request,
-        TimeSpan deltaTime)
+        in GameFrameTime time)
     {
         Tree = tree;
         Node = node;
         Request = request;
-        DeltaTime = deltaTime;
+        Time = time;
     }
 
     public BehaviorTreeInstance Tree { get; }
@@ -22,7 +23,9 @@ public readonly struct BehaviorActionContext
 
     public BehaviorActionRequest Request { get; }
 
-    public TimeSpan DeltaTime { get; }
+    public GameFrameTime Time { get; }
+
+    public TimeSpan DeltaTime => Time.DeltaTime;
 
     public BehaviorBlackboard Blackboard => Tree.Blackboard;
 

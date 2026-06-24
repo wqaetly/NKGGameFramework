@@ -4,7 +4,7 @@ namespace NKGGameFramework.Sampler;
 
 internal readonly record struct GameConfig(string PlayerName, int MaxFrames);
 
-// 存档 DTO 不需要 attribute，也不需要生成代码；Odin 会按当前策略处理普通 C# 类型。
+// 存档传输对象不需要特性，也不需要生成代码；序列化器会按当前策略处理普通类型。
 internal sealed class GameSnapshot
 {
     public int Frame { get; set; }
@@ -18,8 +18,8 @@ internal sealed class GameSnapshot
     public int Health { get; set; }
 }
 
-// 组件都是纯数据 struct，不持有引擎对象。
-// 行为放到 System 中，数据组合放到 Entity 上。
+// 组件都是纯数据结构，不持有引擎对象。
+// 行为放到系统中，数据组合放到实体上。
 internal struct PlayerTag : IComponent;
 
 internal struct Position(double x, double y) : IComponent

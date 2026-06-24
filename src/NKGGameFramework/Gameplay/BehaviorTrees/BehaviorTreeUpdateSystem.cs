@@ -11,7 +11,7 @@ public sealed class BehaviorTreeUpdateSystem : EcsSystem
 
     public override void Update(Scene scene, in SystemUpdateContext context)
     {
-        var deltaTime = TimeSpan.FromSeconds(Math.Max(0, context.DeltaTime));
+        var time = context.Time;
         var instancesToUpdate = new List<BehaviorTreeInstance>();
 
         scene.Query<BehaviorTreeComponent>().ForEach((ref BehaviorTreeComponent component, Entity _) =>
@@ -21,7 +21,7 @@ public sealed class BehaviorTreeUpdateSystem : EcsSystem
 
         foreach (var instance in instancesToUpdate)
         {
-            instance.Update(deltaTime);
+            instance.Update(in time);
         }
 
         scene.Query<BehaviorTreeComponent>().ForEach((ref BehaviorTreeComponent component, Entity _) =>

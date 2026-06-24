@@ -4,6 +4,8 @@ public interface IRuntimeContext : IGameLoop, IDisposable
 {
     IEventBus Events { get; }
 
+    GameFrameTime Time { get; }
+
     T RegisterModule<T>(T module)
         where T : Module;
 
@@ -30,6 +32,12 @@ public sealed class RuntimeContext : IRuntimeContext
     }
 
     public IEventBus Events { get; }
+
+    public GameFrameTime Time { get; private set; } = GameFrameTime.Zero;
+
+    public IReadOnlyList<Module> Modules => _modules;
+
+    public bool IsDisposed => _disposed;
 
     public T RegisterModule<T>(T module)
         where T : Module
@@ -86,17 +94,24 @@ public sealed class RuntimeContext : IRuntimeContext
         return false;
     }
 
-    public void Update(double deltaTime, double realDeltaTime)
+    public void Update(in GameFrameTime time)
     {
         ThrowIfDisposed();
         RebuildUpdateListIfNeeded();
+        Time = time;
 
         foreach (var module in _updateModules)
         {
-            module.Update(deltaTime, realDeltaTime);
+            module.Update(in time);
         }
 
         Events.DispatchQueuedEvents();
+    }
+
+    public void Update(double deltaTime, double realDeltaTime)
+    {
+        var time = GameFrameTime.Advance(Time, deltaTime, realDeltaTime);
+        Update(in time);
     }
 
     public void Shutdown()

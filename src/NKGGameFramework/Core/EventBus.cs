@@ -386,7 +386,7 @@ public sealed class EventModule(EventBus? eventBus = null) : Module, IUpdateModu
         _eventBus.Clear();
     }
 
-    public void Update(double deltaTime, double realDeltaTime)
+    public void Update(in GameFrameTime time)
     {
         _eventBus.DispatchQueuedEvents();
     }

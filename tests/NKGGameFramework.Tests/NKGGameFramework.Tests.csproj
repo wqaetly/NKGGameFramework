@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NKGGameFramework\NKGGameFramework.csproj" />
+    <ProjectReference Include="..\..\src\NKGGameFramework.Hosting\NKGGameFramework.Hosting.csproj" />
   </ItemGroup>
 
 </Project>

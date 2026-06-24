@@ -1,3 +1,4 @@
+using NKGGameFramework.Core;
 using NKGGameFramework.Gameplay;
 
 namespace NKGGameFramework.Tests.Gameplay;
@@ -121,5 +122,33 @@ public sealed class BehaviorTreeTests
         Assert.Contains(BehaviorActionRequest.Start, requests);
         Assert.Contains(BehaviorActionRequest.Update, requests);
         Assert.Contains(BehaviorActionRequest.Cancel, requests);
+    }
+
+    [Fact]
+    public void Action_update_receives_driver_frame_time()
+    {
+        long? frame = null;
+        TimeSpan? deltaTime = null;
+        var tree = new BehaviorTreeInstance(
+            new BehaviorActionNode(new DelegateBehaviorAction(context =>
+            {
+                if (context.Request == BehaviorActionRequest.Update)
+                {
+                    frame = context.Time.Frame;
+                    deltaTime = context.DeltaTime;
+                    return BehaviorActionStatus.Success;
+                }
+
+                return BehaviorActionStatus.Running;
+            })),
+            new BehaviorActionRegistry());
+        var time = new GameFrameTime(7, TimeSpan.FromSeconds(0.1), TimeSpan.FromSeconds(0.2));
+
+        tree.Start();
+        tree.Update(in time);
+
+        Assert.Equal(BehaviorTreeStatus.Succeeded, tree.Status);
+        Assert.Equal(7, frame);
+        Assert.Equal(TimeSpan.FromSeconds(0.1), deltaTime);
     }
 }

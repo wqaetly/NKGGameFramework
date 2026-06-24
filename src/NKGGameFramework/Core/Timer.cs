@@ -13,6 +13,12 @@ public sealed class ManualGameClock : IGameClock
 
     public TimeSpan Elapsed { get; private set; }
 
+    public GameFrameTime AdvanceFrame(TimeSpan delta, TimeSpan? realDelta = null)
+    {
+        Advance(delta);
+        return new GameFrameTime(Tick, delta, realDelta ?? delta);
+    }
+
     public void Advance(TimeSpan delta)
     {
         if (delta < TimeSpan.Zero)
@@ -30,7 +36,11 @@ public sealed class TimerService : IUpdateModule
     private readonly PriorityQueue<TimerEntry, TimeSpan> _timers = new();
     private long _nextId;
 
+    public long Tick { get; private set; }
+
     public TimeSpan Elapsed { get; private set; }
+
+    public GameFrameTime Time { get; private set; } = GameFrameTime.Zero;
 
     public long Schedule(TimeSpan delay, Action callback, bool repeat = false)
     {
@@ -46,14 +56,11 @@ public sealed class TimerService : IUpdateModule
         return timer.Id;
     }
 
-    public void Update(double deltaTime, double realDeltaTime)
+    public void Update(in GameFrameTime time)
     {
-        if (deltaTime < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(deltaTime));
-        }
-
-        Elapsed += TimeSpan.FromSeconds(deltaTime);
+        Time = time;
+        Tick = time.Frame;
+        Elapsed += time.DeltaTime;
 
         while (_timers.TryPeek(out var timer, out var dueTime) && dueTime <= Elapsed)
         {
@@ -68,6 +75,11 @@ public sealed class TimerService : IUpdateModule
         }
     }
 
+    public void Update(double deltaTime, double realDeltaTime)
+    {
+        var time = GameFrameTime.Advance(Time, deltaTime, realDeltaTime);
+        Update(in time);
+    }
+
     private sealed record TimerEntry(long Id, TimeSpan DueTime, TimeSpan Interval, bool Repeat, Action Callback);
 }
-

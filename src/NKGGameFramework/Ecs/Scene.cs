@@ -28,7 +28,40 @@ public sealed class Scene : IDisposable
 
     public SystemGroup Systems { get; }
 
+    public GameFrameTime Time { get; private set; } = GameFrameTime.Zero;
+
     public int EntityCount { get; private set; }
+
+    public IEnumerable<Entity> Entities
+    {
+        get
+        {
+            for (var id = 1; id < _alive.Length; id++)
+            {
+                if (_alive[id])
+                {
+                    yield return new Entity(this, id, _versions[id]);
+                }
+            }
+        }
+    }
+
+    public IReadOnlyList<EcsComponentStoreDebugView> ComponentStores
+    {
+        get
+        {
+            var stores = new List<EcsComponentStoreDebugView>(_componentStores.Count);
+            foreach (var store in _componentStores.Values)
+            {
+                stores.Add(new EcsComponentStoreDebugView(
+                    store.ComponentType,
+                    store.Count,
+                    store.EntityIds.ToArray()));
+            }
+
+            return stores;
+        }
+    }
 
     internal bool IsQueryActive => _queryDepth > 0;
 
@@ -90,10 +123,56 @@ public sealed class Scene : IDisposable
         return commandBuffer;
     }
 
+    public IReadOnlyList<EcsComponentDebugView> GetComponents(Entity entity)
+    {
+        EnsureEntity(entity);
+
+        var components = new List<EcsComponentDebugView>();
+        foreach (var store in _componentStores.Values)
+        {
+            if (store.Has(entity.Id.Value))
+            {
+                components.Add(new EcsComponentDebugView(
+                    store.ComponentType,
+                    store.GetBoxed(entity.Id.Value)));
+            }
+        }
+
+        return components;
+    }
+
+    public void SetComponent(Entity entity, Type componentType, object component)
+    {
+        ArgumentNullException.ThrowIfNull(componentType);
+        ArgumentNullException.ThrowIfNull(component);
+
+        if (!typeof(IComponent).IsAssignableFrom(componentType) || !componentType.IsValueType)
+        {
+            throw new ArgumentException($"Type '{componentType.FullName}' is not a value-type ECS component.", nameof(componentType));
+        }
+
+        if (!componentType.IsInstanceOfType(component))
+        {
+            throw new ArgumentException($"Component value type '{component.GetType().FullName}' does not match '{componentType.FullName}'.", nameof(component));
+        }
+
+        var method = typeof(Scene)
+            .GetMethod(nameof(SetComponentByRuntimeType), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .MakeGenericMethod(componentType);
+        method.Invoke(this, [entity, component]);
+    }
+
+    public void Update(in GameFrameTime time)
+    {
+        Time = time;
+        Systems.Update(this, in time);
+        Events.DispatchQueuedEvents();
+    }
+
     public void Update(double deltaTime, double realDeltaTime)
     {
-        Systems.Update(this, deltaTime, realDeltaTime);
-        Events.DispatchQueuedEvents();
+        var time = GameFrameTime.Advance(Time, deltaTime, realDeltaTime);
+        Update(in time);
     }
 
     public void Dispose()
@@ -113,7 +192,7 @@ public sealed class Scene : IDisposable
         return id > 0 && id < _alive.Length && _alive[id] && _versions[id] == version;
     }
 
-    internal bool TryGetEntity(int id, int version, out Entity entity)
+    public bool TryGetEntity(int id, int version, out Entity entity)
     {
         if (IsAlive(id, version))
         {
@@ -125,7 +204,7 @@ public sealed class Scene : IDisposable
         return false;
     }
 
-    internal bool TryGetEntity(int id, out Entity entity)
+    public bool TryGetEntity(int id, out Entity entity)
     {
         if (id > 0 && id < _alive.Length && _alive[id])
         {
@@ -235,6 +314,12 @@ public sealed class Scene : IDisposable
         store = new ComponentStore<TComponent>();
         _componentStores.Add(typeof(TComponent), store);
         return store;
+    }
+
+    private void SetComponentByRuntimeType<TComponent>(Entity entity, object component)
+        where TComponent : struct, IComponent
+    {
+        SetComponent(entity, (TComponent)component);
     }
 
     private void EnsureEntity(Entity entity)

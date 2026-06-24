@@ -1,3 +1,5 @@
+using NKGGameFramework.Core;
+
 namespace NKGGameFramework.Ecs;
 
 public sealed class World : IDisposable
@@ -11,6 +13,8 @@ public sealed class World : IDisposable
     }
 
     public string Name { get; }
+
+    public GameFrameTime Time { get; private set; } = GameFrameTime.Zero;
 
     public IReadOnlyCollection<Scene> Scenes => _scenes.Values;
 
@@ -33,12 +37,20 @@ public sealed class World : IDisposable
         return _scenes.TryGetValue(name, out scene);
     }
 
-    public void Update(double deltaTime, double realDeltaTime)
+    public void Update(in GameFrameTime time)
     {
+        Time = time;
+
         foreach (var scene in _scenes.Values)
         {
-            scene.Update(deltaTime, realDeltaTime);
+            scene.Update(in time);
         }
+    }
+
+    public void Update(double deltaTime, double realDeltaTime)
+    {
+        var time = GameFrameTime.Advance(Time, deltaTime, realDeltaTime);
+        Update(in time);
     }
 
     public void Dispose()

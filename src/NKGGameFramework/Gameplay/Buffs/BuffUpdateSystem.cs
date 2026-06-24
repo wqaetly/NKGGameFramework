@@ -21,7 +21,7 @@ public sealed class BuffUpdateSystem : EcsSystem
 
     public override void Update(Scene scene, in SystemUpdateContext context)
     {
-        var deltaTime = TimeSpan.FromSeconds(Math.Max(0, context.DeltaTime));
+        var time = context.Time;
         var behaviorTreesToStart = new List<BehaviorTreeInstance>();
         var behaviorTreesToUpdate = new List<BehaviorTreeInstance>();
         var behaviorTreesToCancel = new List<BehaviorTreeInstance>();
@@ -33,7 +33,7 @@ public sealed class BuffUpdateSystem : EcsSystem
             {
                 var buff = buffs[i];
                 var effect = _effects.Resolve(buff.Definition.EffectKey);
-                var effectContext = new BuffEffectContext(scene, entity, buff, deltaTime);
+                var effectContext = new BuffEffectContext(scene, entity, buff, in time);
 
                 ProcessBuff(
                     scene,
@@ -48,6 +48,8 @@ public sealed class BuffUpdateSystem : EcsSystem
                     effect.OnRemove(effectContext);
                     if (buff.ExecutionTreeInstance is { } behaviorTree)
                     {
+                        behaviorTreesToStart.Remove(behaviorTree);
+                        behaviorTreesToUpdate.Remove(behaviorTree);
                         behaviorTreesToCancel.Add(behaviorTree);
                     }
 
@@ -70,7 +72,7 @@ public sealed class BuffUpdateSystem : EcsSystem
 
         foreach (var behaviorTree in behaviorTreesToUpdate)
         {
-            behaviorTree.Update(deltaTime);
+            behaviorTree.Update(in time);
         }
 
         foreach (var behaviorTree in behaviorTreesToCancel)
@@ -122,12 +124,15 @@ public sealed class BuffUpdateSystem : EcsSystem
         if (buff.State is BuffState.Running or BuffState.Forever)
         {
             effect.OnUpdate(context);
+            buff.Tick(context.DeltaTime);
+
             if (buff.ExecutionTreeInstance is { } behaviorTree)
             {
-                behaviorTreesToUpdate.Add(behaviorTree);
+                if (buff.State is BuffState.Running or BuffState.Forever)
+                {
+                    behaviorTreesToUpdate.Add(behaviorTree);
+                }
             }
-
-            buff.Tick(context.DeltaTime);
         }
     }
 

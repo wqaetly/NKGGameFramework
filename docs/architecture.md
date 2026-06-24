@@ -13,7 +13,10 @@ src/
     Runtime/
     Async/
     Serialization/
-    Hosting/Server/
+  NKGGameFramework.Hosting/
+    Server/
+    Diagnostics/
+  NKGGameFramework.Hosting.Web/
   NKGGameFramework.Adapter.Unity/
   NKGGameFramework.Adapter.Godot/
 
@@ -37,8 +40,14 @@ NKGGameFramework
   ^
   |
 Adapter.Unity / Adapter.Godot
+  |
+  v
+Engine runtime packages
 
-NKGGameFramework.Tests -> NKGGameFramework
+NKGGameFramework.Hosting -> NKGGameFramework + Microsoft.AspNetCore.App
+NKGGameFramework.Hosting.Web -> NKGGameFramework.Hosting HTTP endpoints
+
+NKGGameFramework.Tests -> NKGGameFramework + NKGGameFramework.Hosting
 ```
 
 Rules:
@@ -47,7 +56,10 @@ Rules:
 - `NKGGameFramework` 直接引用 Odin standalone Net10 项目，作为项目通用序列化底座。
 - `NKGGameFramework` 直接引用 UniTask NuGet 包，作为项目通用 async/await awaitable 底座。
 - `Adapter.Unity` / `Adapter.Godot` 引用主包，主包不反向引用 Adapter。
+- `NKGGameFramework.Hosting` 是可选 ASP.NET Core 宿主包，用于 Server tick 和 Web Debug Inspector，不进入主包。
+- `NKGGameFramework.Hosting.Web` 是 React/Vite 调试面板源码，通过 `/_nkg/debug/*` HTTP API 读取快照。
 - Unity/Godot/YooAsset/HybridCLR/Luban 等引擎或生成管线依赖只能出现在 Adapter 的实际引擎实现包中，不能出现在主包。
+- ASP.NET Core、React、Vite 等宿主和工具链依赖只能出现在 Hosting/Web 包中，不能出现在主包。
 
 ## Core
 
@@ -74,6 +86,19 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 - System 生命周期：`OnCreate`、`OnStartRunning`、`Update`、`OnStopRunning`、`OnDestroy`。
 - 组件变化回调：`IComponentAddedSystem<T>`、`IComponentUpdatedSystem<T>`、`IComponentRemovedSystem<T>`，用于在组件增删改时派生逻辑或补全组合。
 - 生命周期事件：实体创建销毁、组件增删改会发布到 Scene 级 `EventBus`。
+- 调试枚举：`Scene.Entities`、`Scene.ComponentStores` 和 `Scene.GetComponents` 提供只读 DebugView，允许 Hosting 快照展示所有实体、组件类型和组件值；这些 API 面向调试工具，不改变 ECS 热路径仍以泛型组件存储为主的设计。
+
+## Hosting
+
+Hosting 层提供不绑定具体游戏引擎的宿主工具：
+
+- `ServerGameLoop`：驱动 `RuntimeContext.Update` 和 `World.Update`，方便 Server 或工具进程统一 tick。
+- `GameDebugSession`：注册一个或多个 `RuntimeContext` / `World`。
+- `GameDebugSnapshotProvider`：从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件原始值序列化为 Odin JSON payload。
+- `GameDebugMutationHandler`：接收某个 entity/component 的 Odin JSON payload，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
+- `MapNkgGameDebugEndpoints`：以 ASP.NET Core Minimal API 暴露 `/_nkg/debug/health`、`/_nkg/debug/snapshot` 和 `/_nkg/debug/mutations`。
+
+React/Vite 面板放在 `NKGGameFramework.Hosting.Web`，保持前端依赖与 .NET 核心编译解耦；没有 Node 环境时仍可构建和测试核心框架与 Hosting 包。
 
 ## Gameplay
 
@@ -125,7 +150,8 @@ var unit = scene.CreateEntity()
     .Add(new Position(0, 0))
     .Add(new Velocity(2, 3));
 
-scene.Update(0.5, 0.5);
+var frameTime = GameFrameTime.FromSeconds(0.5, 0.5, frame: 1);
+scene.Update(in frameTime);
 ```
 
 ## Runtime

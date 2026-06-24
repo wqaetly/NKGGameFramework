@@ -10,3 +10,7 @@ coverage/
 .dotnet10/
 .dotnet-install.ps1
 references/
+node_modules/
+dist/
+*.tsbuildinfo
+*.log

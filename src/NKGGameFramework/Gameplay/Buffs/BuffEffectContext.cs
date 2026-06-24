@@ -5,12 +5,12 @@ namespace NKGGameFramework.Gameplay;
 
 public readonly struct BuffEffectContext
 {
-    internal BuffEffectContext(Scene scene, Entity target, BuffInstance buff, TimeSpan deltaTime)
+    internal BuffEffectContext(Scene scene, Entity target, BuffInstance buff, in GameFrameTime time)
     {
         Scene = scene;
         Target = target;
         Buff = buff;
-        DeltaTime = deltaTime;
+        Time = time;
     }
 
     public Scene Scene { get; }
@@ -21,7 +21,9 @@ public readonly struct BuffEffectContext
 
     public BuffInstance Buff { get; }
 
-    public TimeSpan DeltaTime { get; }
+    public GameFrameTime Time { get; }
+
+    public TimeSpan DeltaTime => Time.DeltaTime;
 
     public bool TryGetSource(out Entity source)
     {

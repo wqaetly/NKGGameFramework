@@ -38,6 +38,8 @@ public sealed class Fsm<TOwner>
 
     public FsmState<TOwner>? CurrentState => _currentState;
 
+    public IReadOnlyCollection<FsmState<TOwner>> States => _states.Values;
+
     public double CurrentStateTime { get; private set; }
 
     public bool IsRunning => _currentState is not null;
@@ -111,15 +113,21 @@ public sealed class Fsm<TOwner>
         nextState.Enter(this);
     }
 
-    public void Update(double deltaTime, double realDeltaTime)
+    public void Update(in GameFrameTime time)
     {
         if (_currentState is null)
         {
             return;
         }
 
-        CurrentStateTime += deltaTime;
-        _currentState.Update(this, deltaTime, realDeltaTime);
+        CurrentStateTime += time.DeltaSeconds;
+        _currentState.Update(this, in time);
+    }
+
+    public void Update(double deltaTime, double realDeltaTime)
+    {
+        var time = GameFrameTime.FromSeconds(deltaTime, realDeltaTime);
+        Update(in time);
     }
 
     public void Shutdown()
@@ -150,9 +158,9 @@ public abstract class FsmState<TOwner>
         OnEnter(fsm);
     }
 
-    internal void Update(Fsm<TOwner> fsm, double deltaTime, double realDeltaTime)
+    internal void Update(Fsm<TOwner> fsm, in GameFrameTime time)
     {
-        OnUpdate(fsm, deltaTime, realDeltaTime);
+        OnUpdate(fsm, in time);
     }
 
     internal void Leave(Fsm<TOwner> fsm, bool isShutdown)
@@ -171,6 +179,11 @@ public abstract class FsmState<TOwner>
 
     protected virtual void OnEnter(Fsm<TOwner> fsm)
     {
+    }
+
+    protected virtual void OnUpdate(Fsm<TOwner> fsm, in GameFrameTime time)
+    {
+        OnUpdate(fsm, time.DeltaSeconds, time.RealDeltaSeconds);
     }
 
     protected virtual void OnUpdate(Fsm<TOwner> fsm, double deltaTime, double realDeltaTime)

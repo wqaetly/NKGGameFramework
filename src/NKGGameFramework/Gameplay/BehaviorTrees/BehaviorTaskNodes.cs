@@ -107,7 +107,8 @@ public sealed class BehaviorActionNode : BehaviorNode, IBehaviorUpdatable
 
     protected override void OnStart()
     {
-        HandleResult(ResolveAction().Execute(new BehaviorActionContext(Tree, this, BehaviorActionRequest.Start, Tree.DeltaTime)));
+        var time = Tree.Time;
+        HandleResult(ResolveAction().Execute(new BehaviorActionContext(Tree, this, BehaviorActionRequest.Start, in time)));
     }
 
     protected override void OnCancel()
@@ -118,7 +119,8 @@ public sealed class BehaviorActionNode : BehaviorNode, IBehaviorUpdatable
             Tree.RemoveUpdatable(this);
         }
 
-        var result = ResolveAction().Execute(new BehaviorActionContext(Tree, this, BehaviorActionRequest.Cancel, Tree.DeltaTime));
+        var time = Tree.Time;
+        var result = ResolveAction().Execute(new BehaviorActionContext(Tree, this, BehaviorActionRequest.Cancel, in time));
         Stopped(result == BehaviorActionStatus.Success);
     }
 
@@ -129,7 +131,8 @@ public sealed class BehaviorActionNode : BehaviorNode, IBehaviorUpdatable
             return;
         }
 
-        HandleResult(ResolveAction().Execute(new BehaviorActionContext(Tree, this, BehaviorActionRequest.Update, Tree.DeltaTime)));
+        var time = Tree.Time;
+        HandleResult(ResolveAction().Execute(new BehaviorActionContext(Tree, this, BehaviorActionRequest.Update, in time)));
     }
 
     private void HandleResult(BehaviorActionStatus status)
@@ -214,7 +217,8 @@ public sealed class BehaviorServiceNode : BehaviorDecoratorNode
 
     private void TickService()
     {
-        _service.Execute(new BehaviorActionContext(Tree, new BehaviorActionNode(_service), BehaviorActionRequest.Update, Tree.DeltaTime));
+        var time = Tree.Time;
+        _service.Execute(new BehaviorActionContext(Tree, new BehaviorActionNode(_service), BehaviorActionRequest.Update, in time));
     }
 }
 

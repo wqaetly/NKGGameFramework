@@ -2,9 +2,13 @@ namespace NKGGameFramework.Core;
 
 public interface IProcedureModule
 {
+    bool IsProcedureInitialized { get; }
+
     ProcedureBase CurrentProcedure { get; }
 
     double CurrentProcedureTime { get; }
+
+    IReadOnlyCollection<ProcedureBase> Procedures { get; }
 
     void Initialize(params ProcedureBase[] procedures);
 
@@ -24,6 +28,8 @@ public interface IProcedureModule
     ProcedureBase GetProcedure(Type procedureType);
 
     bool RestartProcedure(params ProcedureBase[] procedures);
+
+    bool TryGetCurrentProcedure(out ProcedureBase? procedure);
 }
 
 public abstract class ProcedureBase : FsmState<IProcedureModule>
@@ -40,6 +46,8 @@ public sealed class ProcedureModule : Module, IUpdateModule, IProcedureModule
     private Fsm<IProcedureModule>? _procedureFsm;
 
     public override int Priority => -2;
+
+    public bool IsProcedureInitialized => _procedureFsm is not null;
 
     public ProcedureBase CurrentProcedure
     {
@@ -58,6 +66,10 @@ public sealed class ProcedureModule : Module, IUpdateModule, IProcedureModule
             return _procedureFsm!.CurrentStateTime;
         }
     }
+
+    public IReadOnlyCollection<ProcedureBase> Procedures => _procedureFsm is null
+        ? Array.Empty<ProcedureBase>()
+        : _procedureFsm.States.Cast<ProcedureBase>().ToArray();
 
     public void Initialize(params ProcedureBase[] procedures)
     {
@@ -125,9 +137,21 @@ public sealed class ProcedureModule : Module, IUpdateModule, IProcedureModule
         return true;
     }
 
-    public void Update(double deltaTime, double realDeltaTime)
+    public bool TryGetCurrentProcedure(out ProcedureBase? procedure)
     {
-        _procedureFsm?.Update(deltaTime, realDeltaTime);
+        if (_procedureFsm?.CurrentState is ProcedureBase current)
+        {
+            procedure = current;
+            return true;
+        }
+
+        procedure = null;
+        return false;
+    }
+
+    public void Update(in GameFrameTime time)
+    {
+        _procedureFsm?.Update(in time);
     }
 
     protected override void OnShutdown()

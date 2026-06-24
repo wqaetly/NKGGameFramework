@@ -1,3 +1,5 @@
+using NKGGameFramework.Core;
+
 namespace NKGGameFramework.Ecs;
 
 public interface ISystem
@@ -9,7 +11,33 @@ public interface ISystem
     void Update(Scene scene, in SystemUpdateContext context);
 }
 
-public readonly record struct SystemUpdateContext(double DeltaTime, double RealDeltaTime, EcsCommandBuffer Commands);
+public readonly record struct SystemUpdateContext
+{
+    public SystemUpdateContext(GameFrameTime time, EcsCommandBuffer commands)
+    {
+        Time = time;
+        Commands = commands;
+    }
+
+    public SystemUpdateContext(double deltaTime, double realDeltaTime, EcsCommandBuffer commands)
+        : this(GameFrameTime.FromSeconds(deltaTime, realDeltaTime), commands)
+    {
+    }
+
+    public GameFrameTime Time { get; }
+
+    public EcsCommandBuffer Commands { get; }
+
+    public long Frame => Time.Frame;
+
+    public double DeltaTime => Time.DeltaSeconds;
+
+    public double RealDeltaTime => Time.RealDeltaSeconds;
+
+    public TimeSpan DeltaTimeSpan => Time.DeltaTime;
+
+    public TimeSpan RealDeltaTimeSpan => Time.RealDeltaTime;
+}
 
 public interface ISystemLifecycle
 {
@@ -142,7 +170,7 @@ public sealed class SystemGroup : IDisposable
         NotifyCreated(system);
     }
 
-    public void Update(Scene scene, double deltaTime, double realDeltaTime)
+    public void Update(Scene scene, in GameFrameTime time)
     {
         ThrowIfDisposed();
         EnsureScene(scene);
@@ -159,10 +187,16 @@ public sealed class SystemGroup : IDisposable
             StartIfNeeded(system);
 
             using var commands = scene.CreateCommandBuffer();
-            var context = new SystemUpdateContext(deltaTime, realDeltaTime, commands);
+            var context = new SystemUpdateContext(time, commands);
             system.Update(scene, in context);
             commands.Playback();
         }
+    }
+
+    public void Update(Scene scene, double deltaTime, double realDeltaTime)
+    {
+        var time = GameFrameTime.FromSeconds(deltaTime, realDeltaTime);
+        Update(scene, in time);
     }
 
     internal void NotifyComponentAdded<TComponent>(Entity entity, ref TComponent component)

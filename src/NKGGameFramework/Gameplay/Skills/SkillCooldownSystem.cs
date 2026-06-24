@@ -11,7 +11,7 @@ public sealed class SkillCooldownSystem : EcsSystem
 
     public override void Update(Scene scene, in SystemUpdateContext context)
     {
-        var deltaTime = TimeSpan.FromSeconds(Math.Max(0, context.DeltaTime));
+        var deltaTime = context.Time.DeltaTime;
 
         scene.Query<SkillBookComponent>().ForEach((ref SkillBookComponent book, Entity _) =>
         {

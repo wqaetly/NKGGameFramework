@@ -115,7 +115,7 @@ public sealed class EventBusTests
 
     private sealed class EventRecordingModule(List<string> calls) : Module, IUpdateModule
     {
-        public void Update(double deltaTime, double realDeltaTime)
+        public void Update(in GameFrameTime time)
         {
             calls.Add("module");
         }

@@ -175,4 +175,42 @@ public sealed class BuffSystemTests
 
         Assert.Equal(["delayed_mark:Start"], calls);
     }
+
+    [Fact]
+    public void Buff_execution_tree_does_not_run_after_buff_expires_in_same_frame()
+    {
+        var calls = new List<string>();
+        var actions = new BehaviorActionRegistry()
+            .Register("record", new DelegateBehaviorAction(context =>
+            {
+                calls.Add($"{context.BuffInstance?.Definition.Id}:{context.Request}");
+                return BehaviorActionStatus.Success;
+            }));
+
+        using var scene = new Scene("battle");
+        scene.Systems.Add(new BuffUpdateSystem(behaviorActions: actions));
+
+        var source = scene.CreateEntity();
+        var target = scene.CreateEntity();
+        var definition = new BuffDefinition
+        {
+            Id = "short_burn",
+            Duration = TimeSpan.FromSeconds(0.1),
+            ExecutionTree = new BehaviorTreeDefinition
+            {
+                Root = new BehaviorNodeDefinition
+                {
+                    Type = BehaviorNodeTypes.Action,
+                    ActionKey = "record",
+                },
+            },
+        };
+
+        BuffManager.Apply(source, target, definition);
+
+        scene.Update(0.1, 0.1);
+
+        Assert.Empty(calls);
+        Assert.False(BuffManager.Has(target, "short_burn"));
+    }
 }

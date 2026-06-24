@@ -41,6 +41,11 @@ public abstract class Module
 
 public interface IUpdateModule
 {
-    void Update(double deltaTime, double realDeltaTime);
-}
+    void Update(in GameFrameTime time);
 
+    void Update(double deltaTime, double realDeltaTime)
+    {
+        var time = GameFrameTime.FromSeconds(deltaTime, realDeltaTime);
+        Update(in time);
+    }
+}

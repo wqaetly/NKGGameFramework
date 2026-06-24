@@ -13,6 +13,8 @@ internal interface IComponentStore
     bool Remove(int entityId);
 
     bool RemoveAndNotify(Scene scene, Entity entity);
+
+    object GetBoxed(int entityId);
 }
 
 internal sealed class ComponentStore<TComponent> : IComponentStore
@@ -42,6 +44,11 @@ internal sealed class ComponentStore<TComponent> : IComponentStore
         }
 
         return ref _components[entityId];
+    }
+
+    public object GetBoxed(int entityId)
+    {
+        return Get(entityId);
     }
 
     public void Set(int entityId, in TComponent component)
