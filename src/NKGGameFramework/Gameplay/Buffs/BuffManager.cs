@@ -38,7 +38,7 @@ public static class BuffManager
 
         var actualTarget = definition.TargetKind == BuffTargetKind.Self ? source : target;
         var sourceTags = GameplayTagUtility.GetOwnedTags(source);
-        var targetTags = GameplayTagUtility.GetOwnedTags(actualTarget);
+        var targetTags = source == actualTarget ? sourceTags : GameplayTagUtility.GetOwnedTags(actualTarget);
         if (!GameplayTagUtility.MeetsRequirements(
                 sourceTags,
                 definition.RequiredSourceTags,

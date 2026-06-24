@@ -5,18 +5,26 @@ namespace NKGGameFramework.Hosting.Diagnostics;
 
 public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentValueSerializer
 {
-    public ComponentValueDebugSnapshot Serialize(object value)
+    public ComponentValueDebugSnapshot Serialize(
+        object value,
+        GameDebugComponentValueSerializationOptions? options = null)
     {
+        options ??= GameDebugComponentValueSerializationOptions.Default;
+
         try
         {
             return new ComponentValueDebugSnapshot(
                 "odin-json",
-                Encoding.UTF8.GetString(SerializationUtility.SerializeValueWeak(
-                    value,
-                    DataFormat.JSON,
-                    CreateSerializationContext())),
+                options.IncludePayload
+                    ? Encoding.UTF8.GetString(SerializationUtility.SerializeValueWeak(
+                        value,
+                        DataFormat.JSON,
+                        CreateSerializationContext()))
+                    : null,
                 Error: null,
-                GameDebugStructuredComponentValue.Capture(value));
+                options.IncludeStructured
+                    ? GameDebugStructuredComponentValue.Capture(value)
+                    : null);
         }
         catch (Exception exception)
         {

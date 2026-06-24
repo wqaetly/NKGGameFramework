@@ -42,8 +42,12 @@ public static class GameDebugHostingExtensions
             capturedAt = DateTimeOffset.UtcNow,
         }, GameDebugJson.Options));
 
-        group.MapGet("/snapshot", (IGameDebugSnapshotProvider snapshots) =>
-            Results.Json(snapshots.Capture(), GameDebugJson.Options));
+        group.MapGet("/snapshot", (
+            HttpContext httpContext,
+            IGameDebugSnapshotProvider snapshots) =>
+            Results.Json(
+                snapshots.Capture(CreateSnapshotCaptureOptions(httpContext.Request.Query)),
+                GameDebugJson.Options));
 
         group.MapGet("/control", (GameDebugController control) =>
             Results.Json(control.GetState(), GameDebugJson.Options));
@@ -59,5 +63,67 @@ public static class GameDebugHostingExtensions
             Results.Json(mutations.Execute(request), GameDebugJson.Options));
 
         return endpoints;
+    }
+
+    private static GameDebugSnapshotCaptureOptions CreateSnapshotCaptureOptions(IQueryCollection query)
+    {
+        return new GameDebugSnapshotCaptureOptions
+        {
+            WorldName = GetString(query, "world") ?? GetString(query, "worldName"),
+            SceneName = GetString(query, "scene") ?? GetString(query, "sceneName"),
+            EntityId = GetInt(query, "entityId"),
+            EntityOffset = Math.Max(0, GetInt(query, "entityOffset") ?? GetInt(query, "offset") ?? 0),
+            EntityLimit = NormalizeLimit(GetInt(query, "entityLimit") ?? GetInt(query, "limit")),
+            IncludeComponentPayloads = GetBool(query, "includePayload")
+                ?? GetBool(query, "includeComponentPayloads")
+                ?? true,
+            IncludeStructuredComponentValues = GetBool(query, "includeStructured")
+                ?? GetBool(query, "includeStructuredComponentValues")
+                ?? true,
+        };
+    }
+
+    private static string? GetString(IQueryCollection query, string key)
+    {
+        if (!query.TryGetValue(key, out var value))
+        {
+            return null;
+        }
+
+        var text = value.ToString();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static int? GetInt(IQueryCollection query, string key)
+    {
+        return query.TryGetValue(key, out var value) && int.TryParse(value.ToString(), out var result)
+            ? result
+            : null;
+    }
+
+    private static int? NormalizeLimit(int? value)
+    {
+        return value is > 0 ? value : null;
+    }
+
+    private static bool? GetBool(IQueryCollection query, string key)
+    {
+        if (!query.TryGetValue(key, out var value))
+        {
+            return null;
+        }
+
+        var text = value.ToString();
+        if (bool.TryParse(text, out var result))
+        {
+            return result;
+        }
+
+        return text.Trim() switch
+        {
+            "1" => true,
+            "0" => false,
+            _ => null,
+        };
     }
 }

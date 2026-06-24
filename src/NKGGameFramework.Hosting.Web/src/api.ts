@@ -9,8 +9,30 @@ import type {
 
 const apiBase = import.meta.env.VITE_NKG_DEBUG_API_BASE ?? '';
 
-export async function fetchDebugSnapshot(signal?: AbortSignal): Promise<GameDebugSnapshot> {
-  const response = await fetch(`${apiBase}/_nkg/debug/snapshot`, {
+export interface DebugSnapshotRequestOptions {
+  worldName?: string;
+  sceneName?: string;
+  entityId?: number;
+  entityOffset?: number;
+  entityLimit?: number;
+  includePayload?: boolean;
+  includeStructured?: boolean;
+}
+
+export async function fetchDebugSnapshot(
+  signal?: AbortSignal,
+  options?: DebugSnapshotRequestOptions,
+): Promise<GameDebugSnapshot> {
+  const url = new URL(`${apiBase}/_nkg/debug/snapshot`, window.location.origin);
+  appendQuery(url, 'worldName', options?.worldName);
+  appendQuery(url, 'sceneName', options?.sceneName);
+  appendQuery(url, 'entityId', options?.entityId);
+  appendQuery(url, 'entityOffset', options?.entityOffset);
+  appendQuery(url, 'entityLimit', options?.entityLimit);
+  appendQuery(url, 'includePayload', options?.includePayload);
+  appendQuery(url, 'includeStructured', options?.includeStructured);
+
+  const response = await fetch(toFetchUrl(url), {
     signal,
     headers: {
       Accept: 'application/json',
@@ -22,6 +44,16 @@ export async function fetchDebugSnapshot(signal?: AbortSignal): Promise<GameDebu
   }
 
   return response.json();
+}
+
+function appendQuery(url: URL, key: string, value: string | number | boolean | undefined) {
+  if (value !== undefined) {
+    url.searchParams.set(key, String(value));
+  }
+}
+
+function toFetchUrl(url: URL) {
+  return apiBase ? url.toString() : `${url.pathname}${url.search}`;
 }
 
 export async function postDebugMutation(

@@ -134,6 +134,63 @@ public sealed class BehaviorTreeTests
     }
 
     [Fact]
+    public void Completed_default_blackboard_releases_values_to_scene_pool()
+    {
+        using var scene = new Scene("behavior");
+        var context = new BehaviorTreeContext(scene);
+        BehaviorBlackboardValue? firstValue = null;
+        var tree = new BehaviorTreeInstance(
+            new BehaviorActionNode(new DelegateBehaviorAction(actionContext =>
+            {
+                actionContext.Tree.Blackboard.Set("count", 1);
+                firstValue = actionContext.Tree.Blackboard.Values["count"];
+                return BehaviorActionStatus.Success;
+            })),
+            new BehaviorActionRegistry(),
+            context);
+
+        tree.Start();
+
+        Assert.Equal(BehaviorTreeStatus.Succeeded, tree.Status);
+        Assert.Empty(tree.Blackboard.Values);
+
+        var second = new BehaviorTreeInstance(
+            new BehaviorWaitUntilStoppedNode(),
+            new BehaviorActionRegistry(),
+            context);
+        second.Blackboard.Set("count", 2);
+
+        Assert.NotNull(firstValue);
+        Assert.Same(firstValue, second.Blackboard.Values["count"]);
+    }
+
+    [Fact]
+    public void Completed_external_blackboard_remains_available()
+    {
+        using var scene = new Scene("behavior");
+        var blackboard = new BehaviorBlackboard(scene);
+        var tree = new BehaviorTreeInstance(
+            new BehaviorActionNode(new DelegateBehaviorAction(actionContext =>
+            {
+                actionContext.Tree.Blackboard.Set("count", 1);
+                return BehaviorActionStatus.Success;
+            })),
+            new BehaviorActionRegistry(),
+            blackboard: blackboard);
+
+        tree.Start();
+
+        Assert.Equal(BehaviorTreeStatus.Succeeded, tree.Status);
+        Assert.True(blackboard.TryGet<int>("count", out var value));
+        Assert.Equal(1, value);
+
+        blackboard.Set("next", 2);
+
+        Assert.True(blackboard.TryGet<int>("next", out var next));
+        Assert.Equal(2, next);
+    }
+
+    [Fact]
     public void Default_blackboard_requires_scene_context()
     {
         Assert.Throws<InvalidOperationException>(() => new BehaviorTreeInstance(

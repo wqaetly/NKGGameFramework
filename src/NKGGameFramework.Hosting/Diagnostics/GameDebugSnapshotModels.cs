@@ -5,6 +5,34 @@ public sealed record GameDebugSnapshot(
     IReadOnlyList<RuntimeContextDebugSnapshot> Runtimes,
     IReadOnlyList<WorldDebugSnapshot> Worlds);
 
+public sealed record GameDebugSnapshotCaptureOptions
+{
+    public static GameDebugSnapshotCaptureOptions Default { get; } = new();
+
+    public string? WorldName { get; init; }
+
+    public string? SceneName { get; init; }
+
+    public int? EntityId { get; init; }
+
+    public int EntityOffset { get; init; }
+
+    public int? EntityLimit { get; init; }
+
+    public bool IncludeComponentPayloads { get; init; } = true;
+
+    public bool IncludeStructuredComponentValues { get; init; } = true;
+}
+
+public sealed record GameDebugComponentValueSerializationOptions
+{
+    public static GameDebugComponentValueSerializationOptions Default { get; } = new();
+
+    public bool IncludePayload { get; init; } = true;
+
+    public bool IncludeStructured { get; init; } = true;
+}
+
 public sealed record RuntimeContextDebugSnapshot(
     int Index,
     bool IsDisposed,

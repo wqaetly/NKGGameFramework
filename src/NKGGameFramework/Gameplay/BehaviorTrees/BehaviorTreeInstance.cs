@@ -2,13 +2,17 @@ using NKGGameFramework.Core;
 
 namespace NKGGameFramework.Gameplay;
 
-public sealed class BehaviorTreeInstance
+public sealed class BehaviorTreeInstance : IDisposable
 {
     private readonly Queue<Action> _executionRequests = [];
     private readonly List<BehaviorTimer> _timers = [];
     private readonly HashSet<IBehaviorUpdatable> _updatables = [];
+    private readonly List<Action> _timerCallbacks = [];
+    private readonly List<IBehaviorUpdatable> _updatablesToUpdate = [];
+    private readonly bool _ownsBlackboard;
     private bool _isPumping;
     private bool _cancelRequested;
+    private bool _disposed;
     private long _nextTimerId;
 
     public BehaviorTreeInstance(
@@ -21,6 +25,7 @@ public sealed class BehaviorTreeInstance
         Root = root ?? throw new ArgumentNullException(nameof(root));
         Actions = actions ?? throw new ArgumentNullException(nameof(actions));
         Context = context ?? new BehaviorTreeContext();
+        _ownsBlackboard = blackboard is null;
         Blackboard = blackboard ?? CreateDefaultBlackboard(Context);
         Loop = loop;
 
@@ -49,6 +54,8 @@ public sealed class BehaviorTreeInstance
 
     public void Start()
     {
+        ThrowIfDisposed();
+
         if (Status == BehaviorTreeStatus.Running)
         {
             return;
@@ -66,6 +73,11 @@ public sealed class BehaviorTreeInstance
 
     public void Cancel()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         if (Status != BehaviorTreeStatus.Running)
         {
             return;
@@ -91,6 +103,8 @@ public sealed class BehaviorTreeInstance
             return;
         }
 
+        ThrowIfDisposed();
+
         Time = time;
         DeltaTime = time.DeltaTime;
         TickTimers(time.DeltaTime);
@@ -102,6 +116,32 @@ public sealed class BehaviorTreeInstance
     {
         var time = GameFrameTime.Advance(Time, deltaTime, deltaTime);
         Update(in time);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (Status == BehaviorTreeStatus.Running)
+        {
+            Cancel();
+        }
+
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (Status == BehaviorTreeStatus.Idle)
+        {
+            Status = BehaviorTreeStatus.Canceled;
+        }
+
+        ClearRuntimeState();
+        ReleaseOwnedResources();
     }
 
     internal void EnqueueExecution(Action action)
@@ -201,15 +241,9 @@ public sealed class BehaviorTreeInstance
             return;
         }
 
-        var snapshot = _timers.ToArray();
-        foreach (var timer in snapshot)
+        _timerCallbacks.Clear();
+        for (var index = 0; index < _timers.Count; index++)
         {
-            var index = _timers.FindIndex(candidate => candidate.Id == timer.Id);
-            if (index < 0)
-            {
-                continue;
-            }
-
             var current = _timers[index];
             current.Remaining -= deltaTime;
             if (current.Remaining > TimeSpan.Zero)
@@ -226,10 +260,24 @@ public sealed class BehaviorTreeInstance
             else
             {
                 _timers.RemoveAt(index);
+                index--;
             }
 
-            EnqueueExecution(current.Callback);
+            _timerCallbacks.Add(current.Callback);
         }
+
+        for (var index = 0; index < _timerCallbacks.Count; index++)
+        {
+            if (_disposed || Status != BehaviorTreeStatus.Running)
+            {
+                break;
+            }
+
+            var callback = _timerCallbacks[index];
+            EnqueueExecution(callback);
+        }
+
+        _timerCallbacks.Clear();
     }
 
     private void TickUpdatables()
@@ -239,13 +287,23 @@ public sealed class BehaviorTreeInstance
             return;
         }
 
-        foreach (var updatable in _updatables.ToArray())
+        _updatablesToUpdate.Clear();
+        _updatablesToUpdate.AddRange(_updatables);
+        for (var index = 0; index < _updatablesToUpdate.Count; index++)
         {
+            if (_disposed || Status != BehaviorTreeStatus.Running)
+            {
+                break;
+            }
+
+            var updatable = _updatablesToUpdate[index];
             if (_updatables.Contains(updatable))
             {
                 EnqueueExecution(updatable.UpdateBehavior);
             }
         }
+
+        _updatablesToUpdate.Clear();
     }
 
     private void Finish(BehaviorTreeStatus status)
@@ -256,10 +314,39 @@ public sealed class BehaviorTreeInstance
         }
 
         Status = status;
+        ClearRuntimeState();
+        Completed?.Invoke(this, status);
+        ReleaseOwnedResources();
+    }
+
+    private void ClearRuntimeState()
+    {
         _timers.Clear();
         _updatables.Clear();
+        _timerCallbacks.Clear();
+        _updatablesToUpdate.Clear();
         _executionRequests.Clear();
-        Completed?.Invoke(this, status);
+    }
+
+    private void ReleaseOwnedResources()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_ownsBlackboard)
+        {
+            Blackboard.Dispose();
+        }
+
+        Completed = null;
+        _disposed = true;
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
     private static BehaviorBlackboard CreateDefaultBlackboard(BehaviorTreeContext context)

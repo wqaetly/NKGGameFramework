@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
 
@@ -7,6 +8,7 @@ namespace NKGGameFramework.Hosting.Diagnostics;
 internal static class GameDebugStructuredComponentValue
 {
     private const int MaxDepth = 8;
+    private static readonly ConcurrentDictionary<Type, DebugMember[]> DebugMemberCache = [];
 
     public static ComponentValueDebugNode Capture(object value)
     {
@@ -449,9 +451,15 @@ internal static class GameDebugStructuredComponentValue
         return false;
     }
 
-    private static IEnumerable<DebugMember> GetDebugMembers(Type type)
+    private static IReadOnlyList<DebugMember> GetDebugMembers(Type type)
+    {
+        return DebugMemberCache.GetOrAdd(type, CreateDebugMembers);
+    }
+
+    private static DebugMember[] CreateDebugMembers(Type type)
     {
         const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance;
+        var members = new List<DebugMember>();
 
         foreach (var field in type.GetFields(flags).OrderBy(static field => field.MetadataToken))
         {
@@ -460,12 +468,12 @@ internal static class GameDebugStructuredComponentValue
                 continue;
             }
 
-            yield return new DebugMember(
+            members.Add(new DebugMember(
                 field.Name,
                 field.FieldType,
                 target => field.GetValue(target),
                 (target, value) => field.SetValue(target, value),
-                CanWrite: !field.IsInitOnly);
+                CanWrite: !field.IsInitOnly));
         }
 
         foreach (var property in type.GetProperties(flags).OrderBy(static property => property.MetadataToken))
@@ -475,13 +483,15 @@ internal static class GameDebugStructuredComponentValue
                 continue;
             }
 
-            yield return new DebugMember(
+            members.Add(new DebugMember(
                 property.Name,
                 property.PropertyType,
                 target => property.GetValue(target),
                 (target, value) => property.SetValue(target, value),
-                CanWrite: property.SetMethod is { IsPublic: true });
+                CanWrite: property.SetMethod is { IsPublic: true }));
         }
+
+        return members.ToArray();
     }
 
     private static bool TryGetDebugMember(Type type, string name, out DebugMember member)

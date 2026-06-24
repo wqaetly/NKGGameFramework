@@ -17,12 +17,18 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
         _componentValueSerializer = componentValueSerializer;
     }
 
-    public GameDebugSnapshot Capture()
+    public GameDebugSnapshot Capture(GameDebugSnapshotCaptureOptions? options = null)
     {
+        options ??= GameDebugSnapshotCaptureOptions.Default;
+
         return new GameDebugSnapshot(
             DateTimeOffset.UtcNow,
             _session.GetRuntimeContexts().Select(CaptureRuntime).ToArray(),
-            _session.GetWorlds().Select(CaptureWorld).ToArray());
+            _session.GetWorlds()
+                .Where(world => MatchesWorld(world, options))
+                .Select(world => CaptureWorld(world, options))
+                .Where(world => string.IsNullOrWhiteSpace(options.SceneName) || world.SceneCount > 0)
+                .ToArray());
     }
 
     private RuntimeContextDebugSnapshot CaptureRuntime(RuntimeContext runtime, int index)
@@ -62,10 +68,11 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
                 .ToArray());
     }
 
-    private WorldDebugSnapshot CaptureWorld(World world)
+    private WorldDebugSnapshot CaptureWorld(World world, GameDebugSnapshotCaptureOptions options)
     {
         var scenes = world.Scenes
-            .Select(CaptureScene)
+            .Where(scene => MatchesScene(scene, options))
+            .Select(scene => CaptureScene(scene, options))
             .ToArray();
 
         return new WorldDebugSnapshot(
@@ -74,14 +81,35 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
             scenes);
     }
 
-    private SceneDebugSnapshot CaptureScene(Scene scene)
+    private SceneDebugSnapshot CaptureScene(Scene scene, GameDebugSnapshotCaptureOptions options)
     {
+        var entities = scene.Entities
+            .Where(entity => MatchesEntity(entity, options));
+        if (options.EntityId is null)
+        {
+            if (options.EntityOffset > 0)
+            {
+                entities = entities.Skip(options.EntityOffset);
+            }
+
+            if (options.EntityLimit is { } limit)
+            {
+                entities = entities.Take(limit);
+            }
+        }
+
+        var valueOptions = new GameDebugComponentValueSerializationOptions
+        {
+            IncludePayload = options.IncludeComponentPayloads,
+            IncludeStructured = options.IncludeStructuredComponentValues,
+        };
+
         return new SceneDebugSnapshot(
             scene.Name,
             scene.EntityCount,
             scene.Systems.Systems.Select(CaptureSystem).ToArray(),
             scene.ComponentStores.Select(CaptureComponentStore).ToArray(),
-            scene.Entities.Select(entity => CaptureEntity(scene, entity)).ToArray());
+            entities.Select(entity => CaptureEntity(scene, entity, valueOptions)).ToArray());
     }
 
     private static SystemDebugSnapshot CaptureSystem(ISystem system)
@@ -100,7 +128,10 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
             store.EntityIds);
     }
 
-    private EntityDebugSnapshot CaptureEntity(Scene scene, Entity entity)
+    private EntityDebugSnapshot CaptureEntity(
+        Scene scene,
+        Entity entity,
+        GameDebugComponentValueSerializationOptions valueOptions)
     {
         var components = scene.GetComponents(entity);
         var componentTypes = components
@@ -113,11 +144,28 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
             components
                 .Select(component => new ComponentDebugSnapshot(
                     DebugSnapshotTypeNames.Create(component.ComponentType),
-                    _componentValueSerializer.Serialize(component.Value),
+                    _componentValueSerializer.Serialize(component.Value, valueOptions),
                     CaptureComponentGraph(component.ComponentType, componentTypes)))
                 .ToArray(),
             CaptureSkills(components),
             CaptureBuffs(components));
+    }
+
+    private static bool MatchesWorld(World world, GameDebugSnapshotCaptureOptions options)
+    {
+        return string.IsNullOrWhiteSpace(options.WorldName)
+            || StringComparer.Ordinal.Equals(world.Name, options.WorldName);
+    }
+
+    private static bool MatchesScene(Scene scene, GameDebugSnapshotCaptureOptions options)
+    {
+        return string.IsNullOrWhiteSpace(options.SceneName)
+            || StringComparer.Ordinal.Equals(scene.Name, options.SceneName);
+    }
+
+    private static bool MatchesEntity(Entity entity, GameDebugSnapshotCaptureOptions options)
+    {
+        return options.EntityId is null || entity.Id.Value == options.EntityId.Value;
     }
 
     private static ComponentGraphDebugSnapshot CaptureComponentGraph(Type componentType, ISet<Type> componentTypes)

@@ -4,6 +4,8 @@ namespace NKGGameFramework.Gameplay;
 
 public sealed class BehaviorTreeUpdateSystem : EcsSystem
 {
+    private readonly List<BehaviorTreeInstance> _instancesToUpdate = [];
+
     public BehaviorTreeUpdateSystem(int order = 0)
         : base(order)
     {
@@ -12,26 +14,33 @@ public sealed class BehaviorTreeUpdateSystem : EcsSystem
     public override void Update(Scene scene, in SystemUpdateContext context)
     {
         var time = context.Time;
-        var instancesToUpdate = new List<BehaviorTreeInstance>();
-
-        scene.Query<BehaviorTreeComponent>().ForEach((ref BehaviorTreeComponent component, Entity _) =>
+        _instancesToUpdate.Clear();
+        try
         {
-            instancesToUpdate.AddRange(component.MutableInstances);
-        });
+            scene.Query<BehaviorTreeComponent>().ForEach((ref BehaviorTreeComponent component, Entity _) =>
+            {
+                _instancesToUpdate.AddRange(component.MutableInstances);
+            });
 
-        foreach (var instance in instancesToUpdate)
+            foreach (var instance in _instancesToUpdate)
+            {
+                instance.Update(in time);
+            }
+        }
+        finally
         {
-            instance.Update(in time);
+            _instancesToUpdate.Clear();
         }
 
         scene.Query<BehaviorTreeComponent>().ForEach((ref BehaviorTreeComponent component, Entity _) =>
         {
             var instances = component.MutableInstances;
-            for (var i = instances.Count - 1; i >= 0; i--)
+            for (var index = instances.Count - 1; index >= 0; index--)
             {
-                if (instances[i].IsComplete)
+                if (instances[index].IsComplete)
                 {
-                    instances.RemoveAt(i);
+                    instances[index].Dispose();
+                    instances.RemoveAt(index);
                 }
             }
         });

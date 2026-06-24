@@ -19,5 +19,12 @@ export default defineConfig(({ mode }) => {
     preview: {
       port: 4173,
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: true,
+        },
+      },
+    },
   };
 });

@@ -69,7 +69,7 @@ public static class SkillManager
         }
 
         var casterTags = GameplayTagUtility.GetOwnedTags(caster);
-        var targetTags = GameplayTagUtility.GetOwnedTags(target);
+        var targetTags = caster == target ? casterTags : GameplayTagUtility.GetOwnedTags(target);
         if (!GameplayTagUtility.MeetsRequirements(
                 casterTags,
                 slot.Definition.RequiredCasterTags,

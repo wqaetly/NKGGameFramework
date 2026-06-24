@@ -41,6 +41,6 @@ public sealed class EntityGameplayTagAsset(Entity entity) : IGameplayTagAsset
     public void GetOwnedGameplayTags(GameplayTagContainer tagContainer)
     {
         ArgumentNullException.ThrowIfNull(tagContainer);
-        tagContainer.AppendTags(GameplayTagUtility.GetOwnedTags(Entity));
+        GameplayTagUtility.AppendOwnedTags(Entity, tagContainer);
     }
 }

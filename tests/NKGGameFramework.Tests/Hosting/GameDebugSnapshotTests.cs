@@ -140,6 +140,47 @@ public sealed class GameDebugSnapshotTests
     }
 
     [Fact]
+    public void Capture_options_filter_page_and_trim_component_values()
+    {
+        using var world = new World("debug-world");
+        var battle = world.CreateScene("battle");
+        var menu = world.CreateScene("menu");
+        battle.CreateEntity()
+            .Add(new PositionComponent(1, 1));
+        var second = battle.CreateEntity()
+            .Add(new PositionComponent(2, 2));
+        battle.CreateEntity()
+            .Add(new PositionComponent(3, 3));
+        menu.CreateEntity()
+            .Add(new PositionComponent(4, 4));
+        var session = new GameDebugSession().Register(world);
+        var snapshots = new GameDebugSnapshotProvider(
+            session,
+            new OdinGameDebugComponentValueSerializer());
+
+        var snapshot = snapshots.Capture(new GameDebugSnapshotCaptureOptions
+        {
+            WorldName = world.Name,
+            SceneName = battle.Name,
+            EntityOffset = 1,
+            EntityLimit = 1,
+            IncludeComponentPayloads = false,
+            IncludeStructuredComponentValues = false,
+        });
+
+        var worldSnapshot = Assert.Single(snapshot.Worlds);
+        var sceneSnapshot = Assert.Single(worldSnapshot.Scenes);
+        var entitySnapshot = Assert.Single(sceneSnapshot.Entities);
+        var component = Assert.Single(entitySnapshot.Components);
+        Assert.Equal("battle", sceneSnapshot.Name);
+        Assert.Equal(3, sceneSnapshot.EntityCount);
+        Assert.Equal(second.Id.Value, entitySnapshot.Id);
+        Assert.Null(component.Value.Payload);
+        Assert.Null(component.Value.Structured);
+        Assert.Null(component.Value.Error);
+    }
+
+    [Fact]
     public void Mutations_write_any_component_value_through_odin_payload()
     {
         using var world = new World("debug-world");

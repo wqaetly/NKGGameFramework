@@ -7,7 +7,13 @@ public static class GameplayTagUtility
     public static GameplayTagContainer GetOwnedTags(Entity entity)
     {
         var result = new GameplayTagContainer();
+        AppendOwnedTags(entity, result);
+        return result;
+    }
 
+    public static void AppendOwnedTags(Entity entity, GameplayTagContainer result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
         if (entity.Has<GameplayTagComponent>())
         {
             ref var tagComponent = ref entity.Get<GameplayTagComponent>();
@@ -25,8 +31,6 @@ public static class GameplayTagUtility
                 }
             }
         }
-
-        return result;
     }
 
     public static bool MeetsRequirements(

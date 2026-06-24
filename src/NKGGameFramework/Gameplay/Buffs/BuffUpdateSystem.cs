@@ -6,6 +6,9 @@ public sealed class BuffUpdateSystem : EcsSystem
 {
     private readonly BuffEffectRegistry _effects;
     private readonly BehaviorActionRegistry _behaviorActions;
+    private readonly List<BehaviorTreeInstance> _behaviorTreesToStart = [];
+    private readonly List<BehaviorTreeInstance> _behaviorTreesToUpdate = [];
+    private readonly List<BehaviorTreeInstance> _behaviorTreesToCancel = [];
 
     public BuffUpdateSystem(BuffEffectRegistry? effects, int order)
         : this(effects, null, order)
@@ -22,62 +25,70 @@ public sealed class BuffUpdateSystem : EcsSystem
     public override void Update(Scene scene, in SystemUpdateContext context)
     {
         var time = context.Time;
-        var behaviorTreesToStart = new List<BehaviorTreeInstance>();
-        var behaviorTreesToUpdate = new List<BehaviorTreeInstance>();
-        var behaviorTreesToCancel = new List<BehaviorTreeInstance>();
-
-        scene.Query<BuffCollectionComponent>().ForEach((ref BuffCollectionComponent collection, Entity entity) =>
+        _behaviorTreesToStart.Clear();
+        _behaviorTreesToUpdate.Clear();
+        _behaviorTreesToCancel.Clear();
+        try
         {
-            var buffs = collection.MutableBuffs;
-            for (var i = buffs.Count - 1; i >= 0; i--)
+            scene.Query<BuffCollectionComponent>().ForEach((ref BuffCollectionComponent collection, Entity entity) =>
             {
-                var buff = buffs[i];
-                var effect = _effects.Resolve(buff.Definition.EffectKey);
-                var effectContext = new BuffEffectContext(scene, entity, buff, in time);
-
-                ProcessBuff(
-                    scene,
-                    effect,
-                    effectContext,
-                    _behaviorActions,
-                    behaviorTreesToStart,
-                    behaviorTreesToUpdate);
-
-                if (buff.State == BuffState.Finished)
+                var buffs = collection.MutableBuffs;
+                for (var i = buffs.Count - 1; i >= 0; i--)
                 {
-                    effect.OnRemove(effectContext);
-                    if (buff.ExecutionTreeInstance is { } behaviorTree)
+                    var buff = buffs[i];
+                    var effect = _effects.Resolve(buff.Definition.EffectKey);
+                    var effectContext = new BuffEffectContext(scene, entity, buff, in time);
+
+                    ProcessBuff(
+                        scene,
+                        effect,
+                        effectContext,
+                        _behaviorActions,
+                        _behaviorTreesToStart,
+                        _behaviorTreesToUpdate);
+
+                    if (buff.State == BuffState.Finished)
                     {
-                        behaviorTreesToStart.Remove(behaviorTree);
-                        behaviorTreesToUpdate.Remove(behaviorTree);
-                        behaviorTreesToCancel.Add(behaviorTree);
+                        effect.OnRemove(effectContext);
+                        if (buff.ExecutionTreeInstance is { } behaviorTree)
+                        {
+                            _behaviorTreesToStart.Remove(behaviorTree);
+                            _behaviorTreesToUpdate.Remove(behaviorTree);
+                            _behaviorTreesToCancel.Add(behaviorTree);
+                        }
+
+                        buff.ExecutionTreeInstance = null;
+                        scene.Events.Publish(new BuffRemoved(
+                            entity.ToRef(),
+                            buff.Source,
+                            buff.Definition.Id,
+                            buff.Level,
+                            buff.Stacks));
+                        buffs.RemoveAt(i);
                     }
-
-                    buff.ExecutionTreeInstance = null;
-                    scene.Events.Publish(new BuffRemoved(
-                        entity.ToRef(),
-                        buff.Source,
-                        buff.Definition.Id,
-                        buff.Level,
-                        buff.Stacks));
-                    buffs.RemoveAt(i);
                 }
+            });
+
+            foreach (var behaviorTree in _behaviorTreesToStart)
+            {
+                behaviorTree.Start();
             }
-        });
 
-        foreach (var behaviorTree in behaviorTreesToStart)
-        {
-            behaviorTree.Start();
+            foreach (var behaviorTree in _behaviorTreesToUpdate)
+            {
+                behaviorTree.Update(in time);
+            }
+
+            foreach (var behaviorTree in _behaviorTreesToCancel)
+            {
+                behaviorTree.Cancel();
+            }
         }
-
-        foreach (var behaviorTree in behaviorTreesToUpdate)
+        finally
         {
-            behaviorTree.Update(in time);
-        }
-
-        foreach (var behaviorTree in behaviorTreesToCancel)
-        {
-            behaviorTree.Cancel();
+            _behaviorTreesToStart.Clear();
+            _behaviorTreesToUpdate.Clear();
+            _behaviorTreesToCancel.Clear();
         }
     }
 
