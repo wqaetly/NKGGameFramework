@@ -21,7 +21,7 @@ public sealed class BehaviorTreeInstance
         Root = root ?? throw new ArgumentNullException(nameof(root));
         Actions = actions ?? throw new ArgumentNullException(nameof(actions));
         Context = context ?? new BehaviorTreeContext();
-        Blackboard = blackboard ?? new BehaviorBlackboard();
+        Blackboard = blackboard ?? CreateDefaultBlackboard(Context);
         Loop = loop;
 
         Root.AttachTo(this, null);
@@ -260,6 +260,16 @@ public sealed class BehaviorTreeInstance
         _updatables.Clear();
         _executionRequests.Clear();
         Completed?.Invoke(this, status);
+    }
+
+    private static BehaviorBlackboard CreateDefaultBlackboard(BehaviorTreeContext context)
+    {
+        if (context.Scene is { } scene)
+        {
+            return BehaviorBlackboard.CreateForScene(scene);
+        }
+
+        throw new InvalidOperationException("Default behavior blackboards require BehaviorTreeContext.Scene.");
     }
 
     private struct BehaviorTimer

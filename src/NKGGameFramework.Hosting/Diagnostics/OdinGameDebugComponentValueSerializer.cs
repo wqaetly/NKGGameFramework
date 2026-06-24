@@ -15,7 +15,8 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
                     value,
                     DataFormat.JSON,
                     CreateSerializationContext())),
-                Error: null);
+                Error: null,
+                GameDebugStructuredComponentValue.Capture(value));
         }
         catch (Exception exception)
         {
@@ -36,27 +37,39 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
             throw new ArgumentException($"Unsupported component value format '{value.Format}'.", nameof(value));
         }
 
-        if (string.IsNullOrWhiteSpace(value.Payload))
+        if (!string.IsNullOrWhiteSpace(value.Payload))
+        {
+            var payloadResult = SerializationUtility.DeserializeValueWeak(
+                Encoding.UTF8.GetBytes(value.Payload),
+                DataFormat.JSON,
+                CreateDeserializationContext());
+
+            if (payloadResult is null)
+            {
+                throw new ArgumentException("Component value payload deserialized to null.", nameof(value));
+            }
+
+            if (!expectedType.IsInstanceOfType(payloadResult))
+            {
+                throw new ArgumentException($"Component payload type '{payloadResult.GetType().FullName}' does not match '{expectedType.FullName}'.", nameof(value));
+            }
+
+            return value.Structured is null
+                ? payloadResult
+                : GameDebugStructuredComponentValue.Apply(value.Structured, payloadResult, expectedType);
+        }
+
+        if (value.Structured is null)
         {
             throw new ArgumentException("Component value payload is empty.", nameof(value));
         }
 
-        var result = SerializationUtility.DeserializeValueWeak(
-            Encoding.UTF8.GetBytes(value.Payload),
-            DataFormat.JSON,
-            CreateDeserializationContext());
-
-        if (result is null)
+        if (Activator.CreateInstance(expectedType) is not { } emptyResult)
         {
-            throw new ArgumentException("Component value payload deserialized to null.", nameof(value));
+            throw new ArgumentException($"Component type '{expectedType.FullName}' cannot be created from structured data.", nameof(value));
         }
 
-        if (!expectedType.IsInstanceOfType(result))
-        {
-            throw new ArgumentException($"Component payload type '{result.GetType().FullName}' does not match '{expectedType.FullName}'.", nameof(value));
-        }
-
-        return result;
+        return GameDebugStructuredComponentValue.Apply(value.Structured, emptyResult, expectedType);
     }
 
     private static SerializationContext CreateSerializationContext()

@@ -67,11 +67,46 @@ export interface EntityDebugSnapshot {
 export interface ComponentDebugSnapshot {
   type: DebugTypeInfo;
   value: ComponentValueDebugSnapshot;
+  graph: ComponentGraphDebugSnapshot;
+}
+
+export interface ComponentGraphDebugSnapshot {
+  id: string;
+  parentId: string | null;
+  parentType: DebugTypeInfo | null;
+  group: string | null;
+  order: number;
 }
 
 export interface ComponentValueDebugSnapshot {
   format: string;
   payload: string | null;
+  error: string | null;
+  structured: ComponentValueDebugNode | null;
+}
+
+export type ComponentValueDebugNodeKind =
+  | 'boolean'
+  | 'integer'
+  | 'number'
+  | 'string'
+  | 'enum'
+  | 'object'
+  | 'list'
+  | 'null'
+  | 'reference'
+  | 'unsupported';
+
+export interface ComponentValueDebugNode {
+  kind: ComponentValueDebugNodeKind;
+  name: string | null;
+  type: DebugTypeInfo;
+  editable: boolean;
+  value: string | null;
+  children: ComponentValueDebugNode[];
+  options: string[];
+  elementType: DebugTypeInfo | null;
+  elementTemplate: ComponentValueDebugNode | null;
   error: string | null;
 }
 

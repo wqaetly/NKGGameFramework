@@ -2,6 +2,7 @@ using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Gameplay;
 
+[ComponentGraph(Parent = typeof(SkillBookComponent), Group = "Gameplay/Skills", Order = 20)]
 public struct BehaviorTreeComponent : IComponent
 {
     private List<BehaviorTreeInstance>? _instances;

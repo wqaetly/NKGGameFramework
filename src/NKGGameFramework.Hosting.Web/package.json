@@ -9,6 +9,8 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.1",
+    "dockview-react": "7.0.2",
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"

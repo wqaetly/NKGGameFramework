@@ -118,6 +118,7 @@ public sealed class GameDebugSnapshotTests
         Assert.Equal("odin-json", positionComponent.Value.Format);
         Assert.False(string.IsNullOrWhiteSpace(positionComponent.Value.Payload));
         Assert.Null(positionComponent.Value.Error);
+        Assert.NotNull(positionComponent.Value.Structured);
 
         var skill = Assert.Single(casterSnapshot.Skills);
         Assert.Equal("fireball", skill.Id);
@@ -168,6 +169,182 @@ public sealed class GameDebugSnapshotTests
         Assert.Equal(34, entity.Get<PositionComponent>().Y);
     }
 
+    [Fact]
+    public void Capture_includes_component_graph_metadata()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var linkedEntity = scene.CreateEntity()
+            .Add(new GraphRootComponent(1))
+            .Add(new GraphChildComponent(2));
+        var orphanEntity = scene.CreateEntity()
+            .Add(new GraphOrphanComponent(3));
+
+        var session = new GameDebugSession().Register(world);
+        var snapshots = new GameDebugSnapshotProvider(
+            session,
+            new OdinGameDebugComponentValueSerializer());
+
+        var snapshot = snapshots.Capture();
+
+        var sceneSnapshot = Assert.Single(Assert.Single(snapshot.Worlds).Scenes);
+        var linkedEntitySnapshot = Assert.Single(sceneSnapshot.Entities, entity => entity.Id == linkedEntity.Id.Value);
+        var root = Assert.Single(linkedEntitySnapshot.Components, component => component.Type.Name == nameof(GraphRootComponent));
+        var child = Assert.Single(linkedEntitySnapshot.Components, component => component.Type.Name == nameof(GraphChildComponent));
+        Assert.Equal(CreateGraphId(typeof(GraphRootComponent)), root.Graph.Id);
+        Assert.Null(root.Graph.ParentId);
+        Assert.Null(root.Graph.ParentType);
+        Assert.Equal("Debug/Test", root.Graph.Group);
+        Assert.Equal(10, root.Graph.Order);
+        Assert.Equal(root.Graph.Id, child.Graph.ParentId);
+        Assert.NotNull(child.Graph.ParentType);
+        Assert.Equal(nameof(GraphRootComponent), child.Graph.ParentType!.Name);
+        Assert.Equal("Debug/Test", child.Graph.Group);
+        Assert.Equal(20, child.Graph.Order);
+
+        var orphanEntitySnapshot = Assert.Single(sceneSnapshot.Entities, entity => entity.Id == orphanEntity.Id.Value);
+        var orphan = Assert.Single(orphanEntitySnapshot.Components, component => component.Type.Name == nameof(GraphOrphanComponent));
+        Assert.Null(orphan.Graph.ParentId);
+        Assert.NotNull(orphan.Graph.ParentType);
+        Assert.Equal(nameof(GraphRootComponent), orphan.Graph.ParentType!.Name);
+    }
+
+    [Fact]
+    public void Capture_includes_structured_component_value_fields()
+    {
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+
+        var value = valueSerializer.Serialize(new EditableComponent
+        {
+            Enabled = true,
+            Count = 3,
+            Name = "caster",
+            Values = [1, 2],
+            Stats = new EditableStats
+            {
+                Multiplier = 1.5,
+            },
+        });
+
+        Assert.NotNull(value.Structured);
+        var root = value.Structured;
+        Assert.Equal("object", root.Kind);
+        Assert.Equal("boolean", FindChild(root, nameof(EditableComponent.Enabled)).Kind);
+        Assert.Equal("integer", FindChild(root, nameof(EditableComponent.Count)).Kind);
+        Assert.Equal("string", FindChild(root, nameof(EditableComponent.Name)).Kind);
+
+        var values = FindChild(root, nameof(EditableComponent.Values));
+        Assert.Equal("list", values.Kind);
+        Assert.Equal(2, values.Children.Count);
+        Assert.Equal("integer", values.Children[0].Kind);
+
+        var stats = FindChild(root, nameof(EditableComponent.Stats));
+        Assert.Equal("object", stats.Kind);
+        Assert.Equal("number", FindChild(stats, nameof(EditableStats.Multiplier)).Kind);
+    }
+
+    [Fact]
+    public void Mutations_write_structured_component_value_fields()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new EditableComponent
+            {
+                Enabled = true,
+                Count = 3,
+                Name = "caster",
+                Values = [1, 2],
+                Stats = new EditableStats
+                {
+                    Multiplier = 1.5,
+                },
+            });
+
+        var session = new GameDebugSession().Register(world);
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var mutations = new GameDebugMutationHandler(
+            session,
+            Options.Create(new GameDebugOptions()),
+            valueSerializer);
+        var componentType = typeof(EditableComponent);
+        var value = valueSerializer.Serialize(entity.Get<EditableComponent>());
+        var edited = SetChild(
+            SetChild(
+                SetChild(
+                    SetChild(
+                        SetChild(value.Structured!, nameof(EditableComponent.Enabled), child => child with { Value = "false" }),
+                        nameof(EditableComponent.Count),
+                        child => child with { Value = "8" }),
+                    nameof(EditableComponent.Name),
+                    child => child with { Value = "enemy" }),
+                nameof(EditableComponent.Values),
+                child => child with
+                {
+                    Children =
+                    [
+                        child.Children[0] with { Name = "[0]", Value = "9" },
+                        child.Children[1] with { Name = "[1]", Value = "10" },
+                        child.ElementTemplate! with { Name = "[2]", Value = "11" },
+                    ],
+                }),
+            nameof(EditableComponent.Stats),
+            child => SetChild(child, nameof(EditableStats.Multiplier), stat => stat with { Value = "2.25" }));
+
+        var result = mutations.Execute(new GameDebugMutationRequest(
+            world.Name,
+            scene.Name,
+            entity.Id.Value,
+            entity.Version,
+            componentType.FullName!,
+            componentType.Assembly.GetName().Name!,
+            value with { Structured = edited }));
+
+        var component = entity.Get<EditableComponent>();
+        Assert.True(result.Succeeded);
+        Assert.False(component.Enabled);
+        Assert.Equal(8, component.Count);
+        Assert.Equal("enemy", component.Name);
+        Assert.Equal([9, 10, 11], component.Values);
+        Assert.Equal(2.25, component.Stats.Multiplier);
+    }
+
+    [Fact]
+    public void Structured_mutations_preserve_readonly_public_properties_from_payload()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new MixedComponent(0.5)
+            {
+                Count = 3,
+            });
+
+        var session = new GameDebugSession().Register(world);
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var mutations = new GameDebugMutationHandler(
+            session,
+            Options.Create(new GameDebugOptions()),
+            valueSerializer);
+        var componentType = typeof(MixedComponent);
+        var value = valueSerializer.Serialize(entity.Get<MixedComponent>());
+        var edited = SetChild(value.Structured!, nameof(MixedComponent.Count), child => child with { Value = "8" });
+
+        var result = mutations.Execute(new GameDebugMutationRequest(
+            world.Name,
+            scene.Name,
+            entity.Id.Value,
+            entity.Version,
+            componentType.FullName!,
+            componentType.Assembly.GetName().Name!,
+            value with { Structured = edited }));
+
+        var component = entity.Get<MixedComponent>();
+        Assert.True(result.Succeeded);
+        Assert.Equal(8, component.Count);
+        Assert.Equal(0.5, component.Multiplier);
+    }
+
     private sealed class BootProcedure : ProcedureBase
     {
     }
@@ -177,4 +354,61 @@ public sealed class GameDebugSnapshotTests
     }
 
     private readonly record struct PositionComponent(double X, double Y) : IComponent;
+
+    [ComponentGraph(Group = "Debug/Test", Order = 10)]
+    private readonly record struct GraphRootComponent(int Value) : IComponent;
+
+    [ComponentGraph(Parent = typeof(GraphRootComponent), Group = "Debug/Test", Order = 20)]
+    private readonly record struct GraphChildComponent(int Value) : IComponent;
+
+    [ComponentGraph(Parent = typeof(GraphRootComponent), Group = "Debug/Test", Order = 30)]
+    private readonly record struct GraphOrphanComponent(int Value) : IComponent;
+
+    private struct EditableComponent : IComponent
+    {
+        public bool Enabled;
+
+        public int Count;
+
+        public string Name;
+
+        public List<int> Values;
+
+        public EditableStats Stats;
+    }
+
+    private struct EditableStats
+    {
+        public double Multiplier;
+    }
+
+    private struct MixedComponent(double multiplier) : IComponent
+    {
+        public int Count;
+
+        public double Multiplier { get; } = multiplier;
+    }
+
+    private static ComponentValueDebugNode FindChild(ComponentValueDebugNode node, string name)
+    {
+        return Assert.Single(node.Children, child => child.Name == name);
+    }
+
+    private static ComponentValueDebugNode SetChild(
+        ComponentValueDebugNode node,
+        string name,
+        Func<ComponentValueDebugNode, ComponentValueDebugNode> update)
+    {
+        return node with
+        {
+            Children = node.Children
+                .Select(child => child.Name == name ? update(child) : child)
+            .ToArray(),
+        };
+    }
+
+    private static string CreateGraphId(Type componentType)
+    {
+        return $"{componentType.Assembly.GetName().Name}:{componentType.FullName}";
+    }
 }

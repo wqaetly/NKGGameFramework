@@ -7,6 +7,20 @@ public interface IComponent
 {
 }
 
+[AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
+public sealed class ComponentGraphAttribute : Attribute
+{
+    public Type? Parent { get; init; }
+
+    public string? Group { get; init; }
+
+    public int Order { get; init; }
+}
+
 public interface ITag : IComponent
+{
+}
+
+public interface ISceneComponent
 {
 }

@@ -43,18 +43,18 @@ public sealed class BehaviorWaitNode : BehaviorNode
             return duration;
         }
 
-        if (_blackboardKey is null || !Blackboard.TryGet(_blackboardKey, out var value) || value is null)
+        if (_blackboardKey is null || !Blackboard.TryGetValue(_blackboardKey, out var value))
         {
             return TimeSpan.Zero;
         }
 
         return value switch
         {
-            TimeSpan timeSpan when timeSpan > TimeSpan.Zero => timeSpan,
-            double seconds when seconds > 0 => TimeSpan.FromSeconds(seconds),
-            float seconds when seconds > 0 => TimeSpan.FromSeconds(seconds),
-            int milliseconds when milliseconds > 0 => TimeSpan.FromMilliseconds(milliseconds),
-            long milliseconds when milliseconds > 0 => TimeSpan.FromMilliseconds(milliseconds),
+            BehaviorBlackboardValue<TimeSpan> typed when typed.Value > TimeSpan.Zero => typed.Value,
+            BehaviorBlackboardValue<double> typed when typed.Value > 0 => TimeSpan.FromSeconds(typed.Value),
+            BehaviorBlackboardValue<float> typed when typed.Value > 0 => TimeSpan.FromSeconds(typed.Value),
+            BehaviorBlackboardValue<int> typed when typed.Value > 0 => TimeSpan.FromMilliseconds(typed.Value),
+            BehaviorBlackboardValue<long> typed when typed.Value > 0 => TimeSpan.FromMilliseconds(typed.Value),
             _ => TimeSpan.Zero,
         };
     }

@@ -128,25 +128,28 @@ public abstract class BehaviorObservingDecoratorNode : BehaviorDecoratorNode
 
 public sealed class BehaviorBlackboardConditionNode : BehaviorObservingDecoratorNode
 {
+    private readonly BehaviorBlackboardValue _value;
+
     public BehaviorBlackboardConditionNode(
         string key,
         BehaviorConditionOperator conditionOperator,
-        object? value,
+        BehaviorBlackboardValue value,
         BehaviorObserverStops stopsOnChange,
         BehaviorNode child)
         : base("BlackboardCondition", stopsOnChange, child)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
         Key = key;
         Operator = conditionOperator;
-        Value = value;
+        _value = value;
     }
 
     public string Key { get; }
 
     public BehaviorConditionOperator Operator { get; }
 
-    public object? Value { get; }
+    public BehaviorBlackboardValue Value => _value;
 
     protected override void StartObserving(Action<BehaviorBlackboardChange> observer)
     {
@@ -165,7 +168,7 @@ public sealed class BehaviorBlackboardConditionNode : BehaviorObservingDecorator
             return true;
         }
 
-        var isSet = Blackboard.TryGet(Key, out var blackboardValue);
+        var isSet = Blackboard.TryGetValue(Key, out var blackboardValue);
         if (Operator == BehaviorConditionOperator.IsSet)
         {
             return isSet;
@@ -181,27 +184,29 @@ public sealed class BehaviorBlackboardConditionNode : BehaviorObservingDecorator
             return false;
         }
 
-        return Compare(blackboardValue, Value, Operator);
+        return Compare(blackboardValue, _value, Operator);
     }
 
-    private static bool Compare(object? left, object? right, BehaviorConditionOperator conditionOperator)
+    private static bool Compare(
+        BehaviorBlackboardValue left,
+        BehaviorBlackboardValue right,
+        BehaviorConditionOperator conditionOperator)
     {
         if (conditionOperator == BehaviorConditionOperator.Equal)
         {
-            return Equals(left, right);
+            return left.ValueEquals(right);
         }
 
         if (conditionOperator == BehaviorConditionOperator.NotEqual)
         {
-            return !Equals(left, right);
+            return !left.ValueEquals(right);
         }
 
-        if (left is null || right is null)
+        if (!BehaviorBlackboardValue.TryCompare(left, right, out var comparison))
         {
             return false;
         }
 
-        var comparison = CompareValues(left, right);
         return conditionOperator switch
         {
             BehaviorConditionOperator.Greater => comparison > 0,
@@ -210,63 +215,5 @@ public sealed class BehaviorBlackboardConditionNode : BehaviorObservingDecorator
             BehaviorConditionOperator.LessOrEqual => comparison <= 0,
             _ => false,
         };
-    }
-
-    private static int CompareValues(object left, object right)
-    {
-        if (TryConvertToDouble(left, out var leftNumber) && TryConvertToDouble(right, out var rightNumber))
-        {
-            return leftNumber.CompareTo(rightNumber);
-        }
-
-        if (left is IComparable comparable && left.GetType().IsInstanceOfType(right))
-        {
-            return comparable.CompareTo(right);
-        }
-
-        return string.CompareOrdinal(left.ToString(), right.ToString());
-    }
-
-    private static bool TryConvertToDouble(object value, out double result)
-    {
-        switch (value)
-        {
-            case byte typed:
-                result = typed;
-                return true;
-            case sbyte typed:
-                result = typed;
-                return true;
-            case short typed:
-                result = typed;
-                return true;
-            case ushort typed:
-                result = typed;
-                return true;
-            case int typed:
-                result = typed;
-                return true;
-            case uint typed:
-                result = typed;
-                return true;
-            case long typed:
-                result = typed;
-                return true;
-            case ulong typed:
-                result = typed;
-                return true;
-            case float typed:
-                result = typed;
-                return true;
-            case double typed:
-                result = typed;
-                return true;
-            case decimal typed:
-                result = (double)typed;
-                return true;
-            default:
-                result = 0;
-                return false;
-        }
     }
 }

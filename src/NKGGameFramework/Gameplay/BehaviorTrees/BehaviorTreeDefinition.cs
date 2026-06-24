@@ -38,7 +38,7 @@ public sealed class BehaviorNodeDefinition
 
     public string? BlackboardKey { get; init; }
 
-    public object? Value { get; init; }
+    public BehaviorBlackboardValue? Value { get; init; }
 
     public BehaviorConditionOperator Operator { get; init; } = BehaviorConditionOperator.AlwaysTrue;
 
@@ -95,7 +95,7 @@ public sealed class BehaviorNodeDefinition
             BehaviorNodeTypes.BlackboardCondition => new BehaviorBlackboardConditionNode(
                 BlackboardKey ?? throw new InvalidOperationException("Blackboard condition behavior nodes require BlackboardKey."),
                 Operator,
-                Value,
+                Value ?? BehaviorBlackboardValue.Create<object?>(null),
                 StopsOnChange,
                 CreateSingleChild()),
             BehaviorNodeTypes.Repeater => new BehaviorRepeaterNode(CreateSingleChild(), RepeatLimit),

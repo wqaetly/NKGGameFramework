@@ -58,12 +58,45 @@ public sealed record EntityDebugSnapshot(
 
 public sealed record ComponentDebugSnapshot(
     DebugTypeInfo Type,
-    ComponentValueDebugSnapshot Value);
+    ComponentValueDebugSnapshot Value,
+    ComponentGraphDebugSnapshot Graph);
+
+public sealed record ComponentGraphDebugSnapshot(
+    string Id,
+    string? ParentId,
+    DebugTypeInfo? ParentType,
+    string? Group,
+    int Order);
 
 public sealed record ComponentValueDebugSnapshot(
     string Format,
     string? Payload,
-    string? Error);
+    string? Error,
+    ComponentValueDebugNode? Structured = null);
+
+public sealed record ComponentValueDebugNode
+{
+    public required string Kind { get; init; }
+
+    public string? Name { get; init; }
+
+    public required DebugTypeInfo Type { get; init; }
+
+    public bool Editable { get; init; }
+
+    public string? Value { get; init; }
+
+    public IReadOnlyList<ComponentValueDebugNode> Children { get; init; } =
+        Array.Empty<ComponentValueDebugNode>();
+
+    public IReadOnlyList<string> Options { get; init; } = Array.Empty<string>();
+
+    public DebugTypeInfo? ElementType { get; init; }
+
+    public ComponentValueDebugNode? ElementTemplate { get; init; }
+
+    public string? Error { get; init; }
+}
 
 public sealed record SkillDebugSnapshot(
     string Id,

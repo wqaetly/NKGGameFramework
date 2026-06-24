@@ -2,6 +2,7 @@ using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Gameplay;
 
+[ComponentGraph(Group = "Gameplay/Skills", Order = 10)]
 public struct SkillBookComponent : IComponent
 {
     private Dictionary<string, SkillSlot>? _skills;

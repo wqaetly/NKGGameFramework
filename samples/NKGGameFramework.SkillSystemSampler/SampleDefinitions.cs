@@ -78,7 +78,7 @@ internal static class SampleDefinitions
                     Type = BehaviorNodeTypes.BlackboardCondition,
                     BlackboardKey = SampleConstants.ProjectileCountKey,
                     Operator = BehaviorConditionOperator.GreaterOrEqual,
-                    Value = index,
+                    Value = BehaviorBlackboardValue.Create(index),
                     Children = { Fireball(index, burning) },
                 },
                 Action("noop"),

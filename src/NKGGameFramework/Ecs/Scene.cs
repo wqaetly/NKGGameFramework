@@ -6,6 +6,7 @@ public sealed class Scene : IDisposable
 {
     private readonly MemoryPool<EcsCommandBuffer> _commandBuffers;
     private readonly Dictionary<Type, IComponentStore> _componentStores = [];
+    private readonly Dictionary<Type, ISceneComponent> _sceneComponents = [];
     private readonly Stack<int> _freeEntityIds = [];
     private int[] _versions = new int[128];
     private bool[] _alive = new bool[128];
@@ -123,6 +124,57 @@ public sealed class Scene : IDisposable
         return commandBuffer;
     }
 
+    public TComponent GetOrCreateSceneComponent<TComponent>()
+        where TComponent : class, ISceneComponent, new()
+    {
+        return GetOrCreateSceneComponent(static () => new TComponent());
+    }
+
+    public TComponent GetOrCreateSceneComponent<TComponent>(Func<TComponent> factory)
+        where TComponent : class, ISceneComponent
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        var type = typeof(TComponent);
+        if (_sceneComponents.TryGetValue(type, out var component))
+        {
+            return (TComponent)component;
+        }
+
+        var created = factory() ?? throw new InvalidOperationException($"Scene component factory returned null for '{type.Name}'.");
+        _sceneComponents.Add(type, created);
+        return created;
+    }
+
+    public bool TryGetSceneComponent<TComponent>(out TComponent component)
+        where TComponent : class, ISceneComponent
+    {
+        if (_sceneComponents.TryGetValue(typeof(TComponent), out var found))
+        {
+            component = (TComponent)found;
+            return true;
+        }
+
+        component = null!;
+        return false;
+    }
+
+    public bool RemoveSceneComponent<TComponent>()
+        where TComponent : class, ISceneComponent
+    {
+        if (!_sceneComponents.Remove(typeof(TComponent), out var component))
+        {
+            return false;
+        }
+
+        if (component is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
+
+        return true;
+    }
+
     public IReadOnlyList<EcsComponentDebugView> GetComponents(Entity entity)
     {
         EnsureEntity(entity);
@@ -180,6 +232,7 @@ public sealed class Scene : IDisposable
         Systems.Dispose();
         Events.Clear();
         _commandBuffers.Clear();
+        ClearSceneComponents();
         _componentStores.Clear();
         _freeEntityIds.Clear();
         _versions = [];
@@ -353,5 +406,18 @@ public sealed class Scene : IDisposable
         {
             throw new InvalidOperationException("Structural ECS changes are not allowed during query iteration. Record them in an EcsCommandBuffer and play it back after the query.");
         }
+    }
+
+    private void ClearSceneComponents()
+    {
+        foreach (var component in _sceneComponents.Values)
+        {
+            if (component is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+
+        _sceneComponents.Clear();
     }
 }

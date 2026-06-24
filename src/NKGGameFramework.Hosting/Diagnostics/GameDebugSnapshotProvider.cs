@@ -103,16 +103,46 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
     private EntityDebugSnapshot CaptureEntity(Scene scene, Entity entity)
     {
         var components = scene.GetComponents(entity);
+        var componentTypes = components
+            .Select(static component => component.ComponentType)
+            .ToHashSet();
+
         return new EntityDebugSnapshot(
             entity.Id.Value,
             entity.Version,
             components
                 .Select(component => new ComponentDebugSnapshot(
                     DebugSnapshotTypeNames.Create(component.ComponentType),
-                    _componentValueSerializer.Serialize(component.Value)))
+                    _componentValueSerializer.Serialize(component.Value),
+                    CaptureComponentGraph(component.ComponentType, componentTypes)))
                 .ToArray(),
             CaptureSkills(components),
             CaptureBuffs(components));
+    }
+
+    private static ComponentGraphDebugSnapshot CaptureComponentGraph(Type componentType, ISet<Type> componentTypes)
+    {
+        var graph = componentType.GetCustomAttributes(typeof(ComponentGraphAttribute), inherit: false)
+            .OfType<ComponentGraphAttribute>()
+            .FirstOrDefault();
+
+        var parentType = graph?.Parent;
+        var parentId = parentType is not null && componentTypes.Contains(parentType)
+            ? CreateComponentGraphId(parentType)
+            : null;
+
+        return new ComponentGraphDebugSnapshot(
+            CreateComponentGraphId(componentType),
+            parentId,
+            parentType is null ? null : DebugSnapshotTypeNames.Create(parentType),
+            graph?.Group,
+            graph?.Order ?? 0);
+    }
+
+    private static string CreateComponentGraphId(Type componentType)
+    {
+        var typeInfo = DebugSnapshotTypeNames.Create(componentType);
+        return $"{typeInfo.AssemblyName}:{typeInfo.FullName}";
     }
 
     private static IReadOnlyList<SkillDebugSnapshot> CaptureSkills(IReadOnlyList<EcsComponentDebugView> components)
