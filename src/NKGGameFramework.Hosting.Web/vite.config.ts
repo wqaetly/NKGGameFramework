@@ -2,10 +2,12 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const debugApi = 'http://127.0.0.1:5067';
 const webDumpDirectory = path.join(process.cwd(), 'NKGDump');
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const debugApi = process.env.NKG_DEBUG_API ??
+    (mode === 'skill' ? 'http://127.0.0.1:5068' : 'http://127.0.0.1:5067');
+
   return {
     plugins: [react()],
     define: {

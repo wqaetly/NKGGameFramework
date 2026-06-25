@@ -189,6 +189,7 @@ var debugHost = await GameDebugHostAutoStart.TryStartAsync(debugStartup);
 ```
 
 React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot`、`/_nkg/debug/stream`、`/_nkg/debug/control`、`/_nkg/debug/mutations` 和 `/_nkg/debug/dump/recording`；Vite dev server 默认代理到基础 sample 的 `http://127.0.0.1:5067`。
+调试技能 sample 时可在 Web 目录运行 `npm run dev:skill`，代理目标会切到 `http://127.0.0.1:5068`；也可以通过 `NKG_DEBUG_API=http://127.0.0.1:<port>` 覆盖代理目标。
 
 `GameDebugSession.Register(...)` 只用于需要显式限定调试范围的场景；默认情况下，快照接口会读取框架内置 registry 中自动发现的运行态对象。
 宿主游戏只需要启动 `GameDebugHost` 或使用 `GameDebugHostAutoStart`，不需要接入额外 Web 框架。
