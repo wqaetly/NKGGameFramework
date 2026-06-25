@@ -198,6 +198,39 @@ public sealed class GameDebugSnapshotTests
     }
 
     [Fact]
+    public void Capture_options_filter_component_values_to_a_single_component_type()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new PositionComponent(1, 2))
+            .Add(new VelocityComponent(3, 4));
+        var componentType = typeof(PositionComponent);
+        var session = new GameDebugSession().Register(world);
+        var snapshots = new GameDebugSnapshotProvider(
+            session,
+            new OdinGameDebugComponentValueSerializer());
+
+        var snapshot = snapshots.Capture(new GameDebugSnapshotCaptureOptions
+        {
+            WorldName = world.Name,
+            SceneName = scene.Name,
+            EntityId = entity.Id.Value,
+            ComponentTypeFullName = componentType.FullName,
+            ComponentAssemblyName = componentType.Assembly.GetName().Name,
+            IncludeComponentPayloads = true,
+            IncludeStructuredComponentValues = true,
+        });
+
+        var sceneSnapshot = Assert.Single(Assert.Single(snapshot.Worlds).Scenes);
+        var entitySnapshot = Assert.Single(sceneSnapshot.Entities);
+        var component = Assert.Single(entitySnapshot.Components);
+        Assert.Equal(nameof(PositionComponent), component.Type.Name);
+        Assert.NotNull(component.Value.Payload);
+        Assert.NotNull(component.Value.Structured);
+    }
+
+    [Fact]
     public void Mutations_write_any_component_value_through_odin_payload()
     {
         using var world = new World("debug-world");
@@ -442,6 +475,8 @@ public sealed class GameDebugSnapshotTests
     }
 
     private readonly record struct PositionComponent(double X, double Y) : IComponent;
+
+    private readonly record struct VelocityComponent(double X, double Y) : IComponent;
 
     [ComponentGraph(Group = "Debug/Test", Order = 10)]
     private readonly record struct GraphRootComponent(int Value) : IComponent;

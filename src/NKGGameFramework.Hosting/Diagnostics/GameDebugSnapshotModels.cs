@@ -22,6 +22,10 @@ public sealed record GameDebugSnapshotCaptureOptions
 
     public int? EntityId { get; init; }
 
+    public string? ComponentTypeFullName { get; init; }
+
+    public string? ComponentAssemblyName { get; init; }
+
     public int EntityOffset { get; init; }
 
     public int? EntityLimit { get; init; }

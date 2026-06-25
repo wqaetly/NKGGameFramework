@@ -2,16 +2,9 @@ namespace NKGGameFramework.Hosting.Diagnostics;
 
 public static class GameDebugHostAutoStart
 {
-    public const string EnabledVariable = "NKG_DEBUG_HOST";
-    public const string UrlVariable = "NKG_DEBUG_HOST_URL";
-    public const string EndpointPrefixVariable = "NKG_DEBUG_HOST_PREFIX";
-    public const string EnableMutationsVariable = "NKG_DEBUG_HOST_MUTATIONS";
-
     private static readonly object Gate = new();
     private static GameDebugHost? _host;
     private static Task<GameDebugHost?>? _startTask;
-
-    public static bool IsEnabled => IsTruthy(Environment.GetEnvironmentVariable(EnabledVariable));
 
     public static Uri? BaseAddress
     {
@@ -24,9 +17,13 @@ public static class GameDebugHostAutoStart
         }
     }
 
-    public static Task<GameDebugHost?> TryStartFromEnvironmentAsync(CancellationToken cancellationToken = default)
+    public static Task<GameDebugHost?> TryStartAsync(
+        GameDebugHostStartupOptions startupOptions,
+        CancellationToken cancellationToken = default)
     {
-        if (!IsEnabled)
+        ArgumentNullException.ThrowIfNull(startupOptions);
+
+        if (!startupOptions.Enabled)
         {
             return Task.FromResult<GameDebugHost?>(null);
         }
@@ -38,7 +35,7 @@ public static class GameDebugHostAutoStart
                 return Task.FromResult<GameDebugHost?>(_host);
             }
 
-            _startTask ??= StartCoreAsync(cancellationToken);
+            _startTask ??= StartCoreAsync(startupOptions, cancellationToken);
             return _startTask;
         }
     }
@@ -70,20 +67,13 @@ public static class GameDebugHostAutoStart
         }
     }
 
-    internal static bool IsTruthy(string? value)
-    {
-        return value?.Trim().ToLowerInvariant() switch
-        {
-            "1" or "true" or "yes" or "on" => true,
-            _ => false,
-        };
-    }
-
-    private static async Task<GameDebugHost?> StartCoreAsync(CancellationToken cancellationToken)
+    private static async Task<GameDebugHost?> StartCoreAsync(
+        GameDebugHostStartupOptions startupOptions,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var host = await GameDebugHost.StartAsync(ConfigureFromEnvironment, cancellationToken)
+            var host = await GameDebugHost.StartAsync(startupOptions.ApplyTo, cancellationToken)
                 .ConfigureAwait(false);
 
             lock (Gate)
@@ -102,27 +92,6 @@ public static class GameDebugHostAutoStart
             }
 
             throw;
-        }
-    }
-
-    private static void ConfigureFromEnvironment(GameDebugHostOptions options)
-    {
-        var url = Environment.GetEnvironmentVariable(UrlVariable);
-        if (!string.IsNullOrWhiteSpace(url))
-        {
-            options.Url = url;
-        }
-
-        var prefix = Environment.GetEnvironmentVariable(EndpointPrefixVariable);
-        if (!string.IsNullOrWhiteSpace(prefix))
-        {
-            options.EndpointPrefix = prefix;
-        }
-
-        var mutations = Environment.GetEnvironmentVariable(EnableMutationsVariable);
-        if (!string.IsNullOrWhiteSpace(mutations))
-        {
-            options.EnableMutations = IsTruthy(mutations);
         }
     }
 }

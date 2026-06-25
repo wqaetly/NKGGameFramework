@@ -22,14 +22,10 @@ import type {
 
 type ComponentNodeData = {
   component: ComponentDebugSnapshot;
-  onSaveComponent: ComponentNodeMutationExecutor;
-  readOnly: boolean;
+  onInspectComponent: ComponentSelectionHandler;
 };
 
-type ComponentNodeMutationExecutor = (
-  component: ComponentDebugSnapshot,
-  value: ComponentValueDebugSnapshot,
-) => Promise<void>;
+type ComponentSelectionHandler = (component: ComponentDebugSnapshot) => void;
 
 type ComponentGroupNodeData = {
   label: string;
@@ -59,33 +55,22 @@ const componentNodeTypes = {
 export function ComponentGraphCanvas({
   entity,
   query,
-  onSaveComponent,
-  readOnly = false,
+  onInspectComponent,
+  selectedComponentKey,
 }: {
   entity: EntityDebugSnapshot;
   query: string;
-  onSaveComponent: ComponentMutationExecutor;
-  readOnly?: boolean;
+  onInspectComponent: ComponentSelectionHandler;
+  selectedComponentKey?: string | null;
 }) {
-  const entityRef = useRef(entity);
-
-  useEffect(() => {
-    entityRef.current = entity;
-  }, [entity]);
-
-  const saveComponent = useCallback<ComponentNodeMutationExecutor>(
-    (component, value) => onSaveComponent(entityRef.current, component, value),
-    [onSaveComponent],
-  );
-
   const stableComponents = useStableComponents(entity.components);
   const filteredComponents = useMemo(
     () => filterComponents(stableComponents, query),
     [stableComponents, query],
   );
   const rawGraph = useMemo(
-    () => buildComponentGraph(filteredComponents, saveComponent, readOnly),
-    [filteredComponents, readOnly, saveComponent],
+    () => buildComponentGraph(filteredComponents, onInspectComponent, selectedComponentKey ?? null),
+    [filteredComponents, onInspectComponent, selectedComponentKey],
   );
   const graph = useStableGraphElements(rawGraph);
 
@@ -210,8 +195,8 @@ function useStableGraphElements(graph: {
 
 function buildComponentGraph(
   components: ComponentDebugSnapshot[],
-  onSaveComponent: ComponentNodeMutationExecutor,
-  readOnly: boolean,
+  onInspectComponent: ComponentSelectionHandler,
+  selectedComponentKey: string | null,
 ) {
   const componentById = new Map<string, ComponentTreeNode>();
 
@@ -274,8 +259,8 @@ function buildComponentGraph(
         root,
         0,
         rootY,
-        onSaveComponent,
-        readOnly,
+        onInspectComponent,
+        selectedComponentKey,
         nodes,
         edges,
       );
@@ -296,8 +281,8 @@ function layoutComponentTree(
   tree: ComponentTreeNode,
   depth: number,
   y: number,
-  onSaveComponent: ComponentNodeMutationExecutor,
-  readOnly: boolean,
+  onInspectComponent: ComponentSelectionHandler,
+  selectedComponentKey: string | null,
   nodes: ComponentGraphFlowNode[],
   edges: Edge[],
 ) {
@@ -322,11 +307,12 @@ function layoutComponentTree(
       width: COMPONENT_NODE_WIDTH,
       height: ownHeight,
     },
-    style: {
-      width: COMPONENT_NODE_WIDTH,
-      height: ownHeight,
-    },
-    data: { component: tree.component, onSaveComponent, readOnly },
+      style: {
+        width: COMPONENT_NODE_WIDTH,
+        height: ownHeight,
+      },
+    selected: selectedComponentKey === graph.id,
+    data: { component: tree.component, onInspectComponent },
     draggable: false,
   });
 
@@ -337,8 +323,8 @@ function layoutComponentTree(
       child,
       depth + 1,
       childY,
-      onSaveComponent,
-      readOnly,
+      onInspectComponent,
+      selectedComponentKey,
       nodes,
       edges,
     );
@@ -398,20 +384,7 @@ function estimateComponentSubtreeHeight(tree: ComponentTreeNode): number {
 }
 
 function estimateComponentNodeHeight(component: ComponentDebugSnapshot) {
-  const structuredRows = component.value.structured ? countStructuredRows(component.value.structured) : 5;
-  return 74 + Math.min(280, Math.max(64, structuredRows * 27));
-}
-
-function countStructuredRows(node: ComponentValueDebugNode): number {
-  if (node.kind === 'object') {
-    return Math.max(1, node.children.reduce((total, child) => total + countStructuredRows(child), 0));
-  }
-
-  if (node.kind === 'list') {
-    return Math.max(2, node.children.reduce((total, child) => total + countStructuredRows(child), 1));
-  }
-
-  return 1;
+  return component.value.error ? 104 : 92;
 }
 
 function stabilizeComponentSnapshot(
@@ -493,8 +466,8 @@ function areFlowNodesEqual(left: ComponentGraphFlowNode, right: ComponentGraphFl
   if (left.type === 'componentNode' && right.type === 'componentNode') {
     return (
       left.data.component === right.data.component &&
-      left.data.onSaveComponent === right.data.onSaveComponent &&
-      left.data.readOnly === right.data.readOnly
+      left.data.onInspectComponent === right.data.onInspectComponent &&
+      left.selected === right.selected
     );
   }
 
@@ -602,12 +575,59 @@ function areStringArraysEqual(left: string[], right: string[]) {
 }
 
 function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
-  const { component, onSaveComponent, readOnly } = data;
-  const [draftPayload, setDraftPayload] = useState(formatComponentValue(component.value));
-  const [draftNode, setDraftNode] = useState(() => cloneDebugNode(component.value.structured));
-  const [saving, setSaving] = useState(false);
+  const { component, onInspectComponent } = data;
   const graph = getComponentGraph(component);
   const initial = component.type.name.trim().charAt(0).toUpperCase() || '?';
+  const hasDetails = component.value.payload !== null ||
+    component.value.structured !== null ||
+    component.value.error !== null;
+  const status = component.value.error ? 'Error' : hasDetails ? 'Loaded' : 'Deferred';
+
+  return (
+    <button
+      className={selected ? 'component-flow-node selected' : 'component-flow-node'}
+      type="button"
+      onClick={() => onInspectComponent(component)}
+      title={component.type.fullName}
+    >
+      <Handle type="target" position={Position.Left} id="in" isConnectable={false} />
+      <div className="component-node-corner">
+        <span className={component.value.error ? 'component-node-status error' : 'component-node-status'} />
+        <span className="component-node-format">{status}</span>
+      </div>
+      <div className="component-flow-node-head">
+        <div className="component-node-icon" aria-hidden>
+          {initial}
+        </div>
+        <div className="component-node-title">
+          <strong>{component.type.name}</strong>
+          <small>{graph.group ?? component.type.fullName}</small>
+        </div>
+      </div>
+      <div className="component-node-summary">
+        <span>{component.value.format}</span>
+        <span>{graph.parentType ? `Child of ${graph.parentType.name}` : 'Root component'}</span>
+      </div>
+      <Handle type="source" position={Position.Right} id="out" isConnectable={false} />
+    </button>
+  );
+}
+
+export function ComponentInspector({
+  entity,
+  component,
+  onSaveComponent,
+  readOnly = false,
+}: {
+  entity: EntityDebugSnapshot;
+  component: ComponentDebugSnapshot;
+  onSaveComponent: ComponentMutationExecutor;
+  readOnly?: boolean;
+}) {
+  const [draftPayload, setDraftPayload] = useState(formatComponentValue(component.value));
+  const [draftNode, setDraftNode] = useState(() => cloneDebugNode(component.value.structured));
+  const graph = getComponentGraph(component);
+  const [saving, setSaving] = useState(false);
   const canSave = !readOnly && component.value.format === 'odin-json' && component.value.error === null;
 
   useEffect(() => {
@@ -620,23 +640,13 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
   }, []);
 
   return (
-    <div className={selected ? 'component-flow-node selected' : 'component-flow-node'}>
-      <Handle type="target" position={Position.Left} id="in" isConnectable={false} />
-      <div className="component-node-corner">
-        <span className={component.value.error ? 'component-node-status error' : 'component-node-status'} />
-        <span className="component-node-format">{component.value.format}</span>
-      </div>
-      <div className="component-flow-node-head">
-        <div className="component-node-icon" aria-hidden>
-          {initial}
-        </div>
-        <div className="component-node-title">
-          <strong>{component.type.name}</strong>
-          <small>{graph.group ?? component.type.fullName}</small>
-        </div>
+    <div className="component-inspector-editor">
+      <div className="component-inspector-meta">
+        <span>{graph.group ?? 'Components'}</span>
+        <span>{component.value.format}</span>
       </div>
       {draftNode ? (
-        <div className="component-flow-node-fields nodrag nopan">
+        <div className="component-inspector-fields">
           <StructuredValueEditor
             node={draftNode}
             path=""
@@ -653,8 +663,8 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
           spellCheck={false}
         />
       )}
-      <div className="action-row component-actions component-node-actions nodrag nopan">
-        <span>{component.value.format}</span>
+      <div className="action-row component-actions component-inspector-actions">
+        <span title={component.type.fullName}>{component.type.fullName}</span>
         <button
           className="mini-button"
           type="button"
@@ -662,7 +672,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
           onClick={async () => {
             setSaving(true);
             try {
-              await onSaveComponent(component, {
+              await onSaveComponent(entity, component, {
                 ...component.value,
                 payload: draftNode ? component.value.payload : draftPayload,
                 structured: draftNode,
@@ -676,7 +686,6 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
           {saving ? 'Saving' : 'Save'}
         </button>
       </div>
-      <Handle type="source" position={Position.Right} id="out" isConnectable={false} />
     </div>
   );
 }

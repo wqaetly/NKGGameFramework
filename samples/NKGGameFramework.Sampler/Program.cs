@@ -5,13 +5,15 @@ namespace NKGGameFramework.Sampler;
 
 internal static class Program
 {
-    private static readonly TimeSpan FrameDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan FrameDelay = TimeSpan.FromMilliseconds(16);
+    private static readonly GameDebugHostStartupOptions DebugHostStartup =
+        GameDebugHostStartupOptions.Localhost(port: 5067, enableMutations: true);
 
     public static async Task Main()
     {
         // 示例程序用普通控制台主循环模拟宿主。
         // 接入具体宿主时，只需要把启动、更新、关闭映射到各自生命周期。
-        var debugHost = await GameDebugHostAutoStart.TryStartFromEnvironmentAsync();
+        var debugHost = await GameDebugHostAutoStart.TryStartAsync(DebugHostStartup);
         if (debugHost is not null)
         {
             Console.WriteLine($"[基础示例] Web Debug Host={debugHost.BaseAddress}");

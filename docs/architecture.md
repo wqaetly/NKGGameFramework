@@ -104,8 +104,8 @@ React/Vite 面板放在 `NKGGameFramework.Hosting.Web`，保持前端依赖与 .
 
 `GameDebugSession.Register(...)` 只用于显式限定调试范围；没有显式注册时，Hosting 默认读取框架 registry 自动发现的运行态对象。
 宿主游戏只需要启动 `GameDebugHost` 或使用 `GameDebugHostAutoStart`，不需要接入额外 Web 框架；浏览器面板继续按 `/_nkg/debug/*` API 访问同一套调试协议。
-Mutation 默认关闭；本地开发可以通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `NKG_DEBUG_HOST_MUTATIONS=1` 显式开启。
-`GameDebugHostAutoStart` 支持通过 `NKG_DEBUG_HOST=1` 在开发环境自动启动；`NKG_DEBUG_HOST_URL`、`NKG_DEBUG_HOST_PREFIX` 和 `NKG_DEBUG_HOST_MUTATIONS` 可覆盖默认监听地址、路由前缀和 mutation 开关。
+真实宿主通过 `GameDebugHostStartupOptions` 作为普通代码配置项接入，例如 `GameDebugHostAutoStart.TryStartAsync(GameDebugHostStartupOptions.Localhost(5067))`。
+Mutation 默认关闭；本地开发可以通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `GameDebugHostStartupOptions.EnableMutations` 显式开启。
 WebDebug 当前数据流、Frame Stream、Snapshot Window Dump，以及后续 delta recorder 方案见 [debug-and-dump.md](debug-and-dump.md)。
 
 ## Gameplay

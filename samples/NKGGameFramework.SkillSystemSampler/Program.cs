@@ -6,10 +6,12 @@ namespace NKGGameFramework.SkillSystemSampler;
 internal static class Program
 {
     private static readonly TimeSpan FrameDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly GameDebugHostStartupOptions DebugHostStartup =
+        GameDebugHostStartupOptions.Localhost(port: 5068, enableMutations: true);
 
     public static async Task Main()
     {
-        var debugHost = await GameDebugHostAutoStart.TryStartFromEnvironmentAsync();
+        var debugHost = await GameDebugHostAutoStart.TryStartAsync(DebugHostStartup);
         if (debugHost is not null)
         {
             SampleLog.Write($"Web Debug Host={debugHost.BaseAddress}");

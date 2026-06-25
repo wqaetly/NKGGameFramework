@@ -981,6 +981,10 @@ public sealed class GameDebugHost : IAsyncDisposable
             WorldName = GetString(query, "world") ?? GetString(query, "worldName"),
             SceneName = GetString(query, "scene") ?? GetString(query, "sceneName"),
             EntityId = GetInt(query, "entityId"),
+            ComponentTypeFullName = GetString(query, "componentTypeFullName")
+                ?? GetString(query, "component"),
+            ComponentAssemblyName = GetString(query, "componentAssemblyName")
+                ?? GetString(query, "componentAssembly"),
             EntityOffset = Math.Max(0, GetInt(query, "entityOffset") ?? GetInt(query, "offset") ?? 0),
             EntityLimit = NormalizeLimit(GetInt(query, "entityLimit") ?? GetInt(query, "limit")),
             IncludeComponentPayloads = GetBool(query, "includePayload")

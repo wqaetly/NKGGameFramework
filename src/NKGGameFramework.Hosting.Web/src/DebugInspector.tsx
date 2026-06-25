@@ -13,6 +13,7 @@ import {
   Bug,
   Cpu,
   Circle,
+  Lock,
   Pause,
   Play,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
   SkipForward,
   Sparkles,
   Square,
+  Unlock,
   Upload,
   X,
 } from 'lucide-react';
@@ -31,8 +33,9 @@ import {
   postDumpRecording,
   postDebugMutation,
 } from './api';
-import { countComponentGroups, type ComponentMutationExecutor } from './componentGraphModel';
+import { countComponentGroups, getComponentGraph, type ComponentMutationExecutor } from './componentGraphModel';
 import type {
+  ComponentDebugSnapshot,
   ComponentStoreDebugSnapshot,
   EntityDebugSnapshot,
   GameDebugControlCommand,
@@ -78,14 +81,60 @@ type DockWorkspaceModel = {
   activeScene: SceneDebugSnapshot | null;
   filteredEntities: EntityDebugSnapshot[];
   selectedEntity: EntityDebugSnapshot | null;
-  selectedEntityLoading: boolean;
+  selectedComponentKey: string | null;
+  activeInspectorPanelId: string | null;
+  componentInspectors: ComponentInspectorPanelState[];
+  componentDetails: Record<string, ComponentDetailEntry>;
   isDumpMode: boolean;
   selectScene: (entry: SceneEntry) => void;
   selectEntity: (entityId: number) => void;
+  inspectComponent: (entity: EntityDebugSnapshot, component: ComponentDebugSnapshot) => void;
+  toggleInspectorLock: (panelId: string) => void;
+  closeInspectorPanel: (panelId: string) => void;
+  reloadComponentDetail: (target: ComponentInspectorTarget) => void;
   onSaveComponent: ComponentMutationExecutor;
 };
 
-type DockPanelProps = IDockviewPanelProps<Record<string, never>>;
+type ComponentInspectorTarget = {
+  worldName: string;
+  sceneName: string;
+  entityId: number;
+  entityVersion: number;
+  componentTypeName: string;
+  componentTypeFullName: string;
+  componentAssemblyName: string;
+  graphId: string;
+};
+
+type ComponentInspectorPanelState = {
+  id: string;
+  locked: boolean;
+  target: ComponentInspectorTarget | null;
+};
+
+type ComponentDetailEntry =
+  | {
+      status: 'loading';
+      entity?: EntityDebugSnapshot;
+      component?: ComponentDebugSnapshot;
+    }
+  | {
+      status: 'ready';
+      entity: EntityDebugSnapshot;
+      component: ComponentDebugSnapshot;
+    }
+  | {
+      status: 'error';
+      message: string;
+      entity?: EntityDebugSnapshot;
+      component?: ComponentDebugSnapshot;
+    };
+
+type DockPanelParams = {
+  inspectorId?: string;
+};
+
+type DockPanelProps = IDockviewPanelProps<DockPanelParams>;
 
 const DOCK_LAYOUT_STORAGE_KEY = 'nkg.webdebug.layout.v3';
 const LEGACY_DOCK_LAYOUT_STORAGE_KEYS = ['nkg.webdebug.layout.v1', 'nkg.webdebug.layout.v2'];
@@ -94,20 +143,28 @@ const LEGACY_FRAME_POLLING_STORAGE_KEY = 'nkg.webdebug.framePolling';
 const LEGACY_AUTO_REFRESH_STORAGE_KEY = 'nkg.webdebug.autoRefresh';
 const DOCK_PANEL_TITLES: Record<string, string> = {
   components: 'Components',
+  inspector: 'Inspector',
   scenes: 'Scenes',
   entities: 'Entities',
   runtime: 'Runtime',
   diagnostics: 'Diagnostics',
 };
 
+const DEFAULT_INSPECTOR_PANEL_ID = 'inspector';
+
 const ComponentGraphCanvas = lazy(() =>
   import('./ComponentGraphCanvas').then((module) => ({ default: module.ComponentGraphCanvas })),
+);
+
+const ComponentInspector = lazy(() =>
+  import('./ComponentGraphCanvas').then((module) => ({ default: module.ComponentInspector })),
 );
 
 const dockPanelComponents = {
   scenes: ScenesDockPanel,
   entities: EntitiesDockPanel,
   components: ComponentsDockPanel,
+  inspector: ComponentInspectorDockPanel,
   runtime: RuntimeDockPanel,
   diagnostics: DiagnosticsDockPanel,
 } satisfies Record<string, React.FunctionComponent<DockPanelProps>>;
@@ -123,7 +180,11 @@ export function App() {
   const [query, setQuery] = useState('');
   const [selection, setSelection] = useState<SceneSelection | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
-  const [entityDetails, setEntityDetails] = useState<Record<string, EntityDebugSnapshot>>({});
+  const [componentDetails, setComponentDetails] = useState<Record<string, ComponentDetailEntry>>({});
+  const [componentInspectors, setComponentInspectors] = useState<ComponentInspectorPanelState[]>(() => [
+    createEmptyInspectorPanel(),
+  ]);
+  const [activeInspectorPanelId, setActiveInspectorPanelId] = useState<string | null>(DEFAULT_INSPECTOR_PANEL_ID);
   const [dockRevision, setDockRevision] = useState(0);
   const [frameStream, setFrameStream] = useState(readStoredFrameStream);
   const [dump, setDump] = useState<GameDebugDumpDocument | null>(null);
@@ -132,40 +193,29 @@ export function App() {
   const [dumpRecording, setDumpRecording] = useState<GameDebugDumpRecordingState | null>(null);
   const [dumpBusy, setDumpBusy] = useState(false);
   const refreshInFlightRef = useRef(false);
-  const entityDetailLoadKeyRef = useRef<string | null>(null);
+  const componentDetailLoadKeysRef = useRef<Set<string>>(new Set());
   const activeSceneEntryRef = useRef<SceneEntry | null>(null);
-  const entityDetailsRef = useRef<Record<string, EntityDebugSnapshot>>({});
-  const selectedEntityOverviewRef = useRef<EntityDebugSnapshot | null>(null);
-  const selectedEntityDetailKeyRef = useRef<string | null>(null);
+  const snapshotRef = useRef<GameDebugSnapshot | null>(null);
+  const componentInspectorsRef = useRef<ComponentInspectorPanelState[]>([]);
+  const componentDetailsRef = useRef<Record<string, ComponentDetailEntry>>({});
   const dumpFileInputRef = useRef<HTMLInputElement | null>(null);
   const dumpModeRef = useRef(false);
+  const nextInspectorIdRef = useRef(1);
   const dumpFrames = dump?.frames ?? [];
   const dumpMode = dumpFrames.length > 0;
   const activeDumpFrame = dumpFrames[dumpFrameIndex] ?? null;
 
   const commitSnapshotMessage = useCallback((
     message: GameDebugSnapshotMessage,
-    options: { clearEntityDetails?: boolean } = {},
+    options: { clearComponentDetails?: boolean } = {},
   ) => {
     setError(null);
     setSnapshot(message.snapshot);
     setControl(message.control);
-    if (options.clearEntityDetails) {
-      setEntityDetails({});
+    if (options.clearComponentDetails) {
+      setComponentDetails({});
     }
     setLoadState('ready');
-  }, []);
-
-  const commitEntityDetail = useCallback((
-    message: GameDebugSnapshotMessage,
-    entity: EntityDebugSnapshot,
-    detailKey: string,
-  ) => {
-    setControl(message.control);
-    setEntityDetails((current) => ({
-      ...current,
-      [detailKey]: entity,
-    }));
   }, []);
 
   const loadDumpDocument = useCallback((nextDump: GameDebugDumpDocument) => {
@@ -175,15 +225,15 @@ export function App() {
     setDumpFrameIndex(0);
     setDumpPlaying(false);
     setFrameStream(false);
-    setEntityDetails({});
+    setComponentDetails({});
     commitSnapshotMessage(nextDump.frames[0], {
-      clearEntityDetails: true,
+      clearComponentDetails: true,
     });
   }, [commitSnapshotMessage]);
 
   const refresh = useCallback(async (
     signal?: AbortSignal,
-    options: { clearEntityDetails?: boolean } = {},
+    options: { clearComponentDetails?: boolean } = {},
   ) => {
     if (refreshInFlightRef.current) {
       return;
@@ -204,7 +254,7 @@ export function App() {
       }
 
       commitSnapshotMessage(next, {
-        clearEntityDetails: options.clearEntityDetails ?? true,
+        clearComponentDetails: options.clearComponentDetails ?? true,
       });
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
@@ -219,54 +269,166 @@ export function App() {
     }
   }, [commitSnapshotMessage]);
 
-  const loadEntityDetail = useCallback(async (
-    worldName: string,
-    sceneName: string,
-    entityId: number,
-    detailKey: string,
-    signal?: AbortSignal,
+  const loadComponentDetail = useCallback(async (
+    target: ComponentInspectorTarget,
+    options: { force?: boolean; signal?: AbortSignal } = {},
   ) => {
-    if (entityDetailLoadKeyRef.current === detailKey) {
+    const detailKey = createComponentDetailKey(target);
+    if (componentDetailLoadKeysRef.current.has(detailKey)) {
       return;
     }
 
-    entityDetailLoadKeyRef.current = detailKey;
+    const currentEntry = componentDetailsRef.current[detailKey];
+    if (!options.force && currentEntry?.status === 'ready') {
+      return;
+    }
+
+    componentDetailLoadKeysRef.current.add(detailKey);
+    setComponentDetails((current) => ({
+      ...current,
+      [detailKey]: {
+        status: 'loading',
+        entity: currentEntry?.entity,
+        component: currentEntry?.component,
+      },
+    }));
 
     try {
-      const detailMessage = await fetchDebugSnapshotMessage(signal, {
-        worldName,
-        sceneName,
-        entityId,
+      if (dumpModeRef.current) {
+        const currentSnapshot = snapshotRef.current;
+        const entity = currentSnapshot
+          ? findEntityDetail(currentSnapshot, target.worldName, target.sceneName, target.entityId)
+          : null;
+        const component = entity ? findComponentDetail(entity, target) : null;
+        if (!entity || !component) {
+          throw new Error('Component value was not recorded in this dump frame.');
+        }
+
+        setComponentDetails((current) => ({
+          ...current,
+          [detailKey]: {
+            status: 'ready',
+            entity,
+            component,
+          },
+        }));
+        return;
+      }
+
+      const detailMessage = await fetchDebugSnapshotMessage(options.signal, {
+        worldName: target.worldName,
+        sceneName: target.sceneName,
+        entityId: target.entityId,
+        componentTypeFullName: target.componentTypeFullName,
+        componentAssemblyName: target.componentAssemblyName,
         includePayload: true,
         includeStructured: true,
       });
       const entity = findEntityDetail(
         detailMessage.snapshot,
-        worldName,
-        sceneName,
-        entityId,
+        target.worldName,
+        target.sceneName,
+        target.entityId,
       );
-      if (!entity) {
-        throw new Error(`Entity #${entityId} was not found in the debug snapshot.`);
+      const component = entity ? findComponentDetail(entity, target) : null;
+      if (!entity || !component) {
+        throw new Error(`Component '${target.componentTypeName}' was not found on Entity #${target.entityId}.`);
       }
 
       if (dumpModeRef.current) {
         return;
       }
 
-      commitEntityDetail(detailMessage, entity, detailKey);
+      setControl(detailMessage.control);
+      setComponentDetails((current) => ({
+        ...current,
+        [detailKey]: {
+          status: 'ready',
+          entity,
+          component,
+        },
+      }));
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
         return;
       }
 
-      setError(caught instanceof Error ? caught.message : String(caught));
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setError(message);
+      setComponentDetails((current) => ({
+        ...current,
+        [detailKey]: {
+          status: 'error',
+          message,
+          entity: current[detailKey]?.entity,
+          component: current[detailKey]?.component,
+        },
+      }));
     } finally {
-      if (entityDetailLoadKeyRef.current === detailKey) {
-        entityDetailLoadKeyRef.current = null;
+      componentDetailLoadKeysRef.current.delete(detailKey);
+    }
+  }, []);
+
+  const reloadInspectorDetails = useCallback((force = false) => {
+    for (const panel of componentInspectorsRef.current) {
+      if (panel.target) {
+        void loadComponentDetail(panel.target, { force });
       }
     }
-  }, [commitEntityDetail]);
+  }, [loadComponentDetail]);
+
+  const reloadComponentDetail = useCallback((target: ComponentInspectorTarget) => {
+    void loadComponentDetail(target, { force: true });
+  }, [loadComponentDetail]);
+
+  const inspectComponent = useCallback((
+    entity: EntityDebugSnapshot,
+    component: ComponentDebugSnapshot,
+  ) => {
+    const entry = activeSceneEntryRef.current;
+    if (!entry) {
+      return;
+    }
+
+    const target = createInspectorTarget(entry, entity, component);
+    let nextActivePanelId = DEFAULT_INSPECTOR_PANEL_ID;
+
+    setComponentInspectors((current) => {
+      const unlocked = current.find((panel) => !panel.locked);
+      if (unlocked) {
+        nextActivePanelId = unlocked.id;
+        return current.map((panel) =>
+          panel.id === unlocked.id ? { ...panel, target } : panel,
+        );
+      }
+
+      const id = createInspectorPanelId(nextInspectorIdRef.current++);
+      nextActivePanelId = id;
+      return [
+        ...current,
+        {
+          id,
+          locked: false,
+          target,
+        },
+      ];
+    });
+    setActiveInspectorPanelId(nextActivePanelId);
+    void loadComponentDetail(target);
+  }, [loadComponentDetail]);
+
+  const toggleInspectorLock = useCallback((panelId: string) => {
+    setComponentInspectors((current) =>
+      current.map((panel) =>
+        panel.id === panelId ? { ...panel, locked: !panel.locked } : panel,
+      ),
+    );
+  }, []);
+
+  const closeInspectorPanel = useCallback((panelId: string) => {
+    setComponentInspectors((current) => current.filter((panel) => panel.id !== panelId));
+    setActiveInspectorPanelId((current) => current === panelId ? null : current);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -290,7 +452,7 @@ export function App() {
     }
 
     commitSnapshotMessage(activeDumpFrame, {
-      clearEntityDetails: true,
+      clearComponentDetails: true,
     });
   }, [activeDumpFrame, commitSnapshotMessage]);
 
@@ -300,8 +462,6 @@ export function App() {
     [scenes, selection],
   );
   const activeScene = activeSceneEntry?.scene ?? null;
-  const activeWorldName = activeSceneEntry?.world.name ?? null;
-  const activeSceneName = activeSceneEntry?.scene.name ?? null;
 
   useEffect(() => {
     if (!selection && scenes[0]) {
@@ -321,38 +481,29 @@ export function App() {
 
     return filteredEntities.find((entity) => entity.id === selectedEntityId) ?? filteredEntities[0];
   }, [filteredEntities, selectedEntityId]);
-  const selectedEntityOverviewId = selectedEntityOverview?.id ?? null;
-  const selectedEntityDetailKey = useMemo(
-    () => activeWorldName && activeSceneName && selectedEntityOverviewId !== null
-      ? createEntityDetailKey(
-          activeWorldName,
-          activeSceneName,
-          selectedEntityOverviewId,
-        )
-      : null,
-    [activeSceneName, activeWorldName, selectedEntityOverviewId],
+  const selectedEntity = selectedEntityOverview;
+  const selectedComponentKey = useMemo(
+    () => componentInspectors.find((panel) => !panel.locked && panel.target)?.target?.graphId ??
+      componentInspectors.find((panel) => panel.target)?.target?.graphId ??
+      null,
+    [componentInspectors],
   );
-  const selectedEntity = selectedEntityDetailKey
-    ? entityDetails[selectedEntityDetailKey] ?? selectedEntityOverview
-    : selectedEntityOverview;
-  const selectedEntityHasDetails = selectedEntity !== null && hasComponentValueDetails(selectedEntity);
-  const selectedEntityLoading = !dumpMode && selectedEntity !== null && !selectedEntityHasDetails;
 
   useEffect(() => {
     activeSceneEntryRef.current = activeSceneEntry;
   }, [activeSceneEntry]);
 
   useEffect(() => {
-    entityDetailsRef.current = entityDetails;
-  }, [entityDetails]);
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   useEffect(() => {
-    selectedEntityOverviewRef.current = selectedEntityOverview;
-  }, [selectedEntityOverview]);
+    componentInspectorsRef.current = componentInspectors;
+  }, [componentInspectors]);
 
   useEffect(() => {
-    selectedEntityDetailKeyRef.current = selectedEntityDetailKey;
-  }, [selectedEntityDetailKey]);
+    componentDetailsRef.current = componentDetails;
+  }, [componentDetails]);
 
   useEffect(() => {
     writeStoredFrameStream(frameStream);
@@ -374,24 +525,7 @@ export function App() {
     const handleSnapshot = (event: Event) => {
       const message = JSON.parse((event as MessageEvent<string>).data) as GameDebugSnapshotMessage;
       commitSnapshotMessage(message);
-
-      const entry = activeSceneEntryRef.current;
-      const entityOverview = selectedEntityOverviewRef.current;
-      const detailKey = selectedEntityDetailKeyRef.current;
-      if (
-        entry &&
-        entityOverview &&
-        detailKey &&
-        entityDetailsRef.current[detailKey] &&
-        entityDetailLoadKeyRef.current !== detailKey
-      ) {
-        void loadEntityDetail(
-          entry.world.name,
-          entry.scene.name,
-          entityOverview.id,
-          detailKey,
-        );
-      }
+      reloadInspectorDetails(true);
     };
 
     stream.addEventListener('snapshot', handleSnapshot);
@@ -403,7 +537,7 @@ export function App() {
       stream.removeEventListener('snapshot', handleSnapshot);
       stream.close();
     };
-  }, [commitSnapshotMessage, dumpMode, frameStream, loadEntityDetail]);
+  }, [commitSnapshotMessage, dumpMode, frameStream, reloadInspectorDetails]);
 
   useEffect(() => {
     if (!dumpMode || !dumpPlaying) {
@@ -431,37 +565,20 @@ export function App() {
   }, [selectedEntityOverview, selectedEntityId]);
 
   useEffect(() => {
-    if (
-      !activeWorldName ||
-      !activeSceneName ||
-      selectedEntityOverviewId === null ||
-      !selectedEntityDetailKey
-    ) {
-      return;
-    }
-
-    if (entityDetails[selectedEntityDetailKey]) {
-      return;
-    }
-
     const controller = new AbortController();
-    void loadEntityDetail(
-      activeWorldName,
-      activeSceneName,
-      selectedEntityOverviewId,
-      selectedEntityDetailKey,
-      controller.signal,
-    );
+    for (const panel of componentInspectors) {
+      if (!panel.target) {
+        continue;
+      }
+
+      const detailKey = createComponentDetailKey(panel.target);
+      if (!componentDetails[detailKey]) {
+        void loadComponentDetail(panel.target, { signal: controller.signal });
+      }
+    }
 
     return () => controller.abort();
-  }, [
-    activeSceneName,
-    activeWorldName,
-    entityDetails,
-    loadEntityDetail,
-    selectedEntityDetailKey,
-    selectedEntityOverviewId,
-  ]);
+  }, [componentDetails, componentInspectors, loadComponentDetail, snapshot?.capturedAt]);
 
   const totals = useMemo(() => summarize(snapshot), [snapshot]);
 
@@ -513,7 +630,7 @@ export function App() {
         return;
       }
 
-      setEntityDetails({});
+      setComponentDetails({});
       await refresh();
     },
     [activeSceneEntry, dumpMode, refresh],
@@ -528,10 +645,17 @@ export function App() {
       activeScene,
       filteredEntities,
       selectedEntity,
-      selectedEntityLoading,
+      selectedComponentKey,
+      activeInspectorPanelId,
+      componentInspectors,
+      componentDetails,
       isDumpMode: dumpMode,
       selectScene,
       selectEntity,
+      inspectComponent,
+      toggleInspectorLock,
+      closeInspectorPanel,
+      reloadComponentDetail,
       onSaveComponent: executeComponentMutation,
     }),
     [
@@ -542,10 +666,17 @@ export function App() {
       activeScene,
       filteredEntities,
       selectedEntity,
-      selectedEntityLoading,
+      selectedComponentKey,
+      activeInspectorPanelId,
+      componentInspectors,
+      componentDetails,
       dumpMode,
       selectScene,
       selectEntity,
+      inspectComponent,
+      toggleInspectorLock,
+      closeInspectorPanel,
+      reloadComponentDetail,
       executeComponentMutation,
     ],
   );
@@ -598,13 +729,13 @@ export function App() {
     setDump(null);
     setDumpFrameIndex(0);
     setDumpPlaying(false);
-    setEntityDetails({});
+    setComponentDetails({});
   }, []);
 
   const returnToLive = useCallback(() => {
     clearDumpPlayback();
     void refresh(undefined, {
-      clearEntityDetails: true,
+      clearComponentDetails: true,
     });
   }, [clearDumpPlayback, refresh]);
 
@@ -658,7 +789,7 @@ export function App() {
         loadDumpDocument(result.dump);
       } else {
         await refresh(undefined, {
-          clearEntityDetails: true,
+          clearComponentDetails: true,
         });
       }
     } catch (caught) {
@@ -820,6 +951,41 @@ function DockWorkspace({ model }: { model: DockWorkspaceModel }) {
     return () => disposable.dispose();
   }, [api]);
 
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    for (const inspector of model.componentInspectors) {
+      const panel = api.getPanel(inspector.id);
+      if (panel) {
+        panel.api.updateParameters({ inspectorId: inspector.id });
+        panel.api.setTitle(formatInspectorPanelTitle(inspector));
+      } else {
+        addInspectorDockPanel(api, inspector);
+      }
+    }
+
+    if (model.activeInspectorPanelId) {
+      api.getPanel(model.activeInspectorPanelId)?.api.setActive();
+    }
+
+    saveDockLayout(api);
+  }, [api, model.activeInspectorPanelId, model.componentInspectors]);
+
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    const disposable = api.onDidRemovePanel((panel) => {
+      if (isInspectorPanelId(panel.api.id)) {
+        model.closeInspectorPanel(panel.api.id);
+      }
+    });
+    return () => disposable.dispose();
+  }, [api, model]);
+
   return (
     <DockWorkspaceContext.Provider value={model}>
       <section className="dock-workspace">
@@ -942,14 +1108,76 @@ function ComponentsDockPanel(_props: DockPanelProps) {
       {model.selectedEntity ? (
         <EntityDetails
           entity={model.selectedEntity}
-          isLoading={model.selectedEntityLoading}
           componentQuery={componentQuery}
           onComponentQueryChange={setComponentQuery}
-          onSaveComponent={model.onSaveComponent}
-          readOnly={model.isDumpMode}
+          selectedComponentKey={model.selectedComponentKey}
+          onInspectComponent={model.inspectComponent}
         />
       ) : (
         <EmptyDetails />
+      )}
+    </DockPanelBody>
+  );
+}
+
+function ComponentInspectorDockPanel(props: DockPanelProps) {
+  const model = useDockModel();
+  const panelId = props.params.inspectorId ?? DEFAULT_INSPECTOR_PANEL_ID;
+  const panel = model.componentInspectors.find((candidate) => candidate.id === panelId);
+  const target = panel?.target ?? null;
+  const entry = target ? model.componentDetails[createComponentDetailKey(target)] : null;
+  const entity = entry?.entity ?? null;
+  const component = entry?.component ?? null;
+  const busy = entry?.status === 'loading';
+
+  return (
+    <DockPanelBody className="component-inspector-panel">
+      <div className="inspector-heading">
+        <div>
+          <h2>{target?.componentTypeName ?? 'Inspector'}</h2>
+          <p>{target ? `Entity #${target.entityId} · Version ${target.entityVersion}` : 'No component'}</p>
+        </div>
+        <div className="inspector-actions">
+          {target ? (
+            <button
+              className={panel?.locked ? 'icon-button active compact' : 'icon-button compact'}
+              type="button"
+              onClick={() => model.toggleInspectorLock(panelId)}
+              title={panel?.locked ? 'Unlock panel' : 'Lock panel'}
+            >
+              {panel?.locked ? <Lock size={15} /> : <Unlock size={15} />}
+            </button>
+          ) : null}
+          {target ? (
+            <button
+              className="icon-button compact"
+              type="button"
+              onClick={() => model.reloadComponentDetail(target)}
+              title="Refresh component"
+              disabled={busy}
+            >
+              <RefreshCw size={15} className={busy ? 'spin' : undefined} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {entry?.status === 'error' ? <div className="error-banner compact">{entry.message}</div> : null}
+
+      {entity && component ? (
+        <Suspense fallback={<div className="empty-details"><span>Loading component</span></div>}>
+          <ComponentInspector
+            entity={entity}
+            component={component}
+            onSaveComponent={model.onSaveComponent}
+            readOnly={model.isDumpMode}
+          />
+        </Suspense>
+      ) : (
+        <div className="empty-details">
+          <Cpu size={28} />
+          <span>{target ? 'Loading component' : 'No component'}</span>
+        </div>
       )}
     </DockPanelBody>
   );
@@ -1086,6 +1314,20 @@ function createDefaultDockLayout(api: DockviewApi) {
   });
 
   api.addPanel({
+    id: DEFAULT_INSPECTOR_PANEL_ID,
+    title: 'Inspector',
+    component: 'inspector',
+    initialWidth: 380,
+    params: {
+      inspectorId: DEFAULT_INSPECTOR_PANEL_ID,
+    },
+    position: {
+      referencePanel: 'components',
+      direction: 'right',
+    },
+  });
+
+  api.addPanel({
     id: 'runtime',
     title: 'Runtime',
     component: 'runtime',
@@ -1113,20 +1355,54 @@ function createDefaultDockLayout(api: DockviewApi) {
 
 function applyDefaultDockSizing(api: DockviewApi) {
   const navigationWidth = Math.min(540, Math.max(420, Math.round(api.width * 0.27)));
+  const inspectorWidth = Math.min(460, Math.max(340, Math.round(api.width * 0.22)));
   const diagnosticsHeight = Math.min(520, Math.max(260, Math.round(api.height * 0.42)));
-  const mainWidth = Math.max(520, api.width - navigationWidth);
+  const mainWidth = Math.max(520, api.width - navigationWidth - inspectorWidth);
 
   api.getPanel('scenes')?.api.setSize({ width: navigationWidth });
   api.getPanel('entities')?.api.setSize({ width: navigationWidth });
   api.getPanel('runtime')?.api.setSize({ width: navigationWidth });
   api.getPanel('diagnostics')?.api.setSize({ width: navigationWidth, height: diagnosticsHeight });
   api.getPanel('components')?.api.setSize({ width: mainWidth });
+  api.getPanel(DEFAULT_INSPECTOR_PANEL_ID)?.api.setSize({ width: inspectorWidth });
 }
 
 function normalizeDockPanelTitles(api: DockviewApi) {
   for (const [panelId, title] of Object.entries(DOCK_PANEL_TITLES)) {
     api.getPanel(panelId)?.api.setTitle(title);
   }
+}
+
+function addInspectorDockPanel(api: DockviewApi, inspector: ComponentInspectorPanelState) {
+  const referencePanel = api.getPanel(DEFAULT_INSPECTOR_PANEL_ID) ??
+    api.getPanel('components') ??
+    api.activePanel;
+  const isDefault = inspector.id === DEFAULT_INSPECTOR_PANEL_ID;
+
+  api.addPanel({
+    id: inspector.id,
+    title: formatInspectorPanelTitle(inspector),
+    component: 'inspector',
+    initialWidth: 380,
+    params: {
+      inspectorId: inspector.id,
+    },
+    position: referencePanel
+      ? {
+          referencePanel,
+          direction: isDefault ? 'right' : 'within',
+        }
+      : undefined,
+  });
+}
+
+function formatInspectorPanelTitle(inspector: ComponentInspectorPanelState) {
+  const title = inspector.target?.componentTypeName ?? 'Inspector';
+  return inspector.locked ? `${title} [Locked]` : title;
+}
+
+function isInspectorPanelId(panelId: string) {
+  return panelId === DEFAULT_INSPECTOR_PANEL_ID || panelId.startsWith('inspector:');
 }
 
 function restoreDockLayout(api: DockviewApi) {
@@ -1408,18 +1684,16 @@ function ComponentStoreRows({ stores, query }: { stores: ComponentStoreDebugSnap
 
 function EntityDetails({
   entity,
-  isLoading,
   componentQuery,
   onComponentQueryChange,
-  onSaveComponent,
-  readOnly,
+  selectedComponentKey,
+  onInspectComponent,
 }: {
   entity: EntityDebugSnapshot;
-  isLoading: boolean;
   componentQuery: string;
   onComponentQueryChange: (value: string) => void;
-  onSaveComponent: ComponentMutationExecutor;
-  readOnly: boolean;
+  selectedComponentKey: string | null;
+  onInspectComponent: (entity: EntityDebugSnapshot, component: ComponentDebugSnapshot) => void;
 }) {
   return (
     <div className="details component-details">
@@ -1436,11 +1710,7 @@ function EntityDetails({
       </div>
 
       <div className="component-detail-surface">
-        {isLoading ? (
-          <div className="component-flow">
-            <div className="component-flow-empty">Loading components</div>
-          </div>
-        ) : entity.components.length ? (
+        {entity.components.length ? (
           <Suspense
             fallback={
               <div className="component-flow">
@@ -1451,8 +1721,8 @@ function EntityDetails({
             <ComponentGraphCanvas
               entity={entity}
               query={componentQuery}
-              onSaveComponent={onSaveComponent}
-              readOnly={readOnly}
+              selectedComponentKey={selectedComponentKey}
+              onInspectComponent={(component) => onInspectComponent(entity, component)}
             />
           </Suspense>
         ) : (
@@ -1529,8 +1799,43 @@ function findActiveSceneEntry(
   );
 }
 
-function createEntityDetailKey(worldName: string, sceneName: string, entityId: number) {
-  return `${worldName}\u0000${sceneName}\u0000${entityId}`;
+function createEmptyInspectorPanel(): ComponentInspectorPanelState {
+  return {
+    id: DEFAULT_INSPECTOR_PANEL_ID,
+    locked: false,
+    target: null,
+  };
+}
+
+function createInspectorPanelId(index: number) {
+  return `inspector:${index}`;
+}
+
+function createInspectorTarget(
+  entry: SceneEntry,
+  entity: EntityDebugSnapshot,
+  component: ComponentDebugSnapshot,
+): ComponentInspectorTarget {
+  return {
+    worldName: entry.world.name,
+    sceneName: entry.scene.name,
+    entityId: entity.id,
+    entityVersion: entity.version,
+    componentTypeName: component.type.name,
+    componentTypeFullName: component.type.fullName,
+    componentAssemblyName: component.type.assemblyName,
+    graphId: getComponentGraph(component).id,
+  };
+}
+
+function createComponentDetailKey(target: ComponentInspectorTarget) {
+  return [
+    target.worldName,
+    target.sceneName,
+    target.entityId,
+    target.componentAssemblyName,
+    target.componentTypeFullName,
+  ].join('\u0000');
 }
 
 function findEntityDetail(
@@ -1544,16 +1849,14 @@ function findEntityDetail(
   return scene?.entities.find((candidate) => candidate.id === entityId) ?? null;
 }
 
-function hasComponentValueDetails(entity: EntityDebugSnapshot) {
-  if (!entity.components.length) {
-    return true;
-  }
-
-  return entity.components.every((component) =>
-    component.value.payload !== null ||
-    component.value.structured !== null ||
-    component.value.error !== null,
-  );
+function findComponentDetail(
+  entity: EntityDebugSnapshot,
+  target: ComponentInspectorTarget,
+) {
+  return entity.components.find((component) =>
+    component.type.fullName === target.componentTypeFullName &&
+    component.type.assemblyName === target.componentAssemblyName,
+  ) ?? null;
 }
 
 function filterScenes(scenes: SceneEntry[], query: string) {

@@ -9,12 +9,12 @@ import type {
   GameDebugSnapshotMessage,
 } from './types';
 
-const apiBase = import.meta.env.VITE_NKG_DEBUG_API_BASE ?? '';
-
 export interface DebugSnapshotRequestOptions {
   worldName?: string;
   sceneName?: string;
   entityId?: number;
+  componentTypeFullName?: string;
+  componentAssemblyName?: string;
   entityOffset?: number;
   entityLimit?: number;
   includePayload?: boolean;
@@ -25,16 +25,18 @@ export async function fetchDebugSnapshotMessage(
   signal?: AbortSignal,
   options?: DebugSnapshotRequestOptions,
 ): Promise<GameDebugSnapshotMessage> {
-  const url = new URL(`${apiBase}/_nkg/debug/snapshot`, window.location.origin);
+  const url = new URL('/_nkg/debug/snapshot', window.location.origin);
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
   appendQuery(url, 'entityId', options?.entityId);
+  appendQuery(url, 'componentTypeFullName', options?.componentTypeFullName);
+  appendQuery(url, 'componentAssemblyName', options?.componentAssemblyName);
   appendQuery(url, 'entityOffset', options?.entityOffset);
   appendQuery(url, 'entityLimit', options?.entityLimit);
   appendQuery(url, 'includePayload', options?.includePayload);
   appendQuery(url, 'includeStructured', options?.includeStructured);
 
-  const response = await fetch(toFetchUrl(url), {
+  const response = await fetch(`${url.pathname}${url.search}`, {
     signal,
     headers: {
       Accept: 'application/json',
@@ -49,15 +51,17 @@ export async function fetchDebugSnapshotMessage(
 }
 
 export function createDebugSnapshotStream(options?: DebugSnapshotRequestOptions): EventSource {
-  const url = new URL(`${apiBase}/_nkg/debug/stream`, window.location.origin);
+  const url = new URL('/_nkg/debug/stream', window.location.origin);
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
   appendQuery(url, 'entityId', options?.entityId);
+  appendQuery(url, 'componentTypeFullName', options?.componentTypeFullName);
+  appendQuery(url, 'componentAssemblyName', options?.componentAssemblyName);
   appendQuery(url, 'entityOffset', options?.entityOffset);
   appendQuery(url, 'entityLimit', options?.entityLimit);
   appendQuery(url, 'includePayload', options?.includePayload);
   appendQuery(url, 'includeStructured', options?.includeStructured);
-  return new EventSource(toFetchUrl(url));
+  return new EventSource(`${url.pathname}${url.search}`);
 }
 
 function appendQuery(url: URL, key: string, value: string | number | boolean | undefined) {
@@ -66,15 +70,11 @@ function appendQuery(url: URL, key: string, value: string | number | boolean | u
   }
 }
 
-function toFetchUrl(url: URL) {
-  return apiBase ? url.toString() : `${url.pathname}${url.search}`;
-}
-
 export async function postDebugMutation(
   request: GameDebugMutationRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugMutationResult> {
-  const response = await fetch(`${apiBase}/_nkg/debug/mutations`, {
+  const response = await fetch('/_nkg/debug/mutations', {
     method: 'POST',
     signal,
     headers: {
@@ -95,7 +95,7 @@ export async function postDebugControl(
   request: GameDebugControlRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugControlResult> {
-  const response = await fetch(`${apiBase}/_nkg/debug/control`, {
+  const response = await fetch('/_nkg/debug/control', {
     method: 'POST',
     signal,
     headers: {
@@ -115,7 +115,7 @@ export async function postDebugControl(
 export async function fetchDumpRecordingState(
   signal?: AbortSignal,
 ): Promise<GameDebugDumpRecordingState> {
-  const response = await fetch(`${apiBase}/_nkg/debug/dump/recording`, {
+  const response = await fetch('/_nkg/debug/dump/recording', {
     signal,
     headers: {
       Accept: 'application/json',
@@ -133,7 +133,7 @@ export async function postDumpRecording(
   request: GameDebugDumpRecordingRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugDumpRecordingResult> {
-  const response = await fetch(`${apiBase}/_nkg/debug/dump/recording`, {
+  const response = await fetch('/_nkg/debug/dump/recording', {
     method: 'POST',
     signal,
     headers: {

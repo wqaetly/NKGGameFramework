@@ -230,6 +230,11 @@ h2 {
   font-size: 11px;
 }
 
+.icon-button.compact {
+  width: 28px;
+  padding: 0;
+}
+
 .icon-button:hover,
 .mini-button:hover {
   border-color: var(--accent-2);
@@ -279,6 +284,11 @@ h2 {
   background: #2d1b1d;
   color: #f0a0a7;
   font-size: 12px;
+}
+
+.error-banner.compact {
+  margin: 0;
+  font-size: 11px;
 }
 
 .dump-timeline {
@@ -943,14 +953,27 @@ button.entity-row:hover,
 
 .component-flow-node {
   position: relative;
+  display: grid;
+  gap: 0;
   width: 360px;
+  height: 92px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--panel);
+  color: var(--text);
+  text-align: left;
   box-shadow:
     0 12px 22px var(--shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+button.component-flow-node {
+  padding: 0;
+}
+
+button.component-flow-node:hover {
+  border-color: var(--accent-2);
 }
 
 .component-flow-node.selected {
@@ -1040,6 +1063,26 @@ button.entity-row:hover,
 .component-node-title small {
   color: var(--muted);
   font-size: 10px;
+}
+
+.component-node-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 9px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--panel-3);
+}
+
+.component-node-summary span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .component-flow-node-fields {
@@ -1223,6 +1266,86 @@ button.entity-row:hover,
 .component-actions span {
   color: var(--muted);
   font-size: 10px;
+}
+
+.component-inspector-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.inspector-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel-2);
+}
+
+.inspector-heading div:first-child {
+  min-width: 0;
+}
+
+.inspector-heading h2,
+.inspector-heading p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.component-inspector-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.component-inspector-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel-3);
+}
+
+.component-inspector-meta span,
+.component-inspector-actions span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.component-inspector-fields {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--panel-3);
+}
+
+.component-inspector-fields .structured-editor {
+  border-top: 0;
+}
+
+.component-inspector-actions {
+  flex-wrap: nowrap;
 }
 
 .empty-details {

@@ -30,18 +30,19 @@ flowchart TD
 - `GameDebugRuntimeRegistry`：自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`。
 - `GameDebugSession`：显式注册或默认读取 registry 中的运行态对象。
 - `GameDebugHost`：本地轻量 debug host，内置 loopback HTTP/SSE transport。
-- `GameDebugHostAutoStart`：通过环境变量开启本地 debug host。
+- `GameDebugHostAutoStart`：通过宿主代码配置开启本地 debug host。
 
-常用环境变量：
+真实宿主更推荐使用普通代码配置项，适合 Unity/Godot、移动端、LeanCLR 和 Server：
 
-```powershell
-$env:NKG_DEBUG_HOST = "1"
-$env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5000"
-$env:NKG_DEBUG_HOST_PREFIX = "/_nkg/debug"
-$env:NKG_DEBUG_HOST_MUTATIONS = "1"
+```csharp
+var debugStartup = GameDebugHostStartupOptions.Localhost(
+    port: 5067,
+    enableMutations: true);
+
+var debugHost = await GameDebugHostAutoStart.TryStartAsync(debugStartup);
 ```
 
-`GameDebugHost` 使用 .NET socket async I/O，不主动把连接处理丢进 `Task.Run`；内部 accept loop、连接处理和 HTTP/SSE 读写使用 `UniTask`，公共 `StartAsync` / `TryStartFromEnvironmentAsync` 仍保留标准 `Task` 形态，方便普通 .NET 宿主调用。`GameDebugHostOptions.MaxConnections` 默认限制为 `32`。Debug 侧的 snapshot、control、mutation 和 dump 操作通过 host 内部 gate 串行执行，避免多个 Web 请求同时触碰同一批调试状态。UniTask 可以降低内部 await 链路成本，但真正跨宿主主线程读写仍需要显式 debug scheduler / Runtime 帧边界兜住。
+`GameDebugHost` 使用 .NET socket async I/O，不主动把连接处理丢进 `Task.Run`；内部 accept loop、连接处理和 HTTP/SSE 读写使用 `UniTask`，公共 `StartAsync` / `TryStartAsync` 仍保留标准 `Task` 形态，方便普通 .NET 宿主调用。`GameDebugHostOptions.MaxConnections` 默认限制为 `32`。Debug 侧的 snapshot、control、mutation 和 dump 操作通过 host 内部 gate 串行执行，避免多个 Web 请求同时触碰同一批调试状态。UniTask 可以降低内部 await 链路成本，但真正跨宿主主线程读写仍需要显式 debug scheduler / Runtime 帧边界兜住。
 
 ### HTTP API
 
@@ -290,7 +291,7 @@ sequenceDiagram
 
 Mutation apply 的位置选在 Runtime 帧末、snapshot 发布之前：它不会影响本帧已经执行完的 gameplay update，但同一帧推给 WebDebug / dump 的 snapshot 会看到编辑后的组件值。暂停状态下没有 Runtime 帧边界，mutation 请求会等到下一次 Step / Play 推进。
 
-Mutation 默认关闭。生产、外网和多人环境必须保持关闭或接入额外鉴权；本地开发可通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `NKG_DEBUG_HOST_MUTATIONS=1` 显式开启。
+Mutation 默认关闭。生产、外网和多人环境必须保持关闭或接入额外鉴权；本地开发可通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `GameDebugHostStartupOptions.EnableMutations` 显式开启。
 
 ## Snapshot Window Dump
 

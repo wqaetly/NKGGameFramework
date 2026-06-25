@@ -178,15 +178,17 @@ await using var debugHost = await GameDebugHost.StartAsync(options =>
 });
 ```
 
-开发环境也可以通过环境变量启用框架自启动：
+宿主程序更推荐把 Debug Host 当作普通代码配置项接入，这对 Unity/Godot、移动端、LeanCLR、Server 都更自然：
 
-```powershell
-$env:NKG_DEBUG_HOST = "1"
-$env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5057"
-$env:NKG_DEBUG_HOST_MUTATIONS = "1"
+```csharp
+var debugStartup = GameDebugHostStartupOptions.Localhost(
+    port: 5067,
+    enableMutations: true);
+
+var debugHost = await GameDebugHostAutoStart.TryStartAsync(debugStartup);
 ```
 
-React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot`、`/_nkg/debug/stream`、`/_nkg/debug/control`、`/_nkg/debug/mutations` 和 `/_nkg/debug/dump/recording`，也可以通过 `NKG_DEBUG_API` 配置 Vite proxy 目标。
+React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求同源 `/_nkg/debug/snapshot`、`/_nkg/debug/stream`、`/_nkg/debug/control`、`/_nkg/debug/mutations` 和 `/_nkg/debug/dump/recording`；Vite dev server 默认代理到基础 sample 的 `http://127.0.0.1:5067`。
 
 `GameDebugSession.Register(...)` 只用于需要显式限定调试范围的场景；默认情况下，快照接口会读取框架内置 registry 中自动发现的运行态对象。
 宿主游戏只需要启动 `GameDebugHost` 或使用 `GameDebugHostAutoStart`，不需要接入额外 Web 框架。
@@ -194,11 +196,11 @@ React 面板位于 `src/NKGGameFramework.Hosting.Web`，开发模式默认请求
 两个 sample 都可作为 Web Debug 手动体验用例。运行后进程会持续推进 Runtime 帧，按任意键退出：
 
 ```powershell
-$env:NKG_DEBUG_HOST = "1"
-$env:NKG_DEBUG_HOST_URL = "http://127.0.0.1:5067"
 dotnet run --project .\samples\NKGGameFramework.Sampler\NKGGameFramework.Sampler.csproj
 dotnet run --project .\samples\NKGGameFramework.SkillSystemSampler\NKGGameFramework.SkillSystemSampler.csproj
 ```
+
+基础 sample 默认启动 `http://127.0.0.1:5067`，技能 sample 默认启动 `http://127.0.0.1:5068`。
 
 Runtime 异步接口统一使用 `UniTask` / `UniTask<T>`：
 

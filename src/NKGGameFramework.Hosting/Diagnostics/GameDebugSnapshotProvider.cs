@@ -113,7 +113,7 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
             scene.EntityCount,
             scene.Systems.Systems.Select(CaptureSystem).ToArray(),
             scene.ComponentStores.Select(CaptureComponentStore).ToArray(),
-            entities.Select(entity => CaptureEntity(scene, entity, valueOptions)).ToArray());
+            entities.Select(entity => CaptureEntity(scene, entity, valueOptions, options)).ToArray());
     }
 
     private static SystemDebugSnapshot CaptureSystem(ISystem system)
@@ -135,24 +135,28 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
     private EntityDebugSnapshot CaptureEntity(
         Scene scene,
         Entity entity,
-        GameDebugComponentValueSerializationOptions valueOptions)
+        GameDebugComponentValueSerializationOptions valueOptions,
+        GameDebugSnapshotCaptureOptions? options)
     {
         var components = scene.GetComponents(entity);
         var componentTypes = components
             .Select(static component => component.ComponentType)
             .ToHashSet();
+        var visibleComponents = components
+            .Where(component => MatchesComponent(component.ComponentType, options))
+            .ToArray();
 
         return new EntityDebugSnapshot(
             entity.Id.Value,
             entity.Version,
-            components
+            visibleComponents
                 .Select(component => new ComponentDebugSnapshot(
                     DebugSnapshotTypeNames.Create(component.ComponentType),
                     CaptureComponentValue(component, valueOptions),
                     CaptureComponentGraph(component.ComponentType, componentTypes)))
                 .ToArray(),
-            CaptureSkills(components),
-            CaptureBuffs(components));
+            CaptureSkills(visibleComponents),
+            CaptureBuffs(visibleComponents));
     }
 
     private ComponentValueDebugSnapshot CaptureComponentValue(
@@ -290,6 +294,19 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
     private static bool MatchesEntity(Entity entity, GameDebugSnapshotCaptureOptions options)
     {
         return options.EntityId is null || entity.Id.Value == options.EntityId.Value;
+    }
+
+    private static bool MatchesComponent(Type componentType, GameDebugSnapshotCaptureOptions? options)
+    {
+        if (options is null || string.IsNullOrWhiteSpace(options.ComponentTypeFullName))
+        {
+            return true;
+        }
+
+        var typeInfo = DebugSnapshotTypeNames.Create(componentType);
+        return StringComparer.Ordinal.Equals(typeInfo.FullName, options.ComponentTypeFullName)
+            && (string.IsNullOrWhiteSpace(options.ComponentAssemblyName)
+                || StringComparer.Ordinal.Equals(typeInfo.AssemblyName, options.ComponentAssemblyName));
     }
 
     private static ComponentGraphDebugSnapshot CaptureComponentGraph(Type componentType, ISet<Type> componentTypes)

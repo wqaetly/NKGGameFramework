@@ -336,6 +336,59 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
+    public async Task Host_snapshot_requests_can_filter_component_detail_payloads()
+    {
+        GameDebugRuntimeRegistry.Clear();
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var world = new World("component-detail-world");
+            var scene = world.CreateScene("battle");
+            var entity = scene.CreateEntity()
+                .Add(new PositionComponent(12, 34))
+                .Add(new VelocityComponent(56, 78));
+            await using var host = await GameDebugHost.StartAsync(options =>
+            {
+                options.Url = "http://127.0.0.1:0";
+            });
+            using var client = new HttpClient
+            {
+                BaseAddress = host.BaseAddress,
+            };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var frame = 0;
+
+            var detail = await GetSnapshotAfterRuntimeFrameAsync(
+                client,
+                CreateSnapshotPath(
+                    world,
+                    scene,
+                    includePayload: true,
+                    includeStructured: true,
+                    entityId: entity.Id.Value,
+                    componentType: typeof(PositionComponent)),
+                () => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame)),
+                timeout.Token);
+            var detailScene = FindSceneSnapshot(detail.Snapshot, world, scene);
+            var detailEntity = Assert.Single(detailScene.Entities);
+            var component = Assert.Single(detailEntity.Components);
+
+            Assert.Equal(nameof(PositionComponent), component.Type.Name);
+            Assert.NotNull(component.Value.Payload);
+            Assert.NotNull(component.Value.Structured);
+        }
+        finally
+        {
+            GameDebugRuntimeRegistry.Clear();
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public async Task Host_stream_pushes_summary_snapshot_after_framework_frame()
     {
         GameDebugRuntimeRegistry.Clear();
@@ -580,31 +633,31 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
-    public async Task AutoStart_returns_null_when_environment_is_disabled()
+    public async Task AutoStart_returns_null_when_code_options_are_disabled()
     {
         await GameDebugHostAutoStart.StopAsync();
 
-        using var enabled = EnvironmentVariableScope.Set(GameDebugHostAutoStart.EnabledVariable, "0");
-        using var url = EnvironmentVariableScope.Set(GameDebugHostAutoStart.UrlVariable, "http://127.0.0.1:0");
-
-        var host = await GameDebugHostAutoStart.TryStartFromEnvironmentAsync();
+        var host = await GameDebugHostAutoStart.TryStartAsync(GameDebugHostStartupOptions.Disabled);
 
         Assert.Null(host);
         Assert.Null(GameDebugHostAutoStart.BaseAddress);
     }
 
     [Fact]
-    public async Task AutoStart_starts_once_from_environment()
+    public async Task AutoStart_starts_once_from_code_options()
     {
         await GameDebugHostAutoStart.StopAsync();
 
-        using var enabled = EnvironmentVariableScope.Set(GameDebugHostAutoStart.EnabledVariable, "1");
-        using var url = EnvironmentVariableScope.Set(GameDebugHostAutoStart.UrlVariable, "http://127.0.0.1:0");
-
         try
         {
-            var first = await GameDebugHostAutoStart.TryStartFromEnvironmentAsync();
-            var second = await GameDebugHostAutoStart.TryStartFromEnvironmentAsync();
+            var startup = new GameDebugHostStartupOptions
+            {
+                Enabled = true,
+                Url = "http://127.0.0.1:0",
+                EnableMutations = true,
+            };
+            var first = await GameDebugHostAutoStart.TryStartAsync(startup);
+            var second = await GameDebugHostAutoStart.TryStartAsync(startup);
 
             Assert.NotNull(first);
             Assert.Same(first, second);
@@ -624,6 +677,8 @@ public sealed class GameDebugHostTests
     }
 
     private readonly record struct PositionComponent(double X, double Y) : IComponent;
+
+    private readonly record struct VelocityComponent(double X, double Y) : IComponent;
 
     private sealed class FrameMutationModule : Module, IUpdateModule
     {
@@ -667,9 +722,10 @@ public sealed class GameDebugHostTests
         Scene scene,
         bool includePayload,
         bool includeStructured,
-        int? entityId = null)
+        int? entityId = null,
+        Type? componentType = null)
     {
-        return CreateDebugPath("snapshot", world, scene, includePayload, includeStructured, entityId);
+        return CreateDebugPath("snapshot", world, scene, includePayload, includeStructured, entityId, componentType);
     }
 
     private static string CreateStreamPath(World world, Scene scene)
@@ -683,7 +739,8 @@ public sealed class GameDebugHostTests
         Scene scene,
         bool includePayload,
         bool includeStructured,
-        int? entityId = null)
+        int? entityId = null,
+        Type? componentType = null)
     {
         var query = new List<string>
         {
@@ -696,6 +753,12 @@ public sealed class GameDebugHostTests
         if (entityId is { } id)
         {
             query.Add($"entityId={id.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        if (componentType is not null)
+        {
+            query.Add($"componentTypeFullName={Uri.EscapeDataString(componentType.FullName!)}");
+            query.Add($"componentAssemblyName={Uri.EscapeDataString(componentType.Assembly.GetName().Name!)}");
         }
 
         return $"/_nkg/debug/{endpoint}?{string.Join("&", query)}";
@@ -787,26 +850,4 @@ public sealed class GameDebugHostTests
         }
     }
 
-    private sealed class EnvironmentVariableScope : IDisposable
-    {
-        private readonly string _name;
-        private readonly string? _previousValue;
-
-        private EnvironmentVariableScope(string name, string? value)
-        {
-            _name = name;
-            _previousValue = Environment.GetEnvironmentVariable(name);
-            Environment.SetEnvironmentVariable(name, value);
-        }
-
-        public static EnvironmentVariableScope Set(string name, string? value)
-        {
-            return new EnvironmentVariableScope(name, value);
-        }
-
-        public void Dispose()
-        {
-            Environment.SetEnvironmentVariable(_name, _previousValue);
-        }
-    }
 }
