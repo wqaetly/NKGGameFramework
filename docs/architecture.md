@@ -94,9 +94,17 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 - `GameDebugRuntimeRegistry`：主框架自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`，让 Web Debug 在没有宿主手动注册时也能发现运行态对象。
 - `GameDebugHost`：框架自带的本地 Debug Host，负责启动轻量 loopback HTTP/SSE transport 并暴露 Web Debug 所需的 `/_nkg/debug/*` API。
 - `GameDebugSession`：注册一个或多个 `RuntimeContext` / `World`。
-- `GameDebugSnapshotProvider`：从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件原始值序列化为 Odin JSON payload。
-- `GameDebugMutationHandler`：接收某个 entity/component 的 Odin JSON payload，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
-- `GameDebugDumpRecorder`：订阅 frame publisher，保存有界的 recent snapshot window，停止时写出 Odin binary `.nkgdump` 供 Web Debug Timeline 回放。
+- `GameDebugSnapshotProvider`：从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件值封装成 `ComponentValueDebugSnapshot`。其中 `payload` 是可写回的主序列化结果，`structured` 是同一值的树形视图。
+- `GameDebugMutationHandler`：接收某个 entity/component 的 `ComponentValueDebugSnapshot`，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
+- `GameDebugDumpRecorder`：订阅 frame publisher，录制期只把完整帧留在内存；停止时把内存里的帧做 keyframe + delta 压缩后写出 `.nkgdump` 供 Web Debug Timeline 回放。
+
+### Component Value Snapshot Model
+
+`ComponentValueDebugSnapshot` 是组件值的统一载体：
+
+- `payload`：组件值本身的序列化结果，面向保存、回放和写回。
+- `structured`：同一组件值的树形投影，面向 WebDebug 展示、编辑和兜底重建。
+- 两者只是同一份组件值的两种视图，不是两套业务数据源。
 
 WebDebug 的 pause / step / frame stream 以 `RuntimeContext.Update` 为唯一帧入口；`World.Update` 和 `Scene.Update` 只是 Runtime 帧内部被模块驱动的执行细节，不单独消费调试步进，也不单独发布 WebDebug frame event。
 
@@ -106,7 +114,7 @@ React/Vite 面板放在 `NKGGameFramework.Hosting.Web`，保持前端依赖与 .
 宿主游戏只需要启动 `GameDebugHost` 或使用 `GameDebugHostAutoStart`，不需要接入额外 Web 框架；浏览器面板继续按 `/_nkg/debug/*` API 访问同一套调试协议。
 真实宿主通过 `GameDebugHostStartupOptions` 作为普通代码配置项接入，例如 `GameDebugHostAutoStart.TryStartAsync(GameDebugHostStartupOptions.Localhost(5067))`。
 Mutation 默认关闭；本地开发可以通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `GameDebugHostStartupOptions.EnableMutations` 显式开启。
-WebDebug 当前数据流、Frame Stream、Snapshot Window Dump，以及后续 delta recorder 方案见 [debug-and-dump.md](debug-and-dump.md)。
+WebDebug 当前数据流、Frame Stream、dump 录制与分析方案见 [debug-and-dump.md](debug-and-dump.md)。
 
 ## Gameplay
 
