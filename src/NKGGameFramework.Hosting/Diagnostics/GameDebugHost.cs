@@ -11,7 +11,7 @@ namespace NKGGameFramework.Hosting.Diagnostics;
 public sealed class GameDebugHost : IAsyncDisposable
 {
     private const int MaxHeaderBytes = 64 * 1024;
-    private const int MaxBodyBytes = 16 * 1024 * 1024;
+    private const int MaxBodyBytes = 128 * 1024 * 1024;
     private static readonly byte[] HeaderTerminator = [13, 10, 13, 10];
 
     private readonly TcpListener _listener;
@@ -442,6 +442,41 @@ public sealed class GameDebugHost : IAsyncDisposable
                 200,
                 "OK",
                 ExecuteDebugOperation(_dumps.GetState),
+                cancellationToken);
+            return;
+        }
+
+        if (IsPost(request, endpoint, "/dump/playback"))
+        {
+            var body = ReadJsonBody<GameDebugDumpPlaybackOpenRequest>(request);
+            await WriteJsonAsync(
+                stream,
+                200,
+                "OK",
+                ExecuteDebugOperation(() => _dumps.OpenPlayback(body)),
+                cancellationToken);
+            return;
+        }
+
+        if (IsPost(request, endpoint, "/dump/playback/upload"))
+        {
+            await WriteJsonAsync(
+                stream,
+                200,
+                "OK",
+                ExecuteDebugOperation(() => _dumps.OpenPlayback(request.Body)),
+                cancellationToken);
+            return;
+        }
+
+        if (IsGet(request, endpoint, "/dump/playback/frame"))
+        {
+            var frameIndex = GetInt(request.Query, "frameIndex") ?? GetInt(request.Query, "index") ?? 0;
+            await WriteJsonAsync(
+                stream,
+                200,
+                "OK",
+                ExecuteDebugOperation(() => _dumps.GetPlaybackFrame(GetString(request.Query, "playbackId"), frameIndex)),
                 cancellationToken);
             return;
         }

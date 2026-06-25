@@ -52,6 +52,17 @@
   background: #1b1c1f;
 }
 
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
 html,
 body,
 #root {
@@ -395,7 +406,8 @@ h2 {
   gap: 4px;
 }
 
-.dump-timeline-zoom span {
+.dump-timeline-zoom span,
+.dump-timeline-scale input {
   width: 46px;
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
@@ -404,6 +416,24 @@ h2 {
   color: var(--muted);
   font-size: 10px;
   text-align: center;
+}
+
+.dump-timeline-scale {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-2);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.dump-timeline-scale span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.dump-timeline-scale input {
+  width: 58px;
 }
 
 .dump-profiler-viewport {
@@ -503,12 +533,12 @@ h2 {
     linear-gradient(
       to top,
       rgba(180, 92, 255, 0.09) 0%,
-      rgba(225, 95, 91, 0.08) 16.7%,
-      rgba(242, 159, 69, 0.08) 16.7%,
-      rgba(242, 159, 69, 0.08) 25%,
-      rgba(217, 200, 77, 0.07) 25%,
-      rgba(217, 200, 77, 0.07) 50%,
-      rgba(47, 191, 113, 0.07) 50%,
+      rgba(225, 95, 91, 0.08) var(--fps-20),
+      rgba(242, 159, 69, 0.08) var(--fps-20),
+      rgba(242, 159, 69, 0.08) var(--fps-30),
+      rgba(217, 200, 77, 0.07) var(--fps-30),
+      rgba(217, 200, 77, 0.07) var(--fps-60),
+      rgba(47, 191, 113, 0.07) var(--fps-60),
       rgba(47, 191, 113, 0.07) 100%
     );
   pointer-events: none;

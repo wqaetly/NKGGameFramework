@@ -304,15 +304,19 @@ flowchart TD
     Recorder --> Capture["Capture full snapshot message"]
     Capture --> Frames["append recorded frame"]
     Frames --> Stop{"stop recording?"}
-    Stop -->|yes| Json[".nkgdump.json"]
-    Json --> Web["WebDebug Dump Timeline"]
+    Stop -->|yes| Binary["Odin binary .nkgdump"]
+    Binary --> Playback["open dump playback session"]
+    Playback --> Web["WebDebug Dump Timeline"]
 ```
 
 当前行为：
 
 - `POST /_nkg/debug/dump/recording` with `{"command":"start"}` 开始录制，但不立即抓取 live snapshot。
-- `POST /_nkg/debug/dump/recording` with `{"command":"stop"}` 停止录制，写出录制期间已捕获的 Runtime 帧 snapshot，并在响应里返回 dump document。
+- `POST /_nkg/debug/dump/recording` with `{"command":"stop"}` 停止录制，写出录制期间已捕获的 Runtime 帧 snapshot 到 Odin binary `.nkgdump`；响应只返回录制状态和文件路径，不返回完整 dump document。
 - `GET /_nkg/debug/dump/recording` 返回当前录制状态。
+- `POST /_nkg/debug/dump/playback` 使用已保存的 `.nkgdump` 文件路径打开回放会话。
+- `POST /_nkg/debug/dump/playback/upload` 接收浏览器选择的 `.nkgdump` 二进制内容并打开回放会话。
+- `GET /_nkg/debug/dump/playback/frame` 从当前回放会话按 frame index 读取单帧 snapshot message。
 - WebDebug 提供 Record / Stop Rec、Load Dump 和 Dump Timeline。
 - WebDebug 开始录制时会把 Web 端进程目录下的 `NKGDump` 作为 `dumpDirectory` 传给 debug host，停止录制后 dump 会写到该目录。
 - 直接调用 debug host API 且未提供 `dumpDirectory` 时，会回退到 `GameDebugOptions.DumpDirectory`，默认是临时目录下的 `NKGGameFramework/debug-dumps`，也可在启动 debug host 时覆盖。

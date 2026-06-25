@@ -659,7 +659,7 @@ function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
         </div>
         <div className="component-node-title">
           <strong>{component.type.name}</strong>
-          <small>{graph.group ?? component.type.fullName}</small>
+          <small>{graph.group ?? component.type.name}</small>
         </div>
       </div>
       <div className="component-node-summary">
@@ -722,7 +722,7 @@ export function ComponentInspector({
         />
       )}
       <div className="action-row component-actions component-inspector-actions">
-        <span title={component.type.fullName}>{component.type.fullName}</span>
+        <span title={component.type.fullName}>{component.type.name}</span>
         <button
           className="mini-button"
           type="button"

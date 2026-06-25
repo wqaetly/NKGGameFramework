@@ -1,6 +1,8 @@
 import type {
   GameDebugControlRequest,
   GameDebugControlResult,
+  GameDebugDumpPlaybackManifest,
+  GameDebugDumpPlaybackOpenRequest,
   GameDebugDumpRecordingRequest,
   GameDebugDumpRecordingResult,
   GameDebugDumpRecordingState,
@@ -237,6 +239,71 @@ export async function postDumpRecording(
 
   if (!response.ok) {
     throw new Error(`Dump recording request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function openDumpPlayback(
+  request: GameDebugDumpPlaybackOpenRequest,
+  signal?: AbortSignal,
+): Promise<GameDebugDumpPlaybackManifest> {
+  const response = await fetch('/_nkg/debug/dump/playback', {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump playback request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function uploadDumpPlayback(
+  payload: ArrayBuffer,
+  signal?: AbortSignal,
+): Promise<GameDebugDumpPlaybackManifest> {
+  const response = await fetch('/_nkg/debug/dump/playback/upload', {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/octet-stream',
+    },
+    body: payload,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump playback upload failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchDumpPlaybackFrame(
+  playbackId: string,
+  frameIndex: number,
+  signal?: AbortSignal,
+): Promise<GameDebugSnapshotMessage> {
+  const url = new URL('/_nkg/debug/dump/playback/frame', window.location.origin);
+  appendQuery(url, 'playbackId', playbackId);
+  appendQuery(url, 'frameIndex', frameIndex);
+
+  const response = await fetch(`${url.pathname}${url.search}`, {
+    signal,
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump playback frame request failed: ${response.status} ${response.statusText}`);
   }
 
   return response.json();

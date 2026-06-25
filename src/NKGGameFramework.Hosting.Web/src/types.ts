@@ -208,16 +208,25 @@ export interface GameDebugControlResult {
   state: GameDebugControlState;
 }
 
-export interface GameDebugDumpDocument {
+export interface GameDebugDumpPlaybackOpenRequest {
+  path?: string | null;
+}
+
+export interface GameDebugDumpPlaybackManifest {
+  id: string;
   format: string;
   version: number;
   name: string;
   createdAt: string;
   startedAt: string;
   endedAt: string;
-  maxFrames?: number;
-  droppedFrameCount?: number;
-  frames: GameDebugSnapshotMessage[];
+  droppedFrameCount: number;
+  frames: GameDebugDumpPlaybackFrame[];
+}
+
+export interface GameDebugDumpPlaybackFrame {
+  index: number;
+  frame: GameDebugFrameInfo;
 }
 
 export type GameDebugDumpRecordingCommand = 'start' | 'stop';
@@ -241,5 +250,4 @@ export interface GameDebugDumpRecordingResult {
   succeeded: boolean;
   message: string;
   state: GameDebugDumpRecordingState;
-  dump: GameDebugDumpDocument | null;
 }

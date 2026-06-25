@@ -1,3 +1,5 @@
+using NKGGameFramework.Diagnostics;
+
 namespace NKGGameFramework.Hosting.Diagnostics;
 
 public sealed record GameDebugDumpDocument(
@@ -26,5 +28,22 @@ public sealed record GameDebugDumpRecordingState(
 public sealed record GameDebugDumpRecordingResult(
     bool Succeeded,
     string Message,
-    GameDebugDumpRecordingState State,
-    GameDebugDumpDocument? Dump = null);
+    GameDebugDumpRecordingState State);
+
+public sealed record GameDebugDumpPlaybackOpenRequest(
+    string? Path = null);
+
+public sealed record GameDebugDumpPlaybackManifest(
+    string Id,
+    string Format,
+    int Version,
+    string Name,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset StartedAt,
+    DateTimeOffset EndedAt,
+    int DroppedFrameCount,
+    IReadOnlyList<GameDebugDumpPlaybackFrame> Frames);
+
+public sealed record GameDebugDumpPlaybackFrame(
+    int Index,
+    GameDebugFrameInfo Frame);

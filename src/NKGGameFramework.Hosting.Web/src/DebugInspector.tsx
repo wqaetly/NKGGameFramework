@@ -29,9 +29,12 @@ import {
   createDebugSnapshotStream,
   fetchDumpRecordingState,
   fetchDebugSnapshotMessage,
+  fetchDumpPlaybackFrame,
+  openDumpPlayback,
   postDebugControl,
   postDumpRecording,
   postDebugMutation,
+  uploadDumpPlayback,
 } from './api';
 import { countComponentGroups, getComponentGraph, type ComponentMutationExecutor } from './componentGraphModel';
 import type {
@@ -40,8 +43,10 @@ import type {
   EntityDebugSnapshot,
   GameDebugControlCommand,
   GameDebugControlState,
-  GameDebugDumpDocument,
+  GameDebugDumpPlaybackFrame,
+  GameDebugDumpPlaybackManifest,
   GameDebugDumpRecordingState,
+  GameDebugFrameInfo,
   GameDebugSnapshotMessage,
   GameDebugSnapshot,
   ModuleDebugSnapshot,
@@ -202,22 +207,13 @@ const STEP_SNAPSHOT_POLL_INTERVAL_MS = 50;
 const TIMELINE_MIN_ZOOM = 1;
 const TIMELINE_MAX_ZOOM = 16;
 const TIMELINE_ZOOM_STEP = 0.5;
-const TIMELINE_MAX_FPS = 120;
+const TIMELINE_DEFAULT_MAX_FPS = 120;
+const TIMELINE_MAX_MAX_FPS = 2000;
 const TIMELINE_MIN_RENDERED_POINTS = 256;
 const TIMELINE_MAX_RENDERED_POINTS = 4096;
 const TIMELINE_RENDER_OVERSAMPLE = 1.25;
 const TIMELINE_TRACK_HEIGHT_PX = 104;
 const TIMELINE_CONTENT_HEIGHT_PX = 128;
-const TIMELINE_FPS_AXIS_TICKS: TimelineFpsTick[] = [20, 30, 60, 120].map((fps) => {
-  const trackBottomPercent = getFrameSampleHeight(fps);
-
-  return {
-    fps,
-    trackBottomPercent,
-    axisBottomPercent: (trackBottomPercent / 100 * TIMELINE_TRACK_HEIGHT_PX / TIMELINE_CONTENT_HEIGHT_PX) * 100,
-    label: `${fps}`,
-  };
-});
 const DUMP_FILE_PICKER_ID = 'nkg-debug-dumps';
 const WEB_DUMP_DIRECTORY =
   typeof __NKG_WEB_DUMP_DIRECTORY__ === 'string' && __NKG_WEB_DUMP_DIRECTORY__.trim()
@@ -269,7 +265,7 @@ export function App() {
   const [activeInspectorPanelId, setActiveInspectorPanelId] = useState<string | null>(DEFAULT_INSPECTOR_PANEL_ID);
   const [dockRevision, setDockRevision] = useState(0);
   const [frameStream, setFrameStream] = useState(readStoredFrameStream);
-  const [dump, setDump] = useState<GameDebugDumpDocument | null>(null);
+  const [dump, setDump] = useState<GameDebugDumpPlaybackManifest | null>(null);
   const [dumpFrameIndex, setDumpFrameIndex] = useState(0);
   const [dumpPlaying, setDumpPlaying] = useState(false);
   const [dumpRecording, setDumpRecording] = useState<GameDebugDumpRecordingState | null>(null);
@@ -287,7 +283,6 @@ export function App() {
   const nextInspectorIdRef = useRef(1);
   const dumpFrames = dump?.frames ?? [];
   const dumpMode = dumpFrames.length > 0;
-  const activeDumpFrame = dumpFrames[dumpFrameIndex] ?? null;
 
   const showToast = useCallback((title: string, body: string) => {
     if (toastTimeoutRef.current !== null) {
@@ -314,6 +309,7 @@ export function App() {
     options: { clearComponentDetails?: boolean } = {},
   ) => {
     setError(null);
+    snapshotRef.current = message.snapshot;
     setSnapshot(message.snapshot);
     setControl(message.control);
     if (options.clearComponentDetails) {
@@ -322,18 +318,16 @@ export function App() {
     setLoadState('ready');
   }, []);
 
-  const loadDumpDocument = useCallback((nextDump: GameDebugDumpDocument) => {
-    validateDumpDocument(nextDump);
+  const loadDumpPlayback = useCallback((nextDump: GameDebugDumpPlaybackManifest) => {
+    validateDumpPlaybackManifest(nextDump);
     dumpModeRef.current = true;
     setDump(nextDump);
     setDumpFrameIndex(0);
     setDumpPlaying(false);
     setFrameStream(false);
     setComponentDetails({});
-    commitSnapshotMessage(nextDump.frames[0], {
-      clearComponentDetails: true,
-    });
-  }, [commitSnapshotMessage]);
+    setLoadState('loading');
+  }, []);
 
   const refresh = useCallback(async (
     signal?: AbortSignal,
@@ -589,15 +583,29 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeDumpFrame) {
+    if (!dumpMode || !dump) {
       return;
     }
 
-    commitSnapshotMessage(activeDumpFrame, {
-      clearComponentDetails: false,
-    });
-    reloadInspectorDetails(true, true);
-  }, [activeDumpFrame, commitSnapshotMessage, reloadInspectorDetails]);
+    const controller = new AbortController();
+    fetchDumpPlaybackFrame(dump.id, dumpFrameIndex, controller.signal)
+      .then((message) => {
+        commitSnapshotMessage(message, {
+          clearComponentDetails: dumpFrameIndex === 0,
+        });
+        reloadInspectorDetails(true, true);
+      })
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === 'AbortError') {
+          return;
+        }
+
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setLoadState('error');
+      });
+
+    return () => controller.abort();
+  }, [commitSnapshotMessage, dump, dumpFrameIndex, dumpMode, reloadInspectorDetails]);
 
   const scenes = useMemo(() => flattenScenes(snapshot), [snapshot]);
   const activeSceneEntry = useMemo(
@@ -908,14 +916,14 @@ export function App() {
     setDumpBusy(true);
     setError(null);
     try {
-      const parsed = JSON.parse(await file.text()) as GameDebugDumpDocument;
-      loadDumpDocument(parsed);
+      const playback = await uploadDumpPlayback(await file.arrayBuffer());
+      loadDumpPlayback(playback);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setDumpBusy(false);
     }
-  }, [loadDumpDocument]);
+  }, [loadDumpPlayback]);
 
   const openDumpFilePicker = useCallback(async () => {
     const picker = (window as FilePickerWindow).showOpenFilePicker;
@@ -928,7 +936,7 @@ export function App() {
           types: [{
             description: 'NKG dump files',
             accept: {
-              'application/json': ['.json', '.nkgdump', '.nkgdump.json'],
+              'application/octet-stream': ['.nkgdump'],
             },
           }],
         });
@@ -981,12 +989,15 @@ export function App() {
       }
 
       if (command === 'stop') {
-        if (!result.dump) {
-          setError('Dump recording finished without a dump document.');
+        if (!result.state.lastDumpPath) {
+          setError('Dump recording finished without a dump file path.');
           return;
         }
 
-        loadDumpDocument(result.dump);
+        const playback = await openDumpPlayback({
+          path: result.state.lastDumpPath,
+        });
+        loadDumpPlayback(playback);
         showToast(
           'Dump saved',
           result.state.lastDumpPath ?? result.message,
@@ -1001,7 +1012,7 @@ export function App() {
     } finally {
       setDumpBusy(false);
     }
-  }, [clearDumpPlayback, dumpRecording?.isRecording, loadDumpDocument, refresh, showToast]);
+  }, [clearDumpPlayback, dumpRecording?.isRecording, loadDumpPlayback, refresh, showToast]);
 
   const playbackPaused = dumpMode ? !dumpPlaying : control?.isPaused ?? false;
   const playbackCommand: GameDebugControlCommand = playbackPaused ? 'play' : 'pause';
@@ -1014,7 +1025,7 @@ export function App() {
         ref={dumpFileInputRef}
         className="hidden-file-input"
         type="file"
-        accept=".json,.nkgdump,.nkgdump.json,application/json"
+        accept=".nkgdump,application/octet-stream"
         onChange={(event) => void handleDumpFileChange(event)}
       />
       <header className="topbar">
@@ -1214,7 +1225,7 @@ function DumpTimeline({
   isPlaying,
   onSelectFrame,
 }: {
-  dump: GameDebugDumpDocument | null;
+  dump: GameDebugDumpPlaybackManifest | null;
   currentIndex: number;
   isPlaying: boolean;
   onSelectFrame: (frameIndex: number) => void;
@@ -1223,10 +1234,13 @@ function DumpTimeline({
   const max = Math.max(0, frames.length - 1);
   const activeIndex = Math.min(Math.max(0, currentIndex), max);
   const current = frames[activeIndex] ?? null;
-  const samples = useMemo(() => createTimelineSamples(frames), [frames]);
   const [timelineZoom, setTimelineZoom] = useState(TIMELINE_MIN_ZOOM);
+  const [timelineMaxFpsInput, setTimelineMaxFpsInput] = useState(String(TIMELINE_DEFAULT_MAX_FPS));
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
+  const timelineMaxFps = useMemo(() => readTimelineMaxFps(timelineMaxFpsInput), [timelineMaxFpsInput]);
+  const samples = useMemo(() => createTimelineSamples(frames, timelineMaxFps), [frames, timelineMaxFps]);
   const ticks = useMemo(() => createTimelineTicks(samples, timelineZoom), [samples, timelineZoom]);
+  const fpsAxisTicks = useMemo(() => createTimelineFpsAxisTicks(timelineMaxFps), [timelineMaxFps]);
   const timelinePoints = useMemo(
     () => createTimelineChartPoints(samples, timelineViewportWidth, timelineZoom),
     [samples, timelineViewportWidth, timelineZoom],
@@ -1245,10 +1259,23 @@ function DumpTimeline({
     : undefined;
   const playbackState = isPlaying ? 'Playing' : 'Paused';
   const zoomLabel = `${Math.round(timelineZoom * 100)}%`;
+  const plotStyle = {
+    '--fps-20': `${getFrameSampleHeight(20, timelineMaxFps)}%`,
+    '--fps-30': `${getFrameSampleHeight(30, timelineMaxFps)}%`,
+    '--fps-60': `${getFrameSampleHeight(60, timelineMaxFps)}%`,
+  } as React.CSSProperties;
 
   useEffect(() => {
     setTimelineZoom(TIMELINE_MIN_ZOOM);
   }, [dump?.name]);
+
+  const updateTimelineMaxFps = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setTimelineMaxFpsInput(event.currentTarget.value);
+  }, []);
+
+  const commitTimelineMaxFps = useCallback(() => {
+    setTimelineMaxFpsInput(String(readTimelineMaxFps(timelineMaxFpsInput)));
+  }, [timelineMaxFpsInput]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -1434,13 +1461,23 @@ function DumpTimeline({
           <div className="dump-timeline-zoom" aria-label="Profiler zoom">
             <span>{zoomLabel}</span>
           </div>
+          <label className="dump-timeline-scale">
+            <span>Max FPS</span>
+            <input
+              type="number"
+              step={10}
+              value={timelineMaxFpsInput}
+              onChange={updateTimelineMaxFps}
+              onBlur={commitTimelineMaxFps}
+            />
+          </label>
         </div>
       </div>
 
       <div className="dump-profiler-viewport">
         <div className="dump-profiler-axis" aria-hidden>
           <span>FPS</span>
-          {TIMELINE_FPS_AXIS_TICKS.map((tick) => (
+          {fpsAxisTicks.map((tick) => (
             <em
               key={tick.fps}
               style={{ bottom: `${tick.axisBottomPercent}%` }}
@@ -1481,8 +1518,8 @@ function DumpTimeline({
               onPointerUp={endChartDrag}
               onPointerCancel={endChartDrag}
             >
-              <div className="dump-profiler-plot" aria-hidden>
-                {TIMELINE_FPS_AXIS_TICKS.map((tick) => (
+              <div className="dump-profiler-plot" aria-hidden style={plotStyle}>
+                {fpsAxisTicks.map((tick) => (
                   <span
                     key={tick.fps}
                     className="dump-profiler-fps-line"
@@ -2224,23 +2261,49 @@ function EmptyDetails() {
   );
 }
 
-function createTimelineSamples(frames: GameDebugSnapshotMessage[]): TimelineFrameSample[] {
-  return frames.map((message, index) => {
-    const metrics = readTimelineFrameMetrics(message);
+function createTimelineSamples(frames: GameDebugDumpPlaybackFrame[], maxFps: number): TimelineFrameSample[] {
+  return frames.map((entry, index) => {
+    const metrics = readTimelineFrameMetrics(entry.frame);
     const fpsText = formatFps(metrics.fps);
     const millisecondsText = formatMilliseconds(metrics.milliseconds);
 
     return {
       index,
-      frameNumber: message.frame.frame,
+      frameNumber: entry.frame.frame,
       fps: metrics.fps,
       milliseconds: metrics.milliseconds,
       durationWeight: getTimelineDurationWeight(metrics.milliseconds),
-      heightPercent: getFrameSampleHeight(metrics.fps),
+      heightPercent: getFrameSampleHeight(metrics.fps, maxFps),
       color: getFrameHeatColor(metrics.milliseconds),
-      label: `Frame ${message.frame.frame} | Logic ${millisecondsText} | ${fpsText}`,
+      label: `Frame ${entry.frame.frame} | Logic ${millisecondsText} | ${fpsText}`,
     };
   });
+}
+
+function createTimelineFpsAxisTicks(maxFps: number): TimelineFpsTick[] {
+  const normalizedMaxFps = readTimelineMaxFps(maxFps);
+  const candidates = [20, 30, 60, 120, 240, 500, 1000, 2000].filter((fps) => fps <= normalizedMaxFps);
+  const tickValues = Array.from(new Set([...candidates, normalizedMaxFps])).sort((left, right) => left - right);
+
+  return tickValues.map((fps) => {
+    const trackBottomPercent = getFrameSampleHeight(fps, normalizedMaxFps);
+
+    return {
+      fps,
+      trackBottomPercent,
+      axisBottomPercent: (trackBottomPercent / 100 * TIMELINE_TRACK_HEIGHT_PX / TIMELINE_CONTENT_HEIGHT_PX) * 100,
+      label: `${fps}`,
+    };
+  });
+}
+
+function readTimelineMaxFps(value: string | number) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!isPositiveFinite(parsed)) {
+    return TIMELINE_DEFAULT_MAX_FPS;
+  }
+
+  return Math.round(clamp(parsed, 1, TIMELINE_MAX_MAX_FPS));
 }
 
 function createTimelineChartPoints(
@@ -2438,8 +2501,8 @@ function sumTimelineDurationWeights(samples: Array<{ durationWeight: number }>) 
   return samples.reduce((total, sample) => total + Math.max(1, sample.durationWeight), 0);
 }
 
-function readTimelineFrameMetrics(message: GameDebugSnapshotMessage) {
-  const metrics = message.frame.metrics;
+function readTimelineFrameMetrics(frame: GameDebugFrameInfo) {
+  const metrics = frame.metrics;
   const milliseconds = isPositiveFinite(metrics?.logicMilliseconds)
     ? metrics.logicMilliseconds
     : null;
@@ -2476,12 +2539,12 @@ function getFrameHeatColor(milliseconds: number | null) {
   return '#b45cff';
 }
 
-function getFrameSampleHeight(fps: number | null) {
+function getFrameSampleHeight(fps: number | null, maxFps: number) {
   if (fps === null) {
     return 0;
   }
 
-  return clamp((fps / TIMELINE_MAX_FPS) * 100, 0, 100);
+  return clamp((fps / Math.max(1, maxFps)) * 100, 0, 100);
 }
 
 function getTimelineDurationWeight(milliseconds: number | null) {
@@ -2509,7 +2572,7 @@ function areComponentSnapshotsEqual(left: ComponentDebugSnapshot, right: Compone
   );
 }
 
-function validateDumpDocument(dump: GameDebugDumpDocument) {
+function validateDumpPlaybackManifest(dump: GameDebugDumpPlaybackManifest) {
   if (!dump || dump.format !== 'nkg.debug.dump' || dump.version !== 1) {
     throw new Error('Unsupported debug dump file.');
   }

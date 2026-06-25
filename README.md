@@ -154,7 +154,7 @@ Skill/Buff 定义支持 `Required*Tags` / `Blocked*Tags` gate，也支持 `Gamep
 - `GameDebugSession`：注册需要观察的 `RuntimeContext` 和 `World`。
 - `GameDebugSnapshotProvider`：生成包含 modules、procedures、worlds、scenes、systems、entities、components、skills、buffs 的快照；组件原始值以 Odin JSON payload 导出。
 - `GameDebugMutationHandler`：接收组件 Odin JSON payload，按运行时组件类型反序列化后通过 ECS set 流程写回，支持通用组件值编辑。
-- `GameDebugDumpRecorder`：录制最近一段 frame snapshot window，停止时写出 `.nkgdump.json` 并可在 Web 面板 Timeline 中回放。
+- `GameDebugDumpRecorder`：录制最近一段 frame snapshot window，停止时写出 Odin binary `.nkgdump`，并可在 Web 面板 Timeline 中按帧回放。
 
 WebDebug 的 pause / step / frame stream 只挂在 `RuntimeContext.Update` 这一个项目入口上；`World.Update` 和 `Scene.Update` 应由 Runtime 模块在帧内推进，不作为独立调试帧出口。
 

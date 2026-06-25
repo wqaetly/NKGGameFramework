@@ -96,7 +96,7 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 - `GameDebugSession`：注册一个或多个 `RuntimeContext` / `World`。
 - `GameDebugSnapshotProvider`：从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件原始值序列化为 Odin JSON payload。
 - `GameDebugMutationHandler`：接收某个 entity/component 的 Odin JSON payload，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
-- `GameDebugDumpRecorder`：订阅 frame publisher，保存有界的 recent snapshot window，停止时写出 `.nkgdump.json` 供 Web Debug Timeline 回放。
+- `GameDebugDumpRecorder`：订阅 frame publisher，保存有界的 recent snapshot window，停止时写出 Odin binary `.nkgdump` 供 Web Debug Timeline 回放。
 
 WebDebug 的 pause / step / frame stream 以 `RuntimeContext.Update` 为唯一帧入口；`World.Update` 和 `Scene.Update` 只是 Runtime 帧内部被模块驱动的执行细节，不单独消费调试步进，也不单独发布 WebDebug frame event。
 

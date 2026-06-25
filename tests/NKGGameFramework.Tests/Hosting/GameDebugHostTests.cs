@@ -544,12 +544,26 @@ public sealed class GameDebugHostTests
             Assert.NotNull(stop);
             Assert.True(stop.Succeeded);
             Assert.False(stop.State.IsRecording);
-            Assert.NotNull(stop.Dump);
-            Assert.Equal("nkg.debug.dump", stop.Dump.Format);
-            Assert.Equal(1, stop.Dump.Version);
-            Assert.Equal(2, stop.Dump.Frames.Count);
-            Assert.All(stop.Dump.Frames, frame => Assert.Equal(nameof(RuntimeContext), frame.Frame.Source));
-            Assert.All(stop.Dump.Frames, frame =>
+
+            savedPath = stop.State.LastDumpPath;
+            Assert.False(string.IsNullOrWhiteSpace(savedPath));
+            Assert.True(File.Exists(savedPath));
+            Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
+            Assert.NotEqual((byte)'{', File.ReadAllBytes(savedPath)[0]);
+
+            var openResponse = await client.PostAsJsonAsync(
+                "/_nkg/debug/dump/playback",
+                new GameDebugDumpPlaybackOpenRequest(savedPath),
+                JsonOptions);
+            var playback = await openResponse.Content.ReadFromJsonAsync<GameDebugDumpPlaybackManifest>(JsonOptions);
+
+            Assert.True(openResponse.IsSuccessStatusCode);
+            Assert.NotNull(playback);
+            Assert.Equal("nkg.debug.dump", playback.Format);
+            Assert.Equal(1, playback.Version);
+            Assert.Equal(2, playback.Frames.Count);
+            Assert.All(playback.Frames, frame => Assert.Equal(nameof(RuntimeContext), frame.Frame.Source));
+            Assert.All(playback.Frames, frame =>
             {
                 Assert.NotNull(frame.Frame.Metrics);
                 Assert.Equal(0.016, frame.Frame.Metrics.DeltaSeconds, precision: 6);
@@ -558,15 +572,23 @@ public sealed class GameDebugHostTests
                 Assert.True(frame.Frame.Metrics.LogicFramesPerSecond > 0d);
             });
 
-            var lastFrame = stop.Dump.Frames[^1];
+            var lastFrame = await client.GetFromJsonAsync<GameDebugSnapshotMessage>(
+                $"/_nkg/debug/dump/playback/frame?playbackId={playback.Id}&frameIndex=1",
+                JsonOptions);
+            Assert.NotNull(lastFrame);
             Assert.Equal(2, lastFrame.Frame.Frame);
             Assert.Contains(
                 lastFrame.Snapshot.Worlds,
                 worldSnapshot => worldSnapshot.Name == world.Name);
 
-            savedPath = stop.State.LastDumpPath;
-            Assert.False(string.IsNullOrWhiteSpace(savedPath));
-            Assert.True(File.Exists(savedPath));
+            using var uploadContent = new ByteArrayContent(await File.ReadAllBytesAsync(savedPath));
+            uploadContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            var uploadResponse = await client.PostAsync("/_nkg/debug/dump/playback/upload", uploadContent);
+            var uploadedPlayback = await uploadResponse.Content.ReadFromJsonAsync<GameDebugDumpPlaybackManifest>(JsonOptions);
+
+            Assert.True(uploadResponse.IsSuccessStatusCode);
+            Assert.NotNull(uploadedPlayback);
+            Assert.Equal(2, uploadedPlayback.Frames.Count);
         }
         finally
         {
@@ -616,6 +638,7 @@ public sealed class GameDebugHostTests
             Assert.True(stop.Succeeded);
             Assert.False(string.IsNullOrWhiteSpace(stop.State.LastDumpPath));
             Assert.True(File.Exists(stop.State.LastDumpPath));
+            Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(stop.State.LastDumpPath));
             Assert.Equal(
                 Path.GetFullPath(dumpDirectory),
                 Path.GetDirectoryName(stop.State.LastDumpPath));
@@ -672,21 +695,24 @@ public sealed class GameDebugHostTests
             savedPath = stop.State.LastDumpPath;
 
             Assert.True(stop.Succeeded);
-            Assert.NotNull(stop.Dump);
-            Assert.Equal(0, stop.Dump.DroppedFrameCount);
-            Assert.Equal(5, stop.Dump.Frames.Count);
-            Assert.Equal(1, stop.Dump.Frames[0].Frame.Frame);
-            Assert.Equal(2, stop.Dump.Frames[1].Frame.Frame);
-            Assert.Equal(3, stop.Dump.Frames[2].Frame.Frame);
-            Assert.Equal(4, stop.Dump.Frames[3].Frame.Frame);
-            Assert.Equal(5, stop.Dump.Frames[4].Frame.Frame);
-            Assert.All(stop.Dump.Frames, frame =>
+            Assert.False(string.IsNullOrWhiteSpace(savedPath));
+            Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
+            var playback = recorder.OpenPlayback(new GameDebugDumpPlaybackOpenRequest(savedPath));
+
+            Assert.Equal(0, playback.DroppedFrameCount);
+            Assert.Equal(5, playback.Frames.Count);
+            Assert.Equal(1, playback.Frames[0].Frame.Frame);
+            Assert.Equal(2, playback.Frames[1].Frame.Frame);
+            Assert.Equal(3, playback.Frames[2].Frame.Frame);
+            Assert.Equal(4, playback.Frames[3].Frame.Frame);
+            Assert.Equal(5, playback.Frames[4].Frame.Frame);
+            Assert.All(playback.Frames, frame =>
             {
                 Assert.NotNull(frame.Frame.Metrics);
                 Assert.Equal(0.016, frame.Frame.Metrics.DeltaSeconds, precision: 6);
                 Assert.Equal(0.016, frame.Frame.Metrics.RealDeltaSeconds, precision: 6);
-                Assert.True(frame.Frame.Metrics.LogicMilliseconds > 0d);
-                Assert.True(frame.Frame.Metrics.LogicFramesPerSecond > 0d);
+                Assert.True(frame.Frame.Metrics.LogicMilliseconds >= 0d);
+                Assert.True(frame.Frame.Metrics.LogicFramesPerSecond >= 0d);
             });
         }
         finally

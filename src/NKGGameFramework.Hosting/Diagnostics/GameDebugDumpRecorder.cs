@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using NKGGameFramework.Diagnostics;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
@@ -15,6 +14,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
     private readonly GameDebugFramePublisher _frames;
     private readonly GameDebugOptions _options;
     private ActiveDumpRecording? _recording;
+    private ActiveDumpPlayback? _playback;
     private string? _lastDumpName;
     private string? _lastDumpPath;
     private bool _disposed;
@@ -133,8 +133,89 @@ public sealed class GameDebugDumpRecorder : IDisposable
         return new GameDebugDumpRecordingResult(
             true,
             $"Debug dump recording saved to '{path}'.",
-            GetState(),
-            dump);
+            GetState());
+    }
+
+    public GameDebugDumpPlaybackManifest OpenPlayback(GameDebugDumpPlaybackOpenRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var path = string.IsNullOrWhiteSpace(request.Path)
+            ? GetLastDumpPath()
+            : Path.GetFullPath(request.Path.Trim());
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidDataException("No debug dump file has been recorded yet.");
+        }
+
+        var dump = GameDebugDumpFile.Deserialize(File.ReadAllBytes(path));
+        return SetPlayback(dump, path);
+    }
+
+    public GameDebugDumpPlaybackManifest OpenPlayback(byte[] payload)
+    {
+        var dump = GameDebugDumpFile.Deserialize(payload);
+        return SetPlayback(dump, null);
+    }
+
+    public GameDebugSnapshotMessage GetPlaybackFrame(string? playbackId, int frameIndex)
+    {
+        lock (_gate)
+        {
+            if (_playback is null)
+            {
+                throw new InvalidDataException("No debug dump playback is loaded.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(playbackId) &&
+                !StringComparer.Ordinal.Equals(_playback.Id, playbackId))
+            {
+                throw new InvalidDataException("The requested debug dump playback is no longer loaded.");
+            }
+
+            if (frameIndex < 0 || frameIndex >= _playback.Document.Frames.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frameIndex), "The debug dump frame index was out of range.");
+            }
+
+            return _playback.Document.Frames[frameIndex];
+        }
+    }
+
+    private string? GetLastDumpPath()
+    {
+        lock (_gate)
+        {
+            return _lastDumpPath;
+        }
+    }
+
+    private GameDebugDumpPlaybackManifest SetPlayback(GameDebugDumpDocument dump, string? path)
+    {
+        var playback = new ActiveDumpPlayback(Guid.NewGuid().ToString("N"), dump, path);
+        lock (_gate)
+        {
+            _playback = playback;
+        }
+
+        return CreatePlaybackManifest(playback);
+    }
+
+    private static GameDebugDumpPlaybackManifest CreatePlaybackManifest(ActiveDumpPlayback playback)
+    {
+        var dump = playback.Document;
+        return new GameDebugDumpPlaybackManifest(
+            playback.Id,
+            dump.Format,
+            dump.Version,
+            dump.Name,
+            dump.CreatedAt,
+            dump.StartedAt,
+            dump.EndedAt,
+            dump.DroppedFrameCount,
+            dump.Frames
+                .Select((message, index) => new GameDebugDumpPlaybackFrame(index, message.Frame))
+                .ToArray());
     }
 
     private void OnFramePublished(GameDebugFrameInfo info)
@@ -174,9 +255,9 @@ public sealed class GameDebugDumpRecorder : IDisposable
     private string SaveDump(GameDebugDumpDocument dump, string dumpDirectory)
     {
         Directory.CreateDirectory(dumpDirectory);
-        var fileName = $"{SanitizeFileName(dump.Name)}.nkgdump.json";
+        var fileName = $"{SanitizeFileName(dump.Name)}{GameDebugDumpFile.FileExtension}";
         var path = Path.Combine(dumpDirectory, fileName);
-        File.WriteAllText(path, JsonSerializer.Serialize(dump, GameDebugJson.Options));
+        File.WriteAllBytes(path, GameDebugDumpFile.Serialize(dump));
         return path;
     }
 
@@ -268,4 +349,9 @@ public sealed class GameDebugDumpRecorder : IDisposable
             return _frames.ToArray();
         }
     }
+
+    private sealed record ActiveDumpPlayback(
+        string Id,
+        GameDebugDumpDocument Document,
+        string? Path);
 }
