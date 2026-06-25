@@ -14,3 +14,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 *.log
+src/NKGGameFramework.Hosting.Web/NKGDump/

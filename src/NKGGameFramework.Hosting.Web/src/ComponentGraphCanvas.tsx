@@ -6,6 +6,7 @@ import {
   MarkerType,
   Position,
   ReactFlow,
+  type ReactFlowInstance,
   type Edge,
   type Node,
   type NodeProps,
@@ -23,6 +24,8 @@ import type {
 type ComponentNodeData = {
   component: ComponentDebugSnapshot;
   onInspectComponent: ComponentSelectionHandler;
+  searchMatch: boolean;
+  searchActive: boolean;
 };
 
 type ComponentSelectionHandler = (component: ComponentDebugSnapshot) => void;
@@ -35,6 +38,10 @@ type ComponentGroupNodeData = {
 type ComponentFlowNode = Node<ComponentNodeData, 'componentNode'>;
 type ComponentGroupFlowNode = Node<ComponentGroupNodeData, 'componentGroup'>;
 type ComponentGraphFlowNode = ComponentFlowNode | ComponentGroupFlowNode;
+
+function isComponentFlowNode(node: ComponentGraphFlowNode): node is ComponentFlowNode {
+  return node.type === 'componentNode';
+}
 
 type ComponentTreeNode = {
   component: ComponentDebugSnapshot;
@@ -64,20 +71,54 @@ export function ComponentGraphCanvas({
   selectedComponentKey?: string | null;
 }) {
   const stableComponents = useStableComponents(entity.components);
+  const normalizedQuery = query.trim();
+  const searchMatches = useMemo(
+    () => findMatchingComponentIds(stableComponents, normalizedQuery),
+    [stableComponents, normalizedQuery],
+  );
   const filteredComponents = useMemo(
-    () => filterComponents(stableComponents, query),
-    [stableComponents, query],
+    () => stableComponents,
+    [stableComponents],
   );
   const rawGraph = useMemo(
-    () => buildComponentGraph(filteredComponents, onInspectComponent, selectedComponentKey ?? null),
-    [filteredComponents, onInspectComponent, selectedComponentKey],
+    () => buildComponentGraph(
+      filteredComponents,
+      onInspectComponent,
+      selectedComponentKey ?? null,
+      searchMatches,
+    ),
+    [filteredComponents, onInspectComponent, selectedComponentKey, searchMatches],
   );
   const graph = useStableGraphElements(rawGraph);
+  const reactFlowRef = useRef<ReactFlowInstance<ComponentGraphFlowNode, Edge> | null>(null);
+  const searchFocusNode = useMemo<ComponentFlowNode | null>(
+    () => normalizedQuery
+      ? graph.nodes.find((node): node is ComponentFlowNode => isComponentFlowNode(node) && node.data.searchMatch) ?? null
+      : null,
+    [graph.nodes, normalizedQuery],
+  );
+
+  useEffect(() => {
+    if (!reactFlowRef.current || !searchFocusNode || !normalizedQuery) {
+      return;
+    }
+
+    const width = searchFocusNode.width ?? COMPONENT_NODE_WIDTH;
+    const height = searchFocusNode.height ?? estimateComponentNodeHeight(searchFocusNode.data.component);
+    reactFlowRef.current.setCenter(
+      searchFocusNode.position.x + width / 2,
+      searchFocusNode.position.y + height / 2,
+      { zoom: 1.08, duration: 240 },
+    );
+  }, [normalizedQuery, searchFocusNode?.id]);
 
   return (
     <div className="component-flow">
       {graph.nodes.length ? (
         <ReactFlow
+          onInit={(instance) => {
+            reactFlowRef.current = instance;
+          }}
           nodes={graph.nodes}
           edges={graph.edges}
           nodeTypes={componentNodeTypes}
@@ -197,6 +238,7 @@ function buildComponentGraph(
   components: ComponentDebugSnapshot[],
   onInspectComponent: ComponentSelectionHandler,
   selectedComponentKey: string | null,
+  searchMatches: Set<string>,
 ) {
   const componentById = new Map<string, ComponentTreeNode>();
 
@@ -261,6 +303,7 @@ function buildComponentGraph(
         rootY,
         onInspectComponent,
         selectedComponentKey,
+        searchMatches,
         nodes,
         edges,
       );
@@ -283,6 +326,7 @@ function layoutComponentTree(
   y: number,
   onInspectComponent: ComponentSelectionHandler,
   selectedComponentKey: string | null,
+  searchMatches: Set<string>,
   nodes: ComponentGraphFlowNode[],
   edges: Edge[],
 ) {
@@ -312,7 +356,12 @@ function layoutComponentTree(
         height: ownHeight,
       },
     selected: selectedComponentKey === graph.id,
-    data: { component: tree.component, onInspectComponent },
+    data: {
+      component: tree.component,
+      onInspectComponent,
+      searchMatch: searchMatches.has(graph.id),
+      searchActive: searchMatches.size > 0,
+    },
     draggable: false,
   });
 
@@ -325,6 +374,7 @@ function layoutComponentTree(
       childY,
       onInspectComponent,
       selectedComponentKey,
+      searchMatches,
       nodes,
       edges,
     );
@@ -467,6 +517,8 @@ function areFlowNodesEqual(left: ComponentGraphFlowNode, right: ComponentGraphFl
     return (
       left.data.component === right.data.component &&
       left.data.onInspectComponent === right.data.onInspectComponent &&
+      left.data.searchMatch === right.data.searchMatch &&
+      left.data.searchActive === right.data.searchActive &&
       left.selected === right.selected
     );
   }
@@ -575,17 +627,23 @@ function areStringArraysEqual(left: string[], right: string[]) {
 }
 
 function ComponentNode({ data, selected }: NodeProps<ComponentFlowNode>) {
-  const { component, onInspectComponent } = data;
+  const { component, onInspectComponent, searchMatch, searchActive } = data;
   const graph = getComponentGraph(component);
   const initial = component.type.name.trim().charAt(0).toUpperCase() || '?';
   const hasDetails = component.value.payload !== null ||
     component.value.structured !== null ||
     component.value.error !== null;
   const status = component.value.error ? 'Error' : hasDetails ? 'Loaded' : 'Deferred';
+  const className = [
+    'component-flow-node',
+    selected ? 'selected' : '',
+    searchMatch ? 'search-match' : '',
+    searchActive && !searchMatch ? 'search-dimmed' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <button
-      className={selected ? 'component-flow-node selected' : 'component-flow-node'}
+      className={className}
       type="button"
       onClick={() => onInspectComponent(component)}
       title={component.type.fullName}
@@ -1005,10 +1063,15 @@ function formatTypeName(typeName: string) {
   return tickIndex >= 0 ? typeName.slice(0, tickIndex) : typeName;
 }
 
-function filterComponents(components: ComponentDebugSnapshot[], query: string) {
-  return components.filter((component) => {
+function findMatchingComponentIds(components: ComponentDebugSnapshot[], query: string) {
+  const matches = new Set<string>();
+  if (!query.trim()) {
+    return matches;
+  }
+
+  for (const component of components) {
     const graph = getComponentGraph(component);
-    return matchesQuery(
+    if (matchesQuery(
       [
         component.type.name,
         component.type.fullName,
@@ -1019,8 +1082,12 @@ function filterComponents(components: ComponentDebugSnapshot[], query: string) {
         graph.parentType?.fullName ?? '',
       ],
       query,
-    );
-  });
+    )) {
+      matches.add(graph.id);
+    }
+  }
+
+  return matches;
 }
 
 function matchesQuery(parts: unknown[], query: string) {

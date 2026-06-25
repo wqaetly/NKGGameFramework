@@ -9,6 +9,14 @@ export interface GameDebugFrameInfo {
   source: string;
   frame: number;
   capturedAt: string;
+  metrics: GameDebugFrameMetrics | null;
+}
+
+export interface GameDebugFrameMetrics {
+  deltaSeconds: number;
+  realDeltaSeconds: number;
+  logicMilliseconds: number;
+  logicFramesPerSecond: number;
 }
 
 export interface GameDebugSnapshotMessage {
@@ -217,13 +225,13 @@ export type GameDebugDumpRecordingCommand = 'start' | 'stop';
 export interface GameDebugDumpRecordingRequest {
   command: GameDebugDumpRecordingCommand;
   name?: string | null;
+  dumpDirectory?: string | null;
 }
 
 export interface GameDebugDumpRecordingState {
   isRecording: boolean;
   startedAt: string | null;
   frameCount: number;
-  maxFrames: number;
   droppedFrameCount: number;
   lastDumpName: string | null;
   lastDumpPath: string | null;

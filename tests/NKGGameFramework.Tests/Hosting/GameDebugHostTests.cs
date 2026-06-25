@@ -547,9 +547,16 @@ public sealed class GameDebugHostTests
             Assert.NotNull(stop.Dump);
             Assert.Equal("nkg.debug.dump", stop.Dump.Format);
             Assert.Equal(1, stop.Dump.Version);
-            Assert.Equal(600, stop.Dump.MaxFrames);
             Assert.Equal(2, stop.Dump.Frames.Count);
             Assert.All(stop.Dump.Frames, frame => Assert.Equal(nameof(RuntimeContext), frame.Frame.Source));
+            Assert.All(stop.Dump.Frames, frame =>
+            {
+                Assert.NotNull(frame.Frame.Metrics);
+                Assert.Equal(0.016, frame.Frame.Metrics.DeltaSeconds, precision: 6);
+                Assert.Equal(0.016, frame.Frame.Metrics.RealDeltaSeconds, precision: 6);
+                Assert.True(frame.Frame.Metrics.LogicMilliseconds > 0d);
+                Assert.True(frame.Frame.Metrics.LogicFramesPerSecond > 0d);
+            });
 
             var lastFrame = stop.Dump.Frames[^1];
             Assert.Equal(2, lastFrame.Frame.Frame);
@@ -575,7 +582,64 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
-    public void Dump_recorder_keeps_a_bounded_recent_frame_window()
+    public void Dump_recorder_uses_recording_request_dump_directory()
+    {
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+        var dumpDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "NKGGameFramework.Tests",
+            Guid.NewGuid().ToString("N"));
+        var fallbackDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "NKGGameFramework.Tests",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            using var recorder = new GameDebugDumpRecorder(
+                new EmptySnapshotProvider(),
+                GameDebugController.Shared,
+                GameDebugFramePublisher.Shared,
+                new GameDebugOptions
+                {
+                    DumpDirectory = fallbackDirectory,
+                });
+
+            var start = recorder.Execute(new GameDebugDumpRecordingRequest(
+                "start",
+                "request-directory-test",
+                dumpDirectory));
+            Assert.True(start.Succeeded);
+
+            var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
+            Assert.True(stop.Succeeded);
+            Assert.False(string.IsNullOrWhiteSpace(stop.State.LastDumpPath));
+            Assert.True(File.Exists(stop.State.LastDumpPath));
+            Assert.Equal(
+                Path.GetFullPath(dumpDirectory),
+                Path.GetDirectoryName(stop.State.LastDumpPath));
+            Assert.False(Directory.Exists(fallbackDirectory));
+        }
+        finally
+        {
+            if (Directory.Exists(dumpDirectory))
+            {
+                Directory.Delete(dumpDirectory, true);
+            }
+
+            if (Directory.Exists(fallbackDirectory))
+            {
+                Directory.Delete(fallbackDirectory, true);
+            }
+
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
+    public void Dump_recorder_keeps_all_recorded_frames()
     {
         GameDebugController.Shared.Reset();
         GameDebugFramePublisher.Shared.Reset();
@@ -588,14 +652,10 @@ public sealed class GameDebugHostTests
                 new EmptySnapshotProvider(),
                 GameDebugController.Shared,
                 GameDebugFramePublisher.Shared,
-                new GameDebugOptions
-                {
-                    DumpMaxFrames = 3,
-                });
+                new GameDebugOptions());
 
             var start = recorder.Execute(new GameDebugDumpRecordingRequest("start", "bounded-window-test"));
             Assert.True(start.Succeeded);
-            Assert.Equal(3, start.State.MaxFrames);
             Assert.Equal(0, start.State.FrameCount);
 
             for (var frame = 1; frame <= 5; frame++)
@@ -605,20 +665,29 @@ public sealed class GameDebugHostTests
 
             var recording = recorder.GetState();
             Assert.True(recording.IsRecording);
-            Assert.Equal(3, recording.FrameCount);
-            Assert.Equal(2, recording.DroppedFrameCount);
+            Assert.Equal(5, recording.FrameCount);
+            Assert.Equal(0, recording.DroppedFrameCount);
 
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
             savedPath = stop.State.LastDumpPath;
 
             Assert.True(stop.Succeeded);
             Assert.NotNull(stop.Dump);
-            Assert.Equal(3, stop.Dump.MaxFrames);
-            Assert.Equal(2, stop.Dump.DroppedFrameCount);
-            Assert.Equal(3, stop.Dump.Frames.Count);
-            Assert.Equal(3, stop.Dump.Frames[0].Frame.Frame);
-            Assert.Equal(4, stop.Dump.Frames[1].Frame.Frame);
-            Assert.Equal(5, stop.Dump.Frames[2].Frame.Frame);
+            Assert.Equal(0, stop.Dump.DroppedFrameCount);
+            Assert.Equal(5, stop.Dump.Frames.Count);
+            Assert.Equal(1, stop.Dump.Frames[0].Frame.Frame);
+            Assert.Equal(2, stop.Dump.Frames[1].Frame.Frame);
+            Assert.Equal(3, stop.Dump.Frames[2].Frame.Frame);
+            Assert.Equal(4, stop.Dump.Frames[3].Frame.Frame);
+            Assert.Equal(5, stop.Dump.Frames[4].Frame.Frame);
+            Assert.All(stop.Dump.Frames, frame =>
+            {
+                Assert.NotNull(frame.Frame.Metrics);
+                Assert.Equal(0.016, frame.Frame.Metrics.DeltaSeconds, precision: 6);
+                Assert.Equal(0.016, frame.Frame.Metrics.RealDeltaSeconds, precision: 6);
+                Assert.True(frame.Frame.Metrics.LogicMilliseconds > 0d);
+                Assert.True(frame.Frame.Metrics.LogicFramesPerSecond > 0d);
+            });
         }
         finally
         {

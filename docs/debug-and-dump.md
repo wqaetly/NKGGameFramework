@@ -302,8 +302,8 @@ flowchart TD
     Frame["RuntimeContext.Update completed"] --> Publisher["GameDebugFramePublisher"]
     Publisher --> Recorder["GameDebugDumpRecorder"]
     Recorder --> Capture["Capture full snapshot message"]
-    Capture --> Window["bounded recent frame window"]
-    Window --> Stop{"stop recording?"}
+    Capture --> Frames["append recorded frame"]
+    Frames --> Stop{"stop recording?"}
     Stop -->|yes| Json[".nkgdump.json"]
     Json --> Web["WebDebug Dump Timeline"]
 ```
@@ -311,13 +311,15 @@ flowchart TD
 当前行为：
 
 - `POST /_nkg/debug/dump/recording` with `{"command":"start"}` 开始录制，但不立即抓取 live snapshot。
-- `POST /_nkg/debug/dump/recording` with `{"command":"stop"}` 停止录制，写出已捕获的 Runtime 帧末尾 snapshot window，并在响应里返回 dump document。
+- `POST /_nkg/debug/dump/recording` with `{"command":"stop"}` 停止录制，写出录制期间已捕获的 Runtime 帧 snapshot，并在响应里返回 dump document。
 - `GET /_nkg/debug/dump/recording` 返回当前录制状态。
 - WebDebug 提供 Record / Stop Rec、Load Dump 和 Dump Timeline。
-- `GameDebugOptions.DumpMaxFrames` 控制最多保留多少帧，默认 `600`；超过窗口会丢弃最旧帧，并在 `droppedFrameCount` 中记录。
+- WebDebug 开始录制时会把 Web 端进程目录下的 `NKGDump` 作为 `dumpDirectory` 传给 debug host，停止录制后 dump 会写到该目录。
+- 直接调用 debug host API 且未提供 `dumpDirectory` 时，会回退到 `GameDebugOptions.DumpDirectory`，默认是临时目录下的 `NKGGameFramework/debug-dumps`，也可在启动 debug host 时覆盖。
+- Load Dump 优先使用浏览器 File System Access API 的固定 picker id，让支持的浏览器记住上次打开的 dump 文件夹；不支持时回退到普通 file input。浏览器不允许网页强制指定本地文件选择器的初始目录。
 - `GameDebugOptions.DumpIncludeComponentPayloads` 和 `DumpIncludeStructuredComponentValues` 控制 dump 是否包含 Odin payload 和 structured value，默认都开启，便于离线查看实体组件 detail。
 
-这个实现适合短窗口、手动触发、明确 expensive 的诊断场景。它已经避免了无限增长，但仍会在 frame event 中捕获完整 snapshot，因此不应当作为长时间后台 recorder 使用。
+这个实现适合短窗口、手动触发、明确 expensive 的诊断场景。录制期间会持续追加帧并在 frame event 中捕获完整 snapshot，因此不应当作为长时间后台 recorder 使用。
 
 ## Dump / Recorder Direction
 

@@ -52,6 +52,43 @@ public sealed class GameDebugFrameGateTests
     }
 
     [Fact]
+    public void Runtime_context_step_from_playing_mode_pauses_after_one_frame()
+    {
+        GameDebugController.Shared.Reset();
+
+        try
+        {
+            using var context = new RuntimeContext();
+            var module = context.RegisterModule(new CountingModule());
+
+            context.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+            Assert.Equal(1, module.UpdateCount);
+            Assert.Equal(1, context.Time.Frame);
+
+            var step = GameDebugController.Shared.Execute(new GameDebugControlRequest("step"));
+            Assert.True(step.State.IsPaused);
+            Assert.Equal(1, step.State.PendingStepCount);
+
+            context.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
+            Assert.Equal(2, module.UpdateCount);
+            Assert.Equal(2, context.Time.Frame);
+
+            var consumed = GameDebugController.Shared.GetState();
+            Assert.True(consumed.IsPaused);
+            Assert.Equal(0, consumed.PendingStepCount);
+            Assert.Equal("step-consumed", consumed.LastCommand);
+
+            context.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 3));
+            Assert.Equal(2, module.UpdateCount);
+            Assert.Equal(2, context.Time.Frame);
+        }
+        finally
+        {
+            GameDebugController.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public void Runtime_context_step_allows_runtime_driven_world_update_once()
     {
         GameDebugController.Shared.Reset();
@@ -125,6 +162,41 @@ public sealed class GameDebugFrameGateTests
         }
     }
 
+    [Fact]
+    public void Runtime_context_debug_metrics_sample_logic_update_elapsed_time()
+    {
+        GameDebugFramePublisher.Shared.Reset();
+        GameDebugFrameInfo? published = null;
+
+        void OnFramePublished(GameDebugFrameInfo info)
+        {
+            published = info;
+        }
+
+        GameDebugFramePublisher.Shared.FramePublished += OnFramePublished;
+        try
+        {
+            using var context = new RuntimeContext();
+            context.RegisterModule(new BlockingModule(TimeSpan.FromMilliseconds(20)));
+
+            context.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+
+            Assert.NotNull(published);
+            var info = published!;
+            Assert.NotNull(info.Metrics);
+            var metrics = info.Metrics!;
+            Assert.Equal(0.016, metrics.DeltaSeconds, precision: 6);
+            Assert.Equal(0.016, metrics.RealDeltaSeconds, precision: 6);
+            Assert.True(metrics.LogicMilliseconds >= 10d);
+            Assert.True(metrics.LogicFramesPerSecond > 0d);
+        }
+        finally
+        {
+            GameDebugFramePublisher.Shared.FramePublished -= OnFramePublished;
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
     private sealed class CountingModule : Module, IUpdateModule
     {
         public int UpdateCount { get; private set; }
@@ -132,6 +204,14 @@ public sealed class GameDebugFrameGateTests
         public void Update(in GameFrameTime time)
         {
             UpdateCount++;
+        }
+    }
+
+    private sealed class BlockingModule(TimeSpan delay) : Module, IUpdateModule
+    {
+        public void Update(in GameFrameTime time)
+        {
+            Thread.Sleep(delay);
         }
     }
 

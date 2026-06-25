@@ -380,9 +380,10 @@ public sealed class GameDebugHost : IAsyncDisposable
 
         if (IsGet(request, endpoint, "/snapshot"))
         {
-            var message = await CaptureSnapshotOnNextFrameAsync(
-                CreateSnapshotCaptureOptions(request.Query),
-                cancellationToken);
+            var captureOptions = CreateSnapshotCaptureOptions(request.Query);
+            var message = GetBool(request.Query, "waitForFrame") is false
+                ? CaptureCurrentSnapshotMessage(captureOptions)
+                : await CaptureSnapshotOnNextFrameAsync(captureOptions, cancellationToken);
             await WriteJsonAsync(
                 stream,
                 200,
@@ -552,11 +553,11 @@ public sealed class GameDebugHost : IAsyncDisposable
             channel.Writer.TryWrite(message);
         }
 
-        await WriteStreamHeadersAsync(stream, cancellationToken);
-
         _frames.FramePublished += OnFramePublished;
         try
         {
+            await WriteStreamHeadersAsync(stream, cancellationToken);
+
             await foreach (var message in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 await WriteServerSentEventAsync(stream, "snapshot", message, cancellationToken);
@@ -583,6 +584,18 @@ public sealed class GameDebugHost : IAsyncDisposable
             frame,
             _snapshots.Capture(captureOptions),
             _control.GetState()));
+    }
+
+    private GameDebugSnapshotMessage CaptureCurrentSnapshotMessage(
+        GameDebugSnapshotCaptureOptions captureOptions)
+    {
+        return CaptureSnapshotMessage(
+            _frames.GetLastPublished() ?? new GameDebugFrameInfo(
+                0,
+                "Snapshot",
+                0,
+                DateTimeOffset.UtcNow),
+            captureOptions);
     }
 
     private T ExecuteDebugOperation<T>(Func<T> operation)

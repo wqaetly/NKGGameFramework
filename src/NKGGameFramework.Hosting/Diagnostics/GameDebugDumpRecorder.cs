@@ -45,7 +45,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
         return request.Command.Trim().ToLowerInvariant() switch
         {
-            "start" => Start(request.Name),
+            "start" => Start(request.Name, request.DumpDirectory),
             "stop" or "end" => Stop(),
             _ => new GameDebugDumpRecordingResult(
                 false,
@@ -65,7 +65,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
         _frames.FramePublished -= OnFramePublished;
     }
 
-    private GameDebugDumpRecordingResult Start(string? name)
+    private GameDebugDumpRecordingResult Start(string? name, string? dumpDirectory)
     {
         ActiveDumpRecording recording;
         lock (_gate)
@@ -81,8 +81,8 @@ public sealed class GameDebugDumpRecorder : IDisposable
             var now = DateTimeOffset.UtcNow;
             recording = new ActiveDumpRecording(
                 NormalizeDumpName(name, now),
-                now,
-                NormalizeMaxFrames(_options.DumpMaxFrames));
+                ResolveDumpDirectory(dumpDirectory, _options.DumpDirectory),
+                now);
             _recording = recording;
             _frames.FramePublished += OnFramePublished;
         }
@@ -120,10 +120,9 @@ public sealed class GameDebugDumpRecorder : IDisposable
             endedAt,
             recording.StartedAt,
             endedAt,
-            recording.MaxFrames,
             recording.DroppedFrameCount,
             frames);
-        var path = SaveDump(dump);
+        var path = SaveDump(dump, recording.DumpDirectory);
 
         lock (_gate)
         {
@@ -172,11 +171,11 @@ public sealed class GameDebugDumpRecorder : IDisposable
         }
     }
 
-    private string SaveDump(GameDebugDumpDocument dump)
+    private string SaveDump(GameDebugDumpDocument dump, string dumpDirectory)
     {
-        Directory.CreateDirectory(_options.DumpDirectory);
+        Directory.CreateDirectory(dumpDirectory);
         var fileName = $"{SanitizeFileName(dump.Name)}.nkgdump.json";
-        var path = Path.Combine(_options.DumpDirectory, fileName);
+        var path = Path.Combine(dumpDirectory, fileName);
         File.WriteAllText(path, JsonSerializer.Serialize(dump, GameDebugJson.Options));
         return path;
     }
@@ -188,7 +187,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
                 true,
                 recording.StartedAt,
                 recording.FrameCount,
-                recording.MaxFrames,
                 recording.DroppedFrameCount,
                 _lastDumpName,
                 _lastDumpPath)
@@ -196,7 +194,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
                 false,
                 null,
                 0,
-                NormalizeMaxFrames(_options.DumpMaxFrames),
                 0,
                 _lastDumpName,
                 _lastDumpPath);
@@ -228,27 +225,34 @@ public sealed class GameDebugDumpRecorder : IDisposable
         return string.IsNullOrWhiteSpace(sanitized) ? "nkg-debug-dump" : sanitized;
     }
 
-    private static int NormalizeMaxFrames(int value)
+    private static string ResolveDumpDirectory(string? requestedDirectory, string fallbackDirectory)
     {
-        return Math.Max(1, value);
+        var directory = string.IsNullOrWhiteSpace(requestedDirectory)
+            ? fallbackDirectory
+            : requestedDirectory.Trim();
+
+        return Path.GetFullPath(directory);
     }
 
     private sealed class ActiveDumpRecording
     {
         private readonly Queue<GameDebugSnapshotMessage> _frames = [];
 
-        public ActiveDumpRecording(string name, DateTimeOffset startedAt, int maxFrames)
+        public ActiveDumpRecording(
+            string name,
+            string dumpDirectory,
+            DateTimeOffset startedAt)
         {
             Name = name;
+            DumpDirectory = dumpDirectory;
             StartedAt = startedAt;
-            MaxFrames = maxFrames;
         }
 
         public string Name { get; }
 
-        public DateTimeOffset StartedAt { get; }
+        public string DumpDirectory { get; }
 
-        public int MaxFrames { get; }
+        public DateTimeOffset StartedAt { get; }
 
         public int FrameCount => _frames.Count;
 
@@ -256,12 +260,6 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
         public void AddFrame(GameDebugSnapshotMessage message)
         {
-            while (_frames.Count >= MaxFrames)
-            {
-                _frames.Dequeue();
-                DroppedFrameCount++;
-            }
-
             _frames.Enqueue(message);
         }
 

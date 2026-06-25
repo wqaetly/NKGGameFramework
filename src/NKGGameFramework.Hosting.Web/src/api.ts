@@ -19,6 +19,7 @@ export interface DebugSnapshotRequestOptions {
   entityLimit?: number;
   includePayload?: boolean;
   includeStructured?: boolean;
+  waitForFrame?: boolean;
 }
 
 export async function fetchDebugSnapshotMessage(
@@ -35,6 +36,7 @@ export async function fetchDebugSnapshotMessage(
   appendQuery(url, 'entityLimit', options?.entityLimit);
   appendQuery(url, 'includePayload', options?.includePayload);
   appendQuery(url, 'includeStructured', options?.includeStructured);
+  appendQuery(url, 'waitForFrame', options?.waitForFrame);
 
   const response = await fetch(`${url.pathname}${url.search}`, {
     signal,
@@ -61,7 +63,97 @@ export function createDebugSnapshotStream(options?: DebugSnapshotRequestOptions)
   appendQuery(url, 'entityLimit', options?.entityLimit);
   appendQuery(url, 'includePayload', options?.includePayload);
   appendQuery(url, 'includeStructured', options?.includeStructured);
+  appendQuery(url, 'waitForFrame', options?.waitForFrame);
   return new EventSource(`${url.pathname}${url.search}`);
+}
+
+export interface DebugSnapshotStreamWaiter {
+  opened: Promise<void>;
+  message: Promise<GameDebugSnapshotMessage>;
+  close: () => void;
+}
+
+export function waitForDebugSnapshotStreamMessage(
+  signal?: AbortSignal,
+  options?: DebugSnapshotRequestOptions,
+): DebugSnapshotStreamWaiter {
+  const stream = createDebugSnapshotStream(options);
+  let openedSettled = false;
+  let messageSettled = false;
+  let resolveOpened!: () => void;
+  let rejectOpened!: (reason?: unknown) => void;
+  let resolveMessage!: (message: GameDebugSnapshotMessage) => void;
+  let rejectMessage!: (reason?: unknown) => void;
+
+  const opened = new Promise<void>((resolve, reject) => {
+    resolveOpened = resolve;
+    rejectOpened = reject;
+  });
+  const message = new Promise<GameDebugSnapshotMessage>((resolve, reject) => {
+    resolveMessage = resolve;
+    rejectMessage = reject;
+  });
+
+  const cleanup = () => {
+    stream.removeEventListener('open', handleOpen);
+    stream.removeEventListener('snapshot', handleSnapshot);
+    stream.removeEventListener('error', handleError);
+    signal?.removeEventListener('abort', handleAbort);
+  };
+  const close = () => {
+    cleanup();
+    stream.close();
+  };
+  const rejectPending = (reason: unknown) => {
+    if (!openedSettled) {
+      openedSettled = true;
+      rejectOpened(reason);
+    }
+
+    if (!messageSettled) {
+      messageSettled = true;
+      rejectMessage(reason);
+    }
+  };
+
+  function handleOpen() {
+    if (!openedSettled) {
+      openedSettled = true;
+      resolveOpened();
+    }
+  }
+
+  function handleSnapshot(event: Event) {
+    if (messageSettled) {
+      return;
+    }
+
+    messageSettled = true;
+    resolveMessage(JSON.parse((event as MessageEvent<string>).data) as GameDebugSnapshotMessage);
+    close();
+  }
+
+  function handleError() {
+    close();
+    rejectPending(new Error('Debug frame stream disconnected before a snapshot was received.'));
+  }
+
+  function handleAbort() {
+    close();
+    rejectPending(new DOMException('Debug frame stream wait was aborted.', 'AbortError'));
+  }
+
+  stream.addEventListener('open', handleOpen);
+  stream.addEventListener('snapshot', handleSnapshot);
+  stream.addEventListener('error', handleError);
+
+  if (signal?.aborted) {
+    handleAbort();
+  } else {
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  }
+
+  return { opened, message, close };
 }
 
 function appendQuery(url: URL, key: string, value: string | number | boolean | undefined) {

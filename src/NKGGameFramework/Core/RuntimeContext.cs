@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NKGGameFramework.Diagnostics;
 
 namespace NKGGameFramework.Core;
@@ -112,6 +113,7 @@ public sealed class RuntimeContext : IRuntimeContext
             return;
         }
 
+        var logicStartedAt = Stopwatch.GetTimestamp();
         RebuildUpdateListIfNeeded();
         Time = time;
         _timers.Advance(in time);
@@ -122,7 +124,9 @@ public sealed class RuntimeContext : IRuntimeContext
         }
 
         Events.DispatchQueuedEvents();
-        GameDebugFramePublisher.Shared.Publish(nameof(RuntimeContext), Time.Frame);
+        var logicElapsed = Stopwatch.GetElapsedTime(logicStartedAt);
+        var currentTime = Time;
+        GameDebugFramePublisher.Shared.Publish(nameof(RuntimeContext), in currentTime, logicElapsed);
     }
 
     public void Update(double deltaTime, double realDeltaTime)
