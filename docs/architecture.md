@@ -10,6 +10,7 @@ src/
     Core/
     Ecs/
     Gameplay/
+    Nodes/
     Runtime/
     Async/
     Serialization/
@@ -54,6 +55,7 @@ Rules:
 - `NKGGameFramework` 是唯一主包，包含所有引擎无关能力。
 - `NKGGameFramework` 直接引用 Odin standalone Net10 项目，作为项目通用序列化底座。
 - `NKGGameFramework` 直接引用 UniTask NuGet 包，作为项目通用 async/await awaitable 底座。
+- `Nodes` 是主包内的跨平台节点图底座，承载可变节点图、节点/端口/连线、动态端口、连接规则、事件、撤销重做、校验和遍历，不依赖 Unity GraphView、Odin Inspector 或任何编辑器 UI。
 - `Adapter.Unity` / `Adapter.Godot` 引用主包，主包不反向引用 Adapter。
 - `NKGGameFramework.Hosting` 是可选轻量调试宿主包，用于 Web Debug Inspector，不进入主包。
 - `NKGGameFramework.Hosting.Web` 是 React/Vite 调试面板源码，通过 `/_nkg/debug/*` HTTP API 读取快照。
@@ -169,6 +171,21 @@ var unit = scene.CreateEntity()
 var frameTime = GameFrameTime.FromSeconds(0.5, 0.5, frame: 1);
 scene.Update(in frameTime);
 ```
+
+## Nodes
+
+Nodes 提供不绑定具体编辑器的节点图底座，参考 `NKG_NodeGraphToolKit/GraphView` 的核心 Data/Undo 语义，但移除了 Unity 类型和编辑器 UI 依赖：
+
+- `NodeGraph`：运行时可变节点图，维护 `Nodes`、`PortLines`、事件和 `NodeGraphUndoRedo`。
+- `Node`：节点基类，支持属性端口、动态端口、输入/输出节点查询、输入值读取和连接生命周期回调。
+- `NodePort`：输入/输出端口，支持 `Multiple` / `Override` 连接策略和 `None` / `Strict` / `Inherited*` 类型约束。
+- `NodePortLine`：端口连线，保存输入/输出节点 ID、字段名、运行时端口引用和跨平台 reroute 点。
+- `NodeInputAttribute` / `NodeOutputAttribute`：用纯 .NET attribute 声明静态端口，替代 Unity 版 `InputAttribute` / `OutputAttribute`。
+- `NodeGraphEvents`：发布节点增删、端口连接和断开事件，供编辑器、调试器或上层运行时订阅。
+- `NodeGraphUndoRedo`：记录节点创建/删除、端口连接/断开命令，支持 undo/redo 和 dirty 标记。
+- `NodeGraphDefinition` / `NodeGraphIndex`：面向配置、导入导出和静态分析的定义层，提供校验、查找和拓扑遍历。
+
+这一层只负责跨平台图结构、运行时连接语义和基础规则。Unity GraphView、Godot UI、Web Debug Canvas 或其他可视化编辑器都应作为 Adapter/Hosting 层消费 `Nodes`，不能把 UI 类型反向塞进主包。
 
 ## Runtime
 
