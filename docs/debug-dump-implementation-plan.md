@@ -1,74 +1,87 @@
 # Debug Dump Implementation Plan
 
-本文是 [`debug-and-dump.md`](./debug-and-dump.md) 的落地路线图。目标很直接：先把 dump 的大小画像看清，再把停止录制时的 keyframe + delta 写盘做出来，最后补齐回放和回归验证。
+本文是 [`debug-and-dump.md`](./debug-and-dump.md) 的落地路线图。当前路线已经从“逐组件 snapshot payload + keyframe/delta”调整为“轻量 frame snapshot + `ComponentStoreBlock` 批量 Odin payload”。旧 dump 格式不再兼容。
 
 ## Goals
 
-- 先做 dump 分析报告，定位最占空间的类和字段。
-- 再做停止录制时的压缩写盘，保留当前录制链路的通用性。
-- 最后补齐回放重建和正确性验证。
+- 报告工具能定位最占空间的类型、字段、组件、实体和场景。
+- 实时 snapshot 的 summary 路径不序列化普通组件值，组件详情按需读取。
+- dump 录制不再保存逐组件 payload / structured，而是按 ECS `ComponentStore` 批量写 Odin binary block。
+- 回放接口保持 Web UI 可用：frame 先返回轻量摘要，组件详情再按 entity row materialize。
+- 用户新增自定义 `IComponent` 后，不需要为 debug 写专门 recorder 或 DTO。
 - 不引入 temp file、frame reference table 或业务特化 recorder。
 
-## Roadmap
+## Current Architecture
 
-| Phase | Deliverable | Depends On | Verify |
-| --- | --- | --- | --- |
-| 1 | `DumpAnalysisReport` schema + parser | Existing dump document shape | Can rank classes, fields, `payload`, and `structured` size |
-| 2 | Stop-time compaction writer | Phase 1 baseline report | Stop saves a smaller `.nkgdump` and keeps playback working |
-| 3 | Replay reconstruction | Phase 2 compact file | Can open existing dumps and rebuild target frames |
-| 4 | Size tuning | Phases 1-3 | Can compare before/after and adjust keyframe cadence |
+| Area | Current shape | Verification |
+| --- | --- | --- |
+| Live snapshot summary | `includePayload=false && includeStructured=false` 时只读取组件类型元数据 | summary 使用会抛异常的 serializer 仍可捕获组件列表 |
+| Live component detail | 过滤到单个 entity/component 后用 Odin 生成 payload / structured | component detail、mutation 测试覆盖 |
+| Dump recording | 每帧捕获轻量 `GameDebugSnapshotMessage` + `BlockFrames` | host dump 测试验证 `.nkgdump` 有 block payload |
+| Store block payload | 每个 scene/component type 写 `entityIds + TComponent[]` Odin binary | ECS block roundtrip 测试覆盖 |
+| Dump file | `NKGDUMP3\n` container magic + gzip JSON document version | dump file reconstruction 测试覆盖 |
+| Dump playback | frame 返回轻量 snapshot，组件详情从 block row materialize structured | playback component 测试验证第 2 帧字段值 |
+| Dump analysis | 优先分析 block payload，并按需 materialize structured 做字段排行 | recorded block dump analysis 测试覆盖 |
+| Web UI | 集成录制、加载、回放、分析 dockview | TypeScript/Vite build 覆盖 |
 
-## Phase 1: Report Tool
+## Data Model
 
-1. Define a stable report schema.
-2. Parse dump files without touching the write path.
-3. Aggregate size by type, field, component, entity, and scene.
-4. Separate `payload` and `structured` size accounting.
-5. Export machine-readable JSON and a human-readable table.
+```mermaid
+flowchart TD
+    Frame["FramePublished"] --> Light["light snapshot: types, graph, systems, stores"]
+    Frame --> Stores["Scene.ComponentStoreDumpBlocks"]
+    Stores --> Block["entityIds + TComponent[]"]
+    Block --> Odin["Odin binary array payload"]
+    Light --> Dump["GameDebugDumpDocument"]
+    Odin --> Dump
+    Dump --> File["NKGDUMP3 gzip .nkgdump"]
+```
 
-建议优先把 report 做到可用，再开始压缩写盘。这样后面调 keyframe 间隔、delta 粒度和字段裁剪时，判断依据会更实。
+`GameDebugDumpDocument.Frames` 保留 UI 回放需要的轻量 frame 信息。`GameDebugDumpDocument.BlockFrames` 保存真实组件值，每个 block 对应一个 scene 下的一种组件类型。默认录制不截断；配置 `GameDebugOptions.MaxRecordedDumpFrames` 后只保留最近 N 帧，并在 manifest 中报告 `DroppedFrameCount`。
 
-## Phase 2: Stop-Time Compaction
+## Replay Model
 
-1. 录制期间仍然只收完整帧到内存。
-2. 点击停止录制时，先冻结内存里的帧列表。
-3. 按固定间隔切关键帧，初版先用 60 帧一组。
-4. 以最近的关键帧为基准计算每帧差量。
-5. 把关键帧和差量一起序列化成 compact dump。
-6. 冻结后的压缩和写盘可以放后台线程做。
+```mermaid
+flowchart TD
+    File[".nkgdump"] --> Open["open playback"]
+    Open --> Manifest["manifest: frame list"]
+    Open --> Frame["GET /dump/playback/frame"]
+    Frame --> UI["render entity/component summary"]
+    UI --> Detail["GET /dump/playback/component"]
+    Detail --> Locate["locate block by world/scene/type"]
+    Locate --> Row["find entityId row"]
+    Row --> Cache["playback block array cache"]
+    Cache --> Materialize["structured preview"]
+```
 
-这一步的边界要守住：
+回放不需要恢复 live world，也不需要业务组件特化逻辑。只要组件是 ECS store 里的 `IComponent`，就能通过 `TComponent[]` block 被记录和查看。组件详情接口缓存最近 materialize 过的 block array，重复查看同一帧同一组件 store 时不再重复解码整个数组。
 
-- 不在 gameplay 运行时做差量整合。
-- 不把临时文件引进录制链路。
-- 不为 `SkillDefinition`、`BehaviorTreeDefinition` 写特殊 recorder 逻辑。
+## Report Tool
 
-## Phase 3: Replay and Compatibility
+报告工具读取 `.nkgdump` 后优先走 block 分析：
 
-1. 按 header 和索引打开 compact dump。
-2. 从目标帧前最近的关键帧开始重建。
-3. 逐帧应用差量，恢复目标帧。
-4. 让现有 playback 接口继续可用。
-5. 增加帧一致性和文件可读性回归测试。
+1. 按 block payload 统计真实保存成本。
+2. 按 entity row 分摊 payload 大小。
+3. 按需 materialize structured，用于字段级排行。
+4. 聚合 type、field、component、entity、scene。
+5. 输出 JSON 和 table，并在 Web `Dump Report` dockview 展示。
+
+`payloadBytes` 表示 dump 里真实保存的 block bytes 分摊；`structuredBytes` 表示为了报告/预览临时展开后的结构化视图大小。
 
 ## Acceptance Criteria
 
 - 报告工具能明确指出最重的类型和字段。
-- 报告工具能分别展示 `payload` 和 `structured` 的占比。
-- 停止录制后的文件比当前全量窗口更小。
-- 回放仍然能重建出正确帧。
-- 录制器没有出现业务特化分支。
+- 报告工具能分别展示 actual file size、`payload` 和 `structured` 占比。
+- 停止录制后的 `.nkgdump` 不保存逐组件 structured。
+- 回放 frame 轻量，组件详情能从 block 还原出正确字段值。
+- 实时 summary 不对普通组件做值序列化。
+- 新增自定义组件不需要专门 debug 代码即可被 snapshot、dump、analysis 处理。
+- 录制器没有业务特化分支。
 - 没有引入 temp file 或 frame reference table。
+- 配置 `MaxRecordedDumpFrames` 时只保留最近窗口并正确报告丢弃帧数。
 
-## Risks
+## Remaining Tuning Ideas
 
-- keyframe 间隔太短会增大文件，太长会增大回放成本。
-- delta 粒度太细会增加计算量，太粗会降低压缩收益。
-- 报告工具如果只给总量，不给字段级归因，就不够指导优化。
-
-## Suggested Order
-
-1. 先落 report schema 和 parser。
-2. 再落 stop-time compaction writer。
-3. 然后接 replay reconstruction。
-4. 最后做 benchmark 和 keyframe cadence tuning。
+- 对很大的 component store block 做分块，降低单个组件详情的反序列化成本。
+- 对 report 增加采样模式，避免超大 dump 分析时展开所有 row。
+- 增加性能基准，分别测 summary snapshot、recording capture、analysis materialization。

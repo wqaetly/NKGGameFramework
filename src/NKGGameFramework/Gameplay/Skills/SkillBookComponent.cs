@@ -1,10 +1,12 @@
 using NKGGameFramework.Ecs;
+using OdinSerializer;
 
 namespace NKGGameFramework.Gameplay;
 
 [ComponentGraph(Group = "Gameplay/Skills", Order = 10)]
 public struct SkillBookComponent : IComponent
 {
+    [OdinSerialize]
     private Dictionary<string, SkillSlot>? _skills;
 
     public SkillBookComponent()

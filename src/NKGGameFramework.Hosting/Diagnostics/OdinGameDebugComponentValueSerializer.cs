@@ -13,17 +13,34 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
 
         try
         {
+            if (value is null)
+            {
+                return new ComponentValueDebugSnapshot(
+                    "odin-json",
+                    Payload: null,
+                    Error: null,
+                    options.IncludeStructured
+                        ? new ComponentValueDebugNode
+                        {
+                            Kind = "null",
+                            Type = DebugSnapshotTypeNames.Create(typeof(object)),
+                            Editable = true,
+                            Value = null,
+                        }
+                        : null);
+            }
+
             return new ComponentValueDebugSnapshot(
                 "odin-json",
                 options.IncludePayload
                     ? Encoding.UTF8.GetString(SerializationUtility.SerializeValueWeak(
                         value,
                         DataFormat.JSON,
-                        CreateSerializationContext()))
+                        GameDebugOdinSerialization.CreateSerializationContext()))
                     : null,
                 Error: null,
                 options.IncludeStructured
-                    ? GameDebugStructuredComponentValue.Capture(value)
+                    ? GameDebugStructuredComponentValue.Capture(value, options.StructuredCaptureOptions)
                     : null);
         }
         catch (Exception exception)
@@ -50,7 +67,7 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
             var payloadResult = SerializationUtility.DeserializeValueWeak(
                 Encoding.UTF8.GetBytes(value.Payload),
                 DataFormat.JSON,
-                CreateDeserializationContext());
+                GameDebugOdinSerialization.CreateDeserializationContext());
 
             if (payloadResult is null)
             {
@@ -80,24 +97,4 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
         return GameDebugStructuredComponentValue.Apply(value.Structured, emptyResult, expectedType);
     }
 
-    private static SerializationContext CreateSerializationContext()
-    {
-        var context = new SerializationContext();
-        Configure(context.Config);
-        return context;
-    }
-
-    private static DeserializationContext CreateDeserializationContext()
-    {
-        var context = new DeserializationContext();
-        Configure(context.Config);
-        return context;
-    }
-
-    private static void Configure(SerializationConfig config)
-    {
-        config.SerializationPolicy = SerializationPolicies.Everything;
-        config.DebugContext.LoggingPolicy = LoggingPolicy.Silent;
-        config.DebugContext.ErrorHandlingPolicy = ErrorHandlingPolicy.ThrowOnErrors;
-    }
 }

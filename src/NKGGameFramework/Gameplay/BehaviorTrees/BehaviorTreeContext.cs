@@ -20,15 +20,21 @@ public sealed class BehaviorTreeContext
         UserState = userState;
     }
 
+    [field: NonSerialized]
     public Scene? Scene { get; }
 
+    [field: NonSerialized]
     public Entity? Owner { get; }
 
+    [field: NonSerialized]
     public Entity? Target { get; }
 
+    [field: NonSerialized]
     public SkillSlot? SkillSlot { get; }
 
+    [field: NonSerialized]
     public BuffInstance? BuffInstance { get; }
 
+    [field: NonSerialized]
     public object? UserState { get; }
 }

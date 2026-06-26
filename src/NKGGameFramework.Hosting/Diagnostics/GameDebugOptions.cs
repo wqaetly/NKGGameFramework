@@ -9,7 +9,5 @@ public sealed class GameDebugOptions
         "NKGGameFramework",
         "debug-dumps");
 
-    public bool DumpIncludeComponentPayloads { get; set; } = true;
-
-    public bool DumpIncludeStructuredComponentValues { get; set; } = true;
+    public int? MaxRecordedDumpFrames { get; set; }
 }

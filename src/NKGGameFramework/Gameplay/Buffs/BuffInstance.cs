@@ -4,6 +4,12 @@ namespace NKGGameFramework.Gameplay;
 
 public sealed class BuffInstance
 {
+    private BuffInstance()
+    {
+        Definition = null!;
+        StackKey = string.Empty;
+    }
+
     internal BuffInstance(
         BuffDefinition definition,
         string stackKey,
@@ -37,6 +43,7 @@ public sealed class BuffInstance
 
     public BuffState State { get; internal set; } = BuffState.Waiting;
 
+    [field: NonSerialized]
     public object? UserState { get; set; }
 
     internal BehaviorTreeInstance? ExecutionTreeInstance { get; set; }

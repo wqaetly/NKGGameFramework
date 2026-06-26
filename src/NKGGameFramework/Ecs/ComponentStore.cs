@@ -8,6 +8,8 @@ internal interface IComponentStore
 
     IReadOnlyList<int> EntityIds { get; }
 
+    EcsComponentStoreDumpBlock CreateDumpBlock();
+
     bool Has(int entityId);
 
     bool Remove(int entityId);
@@ -30,6 +32,21 @@ internal sealed class ComponentStore<TComponent> : IComponentStore
     public int Count => _entityIds.Count;
 
     public IReadOnlyList<int> EntityIds => _entityIds;
+
+    public EcsComponentStoreDumpBlock CreateDumpBlock()
+    {
+        var entityIds = _entityIds.ToArray();
+        var values = new TComponent[entityIds.Length];
+        for (var index = 0; index < entityIds.Length; index++)
+        {
+            values[index] = _components[entityIds[index]];
+        }
+
+        return new EcsComponentStoreDumpBlock(
+            typeof(TComponent),
+            entityIds,
+            values);
+    }
 
     public bool Has(int entityId)
     {

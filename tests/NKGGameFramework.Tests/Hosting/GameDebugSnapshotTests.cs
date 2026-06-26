@@ -3,6 +3,7 @@ using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
 using NKGGameFramework.Gameplay;
 using NKGGameFramework.Hosting.Diagnostics;
+using OdinSerializer;
 
 namespace NKGGameFramework.Tests.Hosting;
 
@@ -132,18 +133,14 @@ public sealed class GameDebugSnapshotTests
         var buffCollectionComponent = Assert.Single(
             targetSnapshot.Components,
             component => component.Type.Name == nameof(BuffCollectionComponent));
-        Assert.Equal("debug-summary", buffCollectionComponent.Value.Format);
+        Assert.Equal("odin-json", buffCollectionComponent.Value.Format);
         Assert.Null(buffCollectionComponent.Value.Error);
         Assert.NotNull(buffCollectionComponent.Value.Payload);
-        Assert.True(buffCollectionComponent.Value.Payload!.Length < 2048);
 
         var buffCollectionValue = buffCollectionComponent.Value.Structured;
         Assert.NotNull(buffCollectionValue);
         Assert.Equal("object", buffCollectionValue!.Kind);
-        Assert.False(buffCollectionValue.Editable);
-        Assert.Equal("1", FindChild(buffCollectionValue, "Count").Value);
-        Assert.Equal("1", FindChild(buffCollectionValue, "ActiveCount").Value);
-        var buffCollectionEntries = FindChild(buffCollectionValue, "Buffs");
+        var buffCollectionEntries = FindChild(buffCollectionValue, "_buffs");
         Assert.Equal("list", buffCollectionEntries.Kind);
         Assert.Single(buffCollectionEntries.Children);
 
@@ -154,6 +151,20 @@ public sealed class GameDebugSnapshotTests
         Assert.Equal(2, buff.Stacks);
         Assert.Equal(5, buff.RemainingDurationSeconds);
         Assert.Contains("State.Burning", buff.Tags);
+    }
+
+    [Fact]
+    public void Debug_odin_serializer_handles_null_values_without_error()
+    {
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+
+        var value = valueSerializer.Serialize(null!);
+
+        Assert.Equal("odin-json", value.Format);
+        Assert.Null(value.Payload);
+        Assert.Null(value.Error);
+        Assert.NotNull(value.Structured);
+        Assert.Equal("null", value.Structured!.Kind);
     }
 
     [Fact]
@@ -195,6 +206,38 @@ public sealed class GameDebugSnapshotTests
         Assert.Null(component.Value.Payload);
         Assert.Null(component.Value.Structured);
         Assert.Null(component.Value.Error);
+    }
+
+    [Fact]
+    public void Capture_summary_component_list_does_not_serialize_component_values()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new PositionComponent(1, 2))
+            .Add(new VelocityComponent(3, 4));
+        var session = new GameDebugSession().Register(world);
+        var snapshots = new GameDebugSnapshotProvider(
+            session,
+            new ThrowingComponentValueSerializer());
+
+        var snapshot = snapshots.Capture(new GameDebugSnapshotCaptureOptions
+        {
+            IncludeComponentPayloads = false,
+            IncludeStructuredComponentValues = false,
+        });
+
+        var sceneSnapshot = Assert.Single(Assert.Single(snapshot.Worlds).Scenes);
+        var entitySnapshot = Assert.Single(sceneSnapshot.Entities, candidate => candidate.Id == entity.Id.Value);
+        Assert.Contains(entitySnapshot.Components, component => component.Type.Name == nameof(PositionComponent));
+        Assert.Contains(entitySnapshot.Components, component => component.Type.Name == nameof(VelocityComponent));
+        Assert.All(entitySnapshot.Components, component =>
+        {
+            Assert.Equal("none", component.Value.Format);
+            Assert.Null(component.Value.Payload);
+            Assert.Null(component.Value.Structured);
+            Assert.Null(component.Value.Error);
+        });
     }
 
     [Fact]
@@ -365,6 +408,173 @@ public sealed class GameDebugSnapshotTests
     }
 
     [Fact]
+    public void Structured_component_values_stop_at_runtime_reference_boundaries()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity();
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+
+        var value = valueSerializer.Serialize(new RuntimeReferenceComponent
+        {
+            Scene = scene,
+            Owner = entity,
+            Values = [1, 2, 3],
+        });
+
+        Assert.NotNull(value.Structured);
+        var sceneNode = FindChild(value.Structured!, nameof(RuntimeReferenceComponent.Scene));
+        var ownerNode = FindChild(value.Structured!, nameof(RuntimeReferenceComponent.Owner));
+        var valuesNode = FindChild(value.Structured!, nameof(RuntimeReferenceComponent.Values));
+        Assert.Equal("reference", sceneNode.Kind);
+        Assert.Equal("battle", sceneNode.Value);
+        Assert.Equal("Runtime reference boundary.", sceneNode.Error);
+        Assert.DoesNotContain(sceneNode.Children, child => child.Name == nameof(Scene.ComponentStores));
+        Assert.Equal("object", ownerNode.Kind);
+        Assert.Equal("list", valuesNode.Kind);
+        Assert.Equal(3, valuesNode.Children.Count);
+    }
+
+    [Fact]
+    public void Structured_component_values_capture_hashset_as_list_items()
+    {
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var value = valueSerializer.Serialize(new CollectionComponent
+        {
+            Tags = ["beta", "alpha"],
+        });
+
+        Assert.NotNull(value.Structured);
+        var tags = FindChild(value.Structured!, nameof(CollectionComponent.Tags));
+
+        Assert.Equal("list", tags.Kind);
+        Assert.Equal(typeof(string).FullName, tags.ElementType?.FullName);
+        Assert.Equal(["alpha", "beta"], tags.Children.Select(child => child.Value).Order(StringComparer.Ordinal));
+        Assert.DoesNotContain(tags.Children, child => child.Name == "Count");
+        Assert.DoesNotContain(tags.Children, child => child.Name == "Comparer");
+
+        var edited = SetChild(value.Structured!, nameof(CollectionComponent.Tags), child => child with
+        {
+            Children =
+            [
+                child.Children[0] with { Name = "[0]", Value = "gamma" },
+                child.Children[1] with { Name = "[1]", Value = "delta" },
+            ],
+        });
+        var updated = (CollectionComponent)valueSerializer.Deserialize(
+            value with { Structured = edited },
+            typeof(CollectionComponent));
+
+        Assert.Equal(["delta", "gamma"], updated.Tags.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Debug_odin_policy_serializes_public_component_surface_without_private_cache_fields()
+    {
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var value = valueSerializer.Serialize(new PolicyComponent(
+            publicField: 1,
+            publicProperty: 2,
+            readOnlyProperty: 3,
+            privateCache: 4));
+
+        Assert.NotNull(value.Payload);
+        Assert.DoesNotContain("_privateCache", value.Payload, StringComparison.Ordinal);
+        Assert.NotNull(value.Structured);
+        Assert.Contains(value.Structured.Children, child => child.Name == nameof(PolicyComponent.PublicField));
+        Assert.Contains(value.Structured.Children, child => child.Name == nameof(PolicyComponent.PublicProperty));
+        Assert.Contains(value.Structured.Children, child => child.Name == nameof(PolicyComponent.ReadOnlyProperty));
+        Assert.DoesNotContain(value.Structured.Children, child => child.Name == nameof(PolicyComponent.PrivateCache));
+        Assert.DoesNotContain(value.Structured.Children, child => child.Name == "_privateCache");
+
+        var restored = (PolicyComponent)valueSerializer.Deserialize(
+            value with { Structured = null },
+            typeof(PolicyComponent));
+
+        Assert.Equal(1, restored.PublicField);
+        Assert.Equal(2, restored.PublicProperty);
+        Assert.Equal(3, restored.ReadOnlyProperty);
+        Assert.Equal(0, restored.PrivateCache);
+    }
+
+    [Fact]
+    public void Debug_odin_policy_excludes_nonserialized_members()
+    {
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var value = valueSerializer.Serialize(new NonSerializedPolicyComponent(
+            visible: 1,
+            odinButExcluded: 2,
+            propertyExcluded: 3));
+
+        Assert.NotNull(value.Payload);
+        Assert.Contains(nameof(NonSerializedPolicyComponent.Visible), value.Payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("_odinButExcluded", value.Payload, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(NonSerializedPolicyComponent.PropertyExcluded), value.Payload, StringComparison.Ordinal);
+        Assert.NotNull(value.Structured);
+        Assert.Contains(value.Structured.Children, child => child.Name == nameof(NonSerializedPolicyComponent.Visible));
+        Assert.DoesNotContain(value.Structured.Children, child => child.Name == "_odinButExcluded");
+        Assert.DoesNotContain(value.Structured.Children, child => child.Name == nameof(NonSerializedPolicyComponent.PropertyExcluded));
+
+        var restored = (NonSerializedPolicyComponent)valueSerializer.Deserialize(
+            value with { Structured = null },
+            typeof(NonSerializedPolicyComponent));
+
+        Assert.Equal(1, restored.Visible);
+        Assert.Equal(0, restored.OdinButExcluded);
+        Assert.Equal(0, restored.PropertyExcluded);
+    }
+
+    [Fact]
+    public void Debug_odin_policy_serializes_explicit_odin_property()
+    {
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+        var value = valueSerializer.Serialize(new OdinPropertyComponent(7));
+
+        Assert.NotNull(value.Payload);
+        Assert.Contains("PrivateValue", value.Payload, StringComparison.Ordinal);
+        Assert.NotNull(value.Structured);
+        Assert.Contains(value.Structured.Children, child => child.Name == "PrivateValue");
+
+        var restored = (OdinPropertyComponent)valueSerializer.Deserialize(
+            value with { Structured = null },
+            typeof(OdinPropertyComponent));
+
+        Assert.Equal(7, restored.VisibleValue);
+    }
+
+
+    [Fact]
+    public void Debug_odin_policy_serializes_first_party_private_gameplay_state()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new GameplayTagComponent(GameplayTagContainer.From("Unit.Hero.Mage")));
+        SkillManager.Learn(entity, new SkillDefinition
+        {
+            Id = "fireball",
+            DisplayName = "Fireball",
+            Cooldowns = { [1] = TimeSpan.FromSeconds(3) },
+        }, level: 1);
+        var valueSerializer = new OdinGameDebugComponentValueSerializer();
+
+        var tags = valueSerializer.Serialize(entity.Get<GameplayTagComponent>());
+        var skills = valueSerializer.Serialize(entity.Get<SkillBookComponent>());
+
+        Assert.Null(tags.Error);
+        Assert.NotNull(tags.Payload);
+        Assert.Contains("Unit.Hero.Mage", tags.Payload, StringComparison.Ordinal);
+        Assert.NotNull(tags.Structured);
+        Assert.Contains(tags.Structured.Children, child => child.Name == "_tags");
+
+        Assert.Null(skills.Error);
+        Assert.NotNull(skills.Payload);
+        Assert.Contains("fireball", skills.Payload, StringComparison.Ordinal);
+        Assert.NotNull(skills.Structured);
+        Assert.Contains(skills.Structured.Children, child => child.Name == "_skills");
+    }
+
+    [Fact]
     public void Mutations_write_structured_component_value_fields()
     {
         using var world = new World("debug-world");
@@ -510,6 +720,96 @@ public sealed class GameDebugSnapshotTests
         public int Count;
 
         public double Multiplier { get; } = multiplier;
+    }
+
+    private struct RuntimeReferenceComponent : IComponent
+    {
+        public Scene? Scene;
+
+        public Entity Owner;
+
+        public List<int> Values;
+    }
+
+    private struct CollectionComponent : IComponent
+    {
+        public HashSet<string> Tags;
+    }
+
+    private struct PolicyComponent : IComponent
+    {
+        public int PublicField;
+        private int _privateCache;
+
+        public PolicyComponent(
+            int publicField,
+            int publicProperty,
+            int readOnlyProperty,
+            int privateCache)
+        {
+            PublicField = publicField;
+            PublicProperty = publicProperty;
+            ReadOnlyProperty = readOnlyProperty;
+            _privateCache = privateCache;
+        }
+
+        public int PublicProperty { get; set; }
+
+        public int ReadOnlyProperty { get; }
+
+        public int PrivateCache => _privateCache;
+    }
+
+    private struct NonSerializedPolicyComponent : IComponent
+    {
+        public int Visible;
+
+        [OdinSerialize]
+        [NonSerialized]
+        private int _odinButExcluded;
+
+        public NonSerializedPolicyComponent(
+            int visible,
+            int odinButExcluded,
+            int propertyExcluded)
+        {
+            Visible = visible;
+            _odinButExcluded = odinButExcluded;
+            PropertyExcluded = propertyExcluded;
+        }
+
+        public int OdinButExcluded => _odinButExcluded;
+
+        [field: NonSerialized]
+        public int PropertyExcluded { get; set; }
+    }
+
+    private struct OdinPropertyComponent : IComponent
+    {
+        public OdinPropertyComponent(int privateValue)
+        {
+            PrivateValue = privateValue;
+        }
+
+        public int VisibleValue => PrivateValue;
+
+        [OdinSerialize]
+        private int PrivateValue { get; set; }
+    }
+
+    private sealed class ThrowingComponentValueSerializer : IGameDebugComponentValueSerializer
+    {
+        public ComponentValueDebugSnapshot Serialize(
+            object value,
+            GameDebugComponentValueSerializationOptions? options = null)
+        {
+            throw new InvalidOperationException("Summary snapshots should not serialize component values.");
+        }
+
+        public object Deserialize(ComponentValueDebugSnapshot value, Type expectedType)
+        {
+            throw new InvalidOperationException("Summary snapshots should not deserialize component values.");
+        }
     }
 
     private static ComponentValueDebugNode FindChild(ComponentValueDebugNode node, string name)

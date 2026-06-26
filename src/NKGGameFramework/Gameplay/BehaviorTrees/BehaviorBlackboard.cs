@@ -1,4 +1,5 @@
 using NKGGameFramework.Ecs;
+using OdinSerializer;
 
 namespace NKGGameFramework.Gameplay;
 
@@ -39,8 +40,13 @@ public readonly record struct BehaviorBlackboardChange
 
 public sealed class BehaviorBlackboard : IDisposable
 {
+    [OdinSerialize]
     private readonly Dictionary<string, BehaviorBlackboardValue> _values = new(StringComparer.Ordinal);
+
+    [NonSerialized]
     private readonly Dictionary<string, List<Action<BehaviorBlackboardChange>>> _observers = new(StringComparer.Ordinal);
+
+    [NonSerialized]
     private readonly BehaviorBlackboardValuePool _valuePool;
 
     public BehaviorBlackboard(Scene scene, BehaviorBlackboard? parent = null)
@@ -55,6 +61,7 @@ public sealed class BehaviorBlackboard : IDisposable
         _valuePool = parent?._valuePool ?? valuePool;
     }
 
+    [field: NonSerialized]
     public BehaviorBlackboard? Parent { get; }
 
     public IReadOnlyDictionary<string, BehaviorBlackboardValue> Values => _values;

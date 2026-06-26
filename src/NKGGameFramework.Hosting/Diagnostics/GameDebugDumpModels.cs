@@ -10,7 +10,27 @@ public sealed record GameDebugDumpDocument(
     DateTimeOffset StartedAt,
     DateTimeOffset EndedAt,
     int DroppedFrameCount,
-    IReadOnlyList<GameDebugSnapshotMessage> Frames);
+    IReadOnlyList<GameDebugSnapshotMessage> Frames,
+    IReadOnlyList<GameDebugDumpFrameBlocks>? BlockFrames = null);
+
+public sealed record GameDebugDumpFrameBlocks(
+    int Index,
+    IReadOnlyList<GameDebugDumpWorldBlocks> Worlds);
+
+public sealed record GameDebugDumpWorldBlocks(
+    string Name,
+    IReadOnlyList<GameDebugDumpSceneBlocks> Scenes);
+
+public sealed record GameDebugDumpSceneBlocks(
+    string Name,
+    IReadOnlyList<GameDebugDumpComponentStoreBlock> ComponentStores);
+
+public sealed record GameDebugDumpComponentStoreBlock(
+    DebugTypeInfo Type,
+    int[] EntityIds,
+    string Format,
+    byte[] Payload,
+    string? Error);
 
 public sealed record GameDebugDumpRecordingRequest(
     string Command,
@@ -47,3 +67,12 @@ public sealed record GameDebugDumpPlaybackManifest(
 public sealed record GameDebugDumpPlaybackFrame(
     int Index,
     GameDebugFrameInfo Frame);
+
+public sealed record GameDebugDumpPlaybackComponentRequest(
+    string? PlaybackId,
+    int FrameIndex,
+    string WorldName,
+    string SceneName,
+    int EntityId,
+    string ComponentTypeFullName,
+    string? ComponentAssemblyName = null);

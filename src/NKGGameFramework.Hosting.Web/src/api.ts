@@ -1,8 +1,11 @@
 import type {
   GameDebugControlRequest,
   GameDebugControlResult,
+  ComponentDebugSnapshot,
+  GameDebugDumpPlaybackComponentRequest,
   GameDebugDumpPlaybackManifest,
   GameDebugDumpPlaybackOpenRequest,
+  GameDebugDumpAnalysisReport,
   GameDebugDumpRecordingRequest,
   GameDebugDumpRecordingResult,
   GameDebugDumpRecordingState,
@@ -10,6 +13,11 @@ import type {
   GameDebugMutationResult,
   GameDebugSnapshotMessage,
 } from './types';
+
+export type DebugApiConnection = {
+  host: string;
+  port: string;
+};
 
 export interface DebugSnapshotRequestOptions {
   worldName?: string;
@@ -24,11 +32,28 @@ export interface DebugSnapshotRequestOptions {
   waitForFrame?: boolean;
 }
 
+export const DEFAULT_DEBUG_API_CONNECTION: DebugApiConnection = {
+  host: '127.0.0.1',
+  port: '5067',
+};
+
+let debugApiBaseUrl = createDebugApiBaseUrl(DEFAULT_DEBUG_API_CONNECTION);
+
+export function setDebugApiBaseUrl(baseUrl: string) {
+  debugApiBaseUrl = normalizeDebugApiBaseUrl(baseUrl);
+}
+
+export function createDebugApiBaseUrl(connection: DebugApiConnection) {
+  const host = connection.host.trim() || DEFAULT_DEBUG_API_CONNECTION.host;
+  const port = connection.port.trim() || DEFAULT_DEBUG_API_CONNECTION.port;
+  return normalizeDebugApiBaseUrl(`http://${formatHostForUrl(host)}:${port}`);
+}
+
 export async function fetchDebugSnapshotMessage(
   signal?: AbortSignal,
   options?: DebugSnapshotRequestOptions,
 ): Promise<GameDebugSnapshotMessage> {
-  const url = new URL('/_nkg/debug/snapshot', window.location.origin);
+  const url = createDebugApiUrl('/_nkg/debug/snapshot');
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
   appendQuery(url, 'entityId', options?.entityId);
@@ -40,7 +65,7 @@ export async function fetchDebugSnapshotMessage(
   appendQuery(url, 'includeStructured', options?.includeStructured);
   appendQuery(url, 'waitForFrame', options?.waitForFrame);
 
-  const response = await fetch(`${url.pathname}${url.search}`, {
+  const response = await fetch(url.toString(), {
     signal,
     headers: {
       Accept: 'application/json',
@@ -55,7 +80,7 @@ export async function fetchDebugSnapshotMessage(
 }
 
 export function createDebugSnapshotStream(options?: DebugSnapshotRequestOptions): EventSource {
-  const url = new URL('/_nkg/debug/stream', window.location.origin);
+  const url = createDebugApiUrl('/_nkg/debug/stream');
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
   appendQuery(url, 'entityId', options?.entityId);
@@ -66,7 +91,7 @@ export function createDebugSnapshotStream(options?: DebugSnapshotRequestOptions)
   appendQuery(url, 'includePayload', options?.includePayload);
   appendQuery(url, 'includeStructured', options?.includeStructured);
   appendQuery(url, 'waitForFrame', options?.waitForFrame);
-  return new EventSource(`${url.pathname}${url.search}`);
+  return new EventSource(url.toString());
 }
 
 export interface DebugSnapshotStreamWaiter {
@@ -168,7 +193,7 @@ export async function postDebugMutation(
   request: GameDebugMutationRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugMutationResult> {
-  const response = await fetch('/_nkg/debug/mutations', {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/mutations').toString(), {
     method: 'POST',
     signal,
     headers: {
@@ -189,7 +214,7 @@ export async function postDebugControl(
   request: GameDebugControlRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugControlResult> {
-  const response = await fetch('/_nkg/debug/control', {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/control').toString(), {
     method: 'POST',
     signal,
     headers: {
@@ -209,7 +234,7 @@ export async function postDebugControl(
 export async function fetchDumpRecordingState(
   signal?: AbortSignal,
 ): Promise<GameDebugDumpRecordingState> {
-  const response = await fetch('/_nkg/debug/dump/recording', {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/dump/recording').toString(), {
     signal,
     headers: {
       Accept: 'application/json',
@@ -227,7 +252,7 @@ export async function postDumpRecording(
   request: GameDebugDumpRecordingRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugDumpRecordingResult> {
-  const response = await fetch('/_nkg/debug/dump/recording', {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/dump/recording').toString(), {
     method: 'POST',
     signal,
     headers: {
@@ -248,7 +273,7 @@ export async function openDumpPlayback(
   request: GameDebugDumpPlaybackOpenRequest,
   signal?: AbortSignal,
 ): Promise<GameDebugDumpPlaybackManifest> {
-  const response = await fetch('/_nkg/debug/dump/playback', {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/dump/playback').toString(), {
     method: 'POST',
     signal,
     headers: {
@@ -269,7 +294,7 @@ export async function uploadDumpPlayback(
   payload: ArrayBuffer,
   signal?: AbortSignal,
 ): Promise<GameDebugDumpPlaybackManifest> {
-  const response = await fetch('/_nkg/debug/dump/playback/upload', {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/dump/playback/upload').toString(), {
     method: 'POST',
     signal,
     headers: {
@@ -286,16 +311,58 @@ export async function uploadDumpPlayback(
   return response.json();
 }
 
+export async function openDumpAnalysis(
+  request: GameDebugDumpPlaybackOpenRequest,
+  signal?: AbortSignal,
+): Promise<GameDebugDumpAnalysisReport> {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/dump/analysis').toString(), {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump analysis request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function uploadDumpAnalysis(
+  payload: ArrayBuffer,
+  signal?: AbortSignal,
+): Promise<GameDebugDumpAnalysisReport> {
+  const response = await fetch(createDebugApiUrl('/_nkg/debug/dump/analysis/upload').toString(), {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/octet-stream',
+    },
+    body: payload,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump analysis upload failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 export async function fetchDumpPlaybackFrame(
   playbackId: string,
   frameIndex: number,
   signal?: AbortSignal,
 ): Promise<GameDebugSnapshotMessage> {
-  const url = new URL('/_nkg/debug/dump/playback/frame', window.location.origin);
+  const url = createDebugApiUrl('/_nkg/debug/dump/playback/frame');
   appendQuery(url, 'playbackId', playbackId);
   appendQuery(url, 'frameIndex', frameIndex);
 
-  const response = await fetch(`${url.pathname}${url.search}`, {
+  const response = await fetch(url.toString(), {
     signal,
     headers: {
       Accept: 'application/json',
@@ -307,4 +374,55 @@ export async function fetchDumpPlaybackFrame(
   }
 
   return response.json();
+}
+
+export async function fetchDumpPlaybackComponent(
+  request: GameDebugDumpPlaybackComponentRequest,
+  signal?: AbortSignal,
+): Promise<ComponentDebugSnapshot> {
+  const url = createDebugApiUrl('/_nkg/debug/dump/playback/component');
+  appendQuery(url, 'playbackId', request.playbackId ?? undefined);
+  appendQuery(url, 'frameIndex', request.frameIndex);
+  appendQuery(url, 'worldName', request.worldName);
+  appendQuery(url, 'sceneName', request.sceneName);
+  appendQuery(url, 'entityId', request.entityId);
+  appendQuery(url, 'componentTypeFullName', request.componentTypeFullName);
+  appendQuery(url, 'componentAssemblyName', request.componentAssemblyName ?? undefined);
+
+  const response = await fetch(url.toString(), {
+    signal,
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dump playback component request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+function createDebugApiUrl(path: string) {
+  return new URL(path, debugApiBaseUrl);
+}
+
+function normalizeDebugApiBaseUrl(value: string) {
+  const url = new URL(value);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Debug host URL must use http or https.');
+  }
+
+  url.pathname = '/';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+function formatHostForUrl(host: string) {
+  if (host.includes(':') && !host.startsWith('[') && !host.endsWith(']')) {
+    return `[${host}]`;
+  }
+
+  return host;
 }

@@ -1,18 +1,22 @@
 using System.Globalization;
 using NKGGameFramework.Diagnostics;
+using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
 
 public sealed class GameDebugDumpRecorder : IDisposable
 {
     private const string DumpFormat = "nkg.debug.dump";
-    private const int DumpVersion = 1;
+    private const int DumpDocumentVersion = 2;
+    private const int MaxCachedPlaybackBlocks = 32;
 
     private readonly object _gate = new();
     private readonly IGameDebugSnapshotProvider _snapshots;
     private readonly GameDebugController _control;
     private readonly GameDebugFramePublisher _frames;
     private readonly GameDebugOptions _options;
+    private readonly GameDebugSession? _session;
+    private readonly object? _debugStateGate;
     private ActiveDumpRecording? _recording;
     private ActiveDumpPlayback? _playback;
     private string? _lastDumpName;
@@ -23,12 +27,16 @@ public sealed class GameDebugDumpRecorder : IDisposable
         IGameDebugSnapshotProvider snapshots,
         GameDebugController control,
         GameDebugFramePublisher frames,
-        GameDebugOptions options)
+        GameDebugOptions options,
+        GameDebugSession? session = null,
+        object? debugStateGate = null)
     {
         _snapshots = snapshots;
         _control = control;
         _frames = frames;
         _options = options;
+        _session = session;
+        _debugStateGate = debugStateGate;
     }
 
     public GameDebugDumpRecordingState GetState()
@@ -82,7 +90,8 @@ public sealed class GameDebugDumpRecorder : IDisposable
             recording = new ActiveDumpRecording(
                 NormalizeDumpName(name, now),
                 ResolveDumpDirectory(dumpDirectory, _options.DumpDirectory),
-                now);
+                now,
+                NormalizeMaxRecordedFrames(_options.MaxRecordedDumpFrames));
             _recording = recording;
             _frames.FramePublished += OnFramePublished;
         }
@@ -112,16 +121,26 @@ public sealed class GameDebugDumpRecorder : IDisposable
         }
 
         var endedAt = DateTimeOffset.UtcNow;
-        var frames = recording.SnapshotFrames();
+        var recordedFrames = recording.SnapshotFrames();
+        var frames = recordedFrames
+            .Select(static frame => frame.Message)
+            .ToArray();
+        var blockFrames = recordedFrames.Any(static frame => frame.Blocks is not null)
+            ? recordedFrames
+                .Select(static frame => frame.Blocks)
+                .OfType<GameDebugDumpFrameBlocks>()
+                .ToArray()
+            : null;
         var dump = new GameDebugDumpDocument(
             DumpFormat,
-            DumpVersion,
+            DumpDocumentVersion,
             recording.Name,
             endedAt,
             recording.StartedAt,
             endedAt,
             recording.DroppedFrameCount,
-            frames);
+            frames,
+            blockFrames);
         var path = SaveDump(dump, recording.DumpDirectory);
 
         lock (_gate)
@@ -158,6 +177,26 @@ public sealed class GameDebugDumpRecorder : IDisposable
         return SetPlayback(dump, null);
     }
 
+    public GameDebugDumpAnalysisReport AnalyzeDump(GameDebugDumpPlaybackOpenRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var path = string.IsNullOrWhiteSpace(request.Path)
+            ? GetLastDumpPath()
+            : Path.GetFullPath(request.Path.Trim());
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidDataException("No debug dump file has been recorded yet.");
+        }
+
+        return GameDebugDumpAnalyzer.Analyze(File.ReadAllBytes(path));
+    }
+
+    public GameDebugDumpAnalysisReport AnalyzeDump(byte[] payload)
+    {
+        return GameDebugDumpAnalyzer.Analyze(payload);
+    }
+
     public GameDebugSnapshotMessage GetPlaybackFrame(string? playbackId, int frameIndex)
     {
         lock (_gate)
@@ -180,6 +219,53 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
             return _playback.Document.Frames[frameIndex];
         }
+    }
+
+    public ComponentDebugSnapshot GetPlaybackComponent(GameDebugDumpPlaybackComponentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        ActiveDumpPlayback playback;
+        lock (_gate)
+        {
+            playback = GetPlayback(request.PlaybackId);
+        }
+
+        var frame = GetPlaybackFrame(playback, request.FrameIndex);
+        var world = frame.Snapshot.Worlds.SingleOrDefault(world =>
+            StringComparer.Ordinal.Equals(world.Name, request.WorldName))
+            ?? throw new InvalidDataException($"The debug dump world '{request.WorldName}' was not found.");
+        var scene = world.Scenes.SingleOrDefault(scene =>
+            StringComparer.Ordinal.Equals(scene.Name, request.SceneName))
+            ?? throw new InvalidDataException($"The debug dump scene '{request.SceneName}' was not found.");
+        var entity = scene.Entities.SingleOrDefault(entity => entity.Id == request.EntityId)
+            ?? throw new InvalidDataException($"The debug dump entity '{request.EntityId}' was not found.");
+        var component = entity.Components.SingleOrDefault(component =>
+            StringComparer.Ordinal.Equals(component.Type.FullName, request.ComponentTypeFullName)
+            && (string.IsNullOrWhiteSpace(request.ComponentAssemblyName)
+                || StringComparer.Ordinal.Equals(component.Type.AssemblyName, request.ComponentAssemblyName)))
+            ?? throw new InvalidDataException($"The debug dump component '{request.ComponentTypeFullName}' was not found.");
+
+        if (TryFindBlock(
+                playback.Document,
+                request.FrameIndex,
+                request.WorldName,
+                request.SceneName,
+                request.ComponentTypeFullName,
+                request.ComponentAssemblyName,
+                out var block))
+        {
+            return MaterializeBlockComponent(playback, component, block, request);
+        }
+
+        return GameDebugComponentValueMaterializer.MaterializeStructured(
+            component,
+            new OdinGameDebugComponentValueSerializer(),
+            new GameDebugStructuredComponentValueCaptureOptions
+            {
+                MaxCollectionItems = 64,
+                CaptureElementTemplate = false,
+            });
     }
 
     private string? GetLastDumpPath()
@@ -238,18 +324,68 @@ public sealed class GameDebugDumpRecorder : IDisposable
         ActiveDumpRecording recording,
         GameDebugFrameInfo frame)
     {
-        var message = new GameDebugSnapshotMessage(
-            frame,
-            _snapshots.Capture(CreateDumpCaptureOptions()),
-            _control.GetState());
+        var captured = _session is null
+            ? CaptureSnapshotFrame(frame)
+            : CaptureBlockFrame(frame);
 
         lock (_gate)
         {
             if (ReferenceEquals(_recording, recording))
             {
-                recording.AddFrame(message);
+                recording.AddFrame(captured);
             }
         }
+    }
+
+    private GameDebugDumpRecordedFrame CaptureSnapshotFrame(GameDebugFrameInfo frame)
+    {
+        return new GameDebugDumpRecordedFrame(
+            new GameDebugSnapshotMessage(
+                frame,
+                _snapshots.Capture(CreateDumpCaptureOptions()),
+                _control.GetState()),
+            Blocks: null);
+    }
+
+    private GameDebugDumpRecordedFrame CaptureBlockFrame(GameDebugFrameInfo frame)
+    {
+        if (_debugStateGate is null)
+        {
+            return CaptureBlockFrameUnsafe(frame);
+        }
+
+        lock (_debugStateGate)
+        {
+            return CaptureBlockFrameUnsafe(frame);
+        }
+    }
+
+    private GameDebugDumpRecordedFrame CaptureBlockFrameUnsafe(GameDebugFrameInfo frame)
+    {
+        var message = new GameDebugSnapshotMessage(
+            frame,
+            _snapshots.Capture(CreateDumpCaptureOptions()),
+            _control.GetState());
+        var blocks = new GameDebugDumpFrameBlocks(
+            0,
+            _session!.GetWorlds()
+                .Select(CaptureWorldBlocks)
+                .ToArray());
+
+        return new GameDebugDumpRecordedFrame(message, blocks);
+    }
+
+    private static GameDebugDumpWorldBlocks CaptureWorldBlocks(World world)
+    {
+        return new GameDebugDumpWorldBlocks(
+            world.Name,
+            world.Scenes
+                .Select(static scene => new GameDebugDumpSceneBlocks(
+                    scene.Name,
+                    scene.ComponentStoreDumpBlocks
+                        .Select(GameDebugComponentStoreBlockSerializer.Serialize)
+                        .ToArray()))
+                .ToArray());
     }
 
     private string SaveDump(GameDebugDumpDocument dump, string dumpDirectory)
@@ -284,9 +420,148 @@ public sealed class GameDebugDumpRecorder : IDisposable
     {
         return new GameDebugSnapshotCaptureOptions
         {
-            IncludeComponentPayloads = _options.DumpIncludeComponentPayloads,
-            IncludeStructuredComponentValues = _options.DumpIncludeStructuredComponentValues,
+            IncludeComponentPayloads = false,
+            IncludeStructuredComponentValues = false,
         };
+    }
+
+    private ActiveDumpPlayback GetPlayback(string? playbackId)
+    {
+        if (_playback is null)
+        {
+            throw new InvalidDataException("No debug dump playback is loaded.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(playbackId) &&
+            !StringComparer.Ordinal.Equals(_playback.Id, playbackId))
+        {
+            throw new InvalidDataException("The requested debug dump playback is no longer loaded.");
+        }
+
+        return _playback;
+    }
+
+    private static GameDebugSnapshotMessage GetPlaybackFrame(ActiveDumpPlayback playback, int frameIndex)
+    {
+        if (frameIndex < 0 || frameIndex >= playback.Document.Frames.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(frameIndex), "The debug dump frame index was out of range.");
+        }
+
+        return playback.Document.Frames[frameIndex];
+    }
+
+    private static bool TryFindBlock(
+        GameDebugDumpDocument dump,
+        int frameIndex,
+        string worldName,
+        string sceneName,
+        string componentTypeFullName,
+        string? componentAssemblyName,
+        out GameDebugDumpComponentStoreBlock block)
+    {
+        if (dump.BlockFrames is not { Count: > 0 } blockFrames)
+        {
+            block = null!;
+            return false;
+        }
+
+        var frameBlocks = blockFrames.SingleOrDefault(frame => frame.Index == frameIndex);
+        if (frameBlocks is null)
+        {
+            block = null!;
+            return false;
+        }
+
+        var world = frameBlocks.Worlds.SingleOrDefault(world =>
+            StringComparer.Ordinal.Equals(world.Name, worldName));
+        var scene = world?.Scenes.SingleOrDefault(scene =>
+            StringComparer.Ordinal.Equals(scene.Name, sceneName));
+        var found = scene?.ComponentStores.SingleOrDefault(store =>
+            StringComparer.Ordinal.Equals(store.Type.FullName, componentTypeFullName)
+            && (string.IsNullOrWhiteSpace(componentAssemblyName)
+                || StringComparer.Ordinal.Equals(store.Type.AssemblyName, componentAssemblyName)));
+
+        block = found!;
+        return found is not null;
+    }
+
+    private static ComponentDebugSnapshot MaterializeBlockComponent(
+        ActiveDumpPlayback playback,
+        ComponentDebugSnapshot component,
+        GameDebugDumpComponentStoreBlock block,
+        GameDebugDumpPlaybackComponentRequest request)
+    {
+        var row = Array.IndexOf(block.EntityIds, request.EntityId);
+        if (row < 0)
+        {
+            return component with
+            {
+                Value = new ComponentValueDebugSnapshot(
+                    GameDebugComponentStoreBlockSerializer.Format,
+                    Payload: null,
+                    $"Entity {request.EntityId} was not present in component store '{block.Type.Name}'."),
+            };
+        }
+
+        var cacheKey = CreatePlaybackBlockCacheKey(request, block);
+        if (!playback.TryGetBlockValues(cacheKey, block, out var values, out var error))
+        {
+            return component with
+            {
+                Value = new ComponentValueDebugSnapshot(
+                    GameDebugComponentStoreBlockSerializer.Format,
+                    Payload: null,
+                    error),
+            };
+        }
+
+        object value;
+        try
+        {
+            value = values.GetValue(row)
+                ?? throw new InvalidDataException("The component store block contained a null row.");
+        }
+        catch (Exception exception)
+        {
+            return component with
+            {
+                Value = new ComponentValueDebugSnapshot(
+                    GameDebugComponentStoreBlockSerializer.Format,
+                    Payload: null,
+                    exception.Message),
+            };
+        }
+
+        var serializer = new OdinGameDebugComponentValueSerializer();
+        return component with
+        {
+            Value = serializer.Serialize(
+                value,
+                new GameDebugComponentValueSerializationOptions
+                {
+                    IncludePayload = false,
+                    IncludeStructured = true,
+                    StructuredCaptureOptions = new GameDebugStructuredComponentValueCaptureOptions
+                    {
+                        MaxCollectionItems = 64,
+                        CaptureElementTemplate = false,
+                    },
+                }),
+        };
+    }
+
+    private static string CreatePlaybackBlockCacheKey(
+        GameDebugDumpPlaybackComponentRequest request,
+        GameDebugDumpComponentStoreBlock block)
+    {
+        return string.Join(
+            '\0',
+            request.FrameIndex.ToString(CultureInfo.InvariantCulture),
+            request.WorldName,
+            request.SceneName,
+            block.Type.AssemblyName,
+            block.Type.FullName);
     }
 
     private static string NormalizeDumpName(string? name, DateTimeOffset now)
@@ -315,18 +590,35 @@ public sealed class GameDebugDumpRecorder : IDisposable
         return Path.GetFullPath(directory);
     }
 
+    private static int? NormalizeMaxRecordedFrames(int? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value > 0
+            ? value
+            : throw new ArgumentOutOfRangeException(
+                nameof(GameDebugOptions.MaxRecordedDumpFrames),
+                "The maximum recorded debug dump frame count must be positive.");
+    }
+
     private sealed class ActiveDumpRecording
     {
-        private readonly Queue<GameDebugSnapshotMessage> _frames = [];
+        private readonly Queue<GameDebugDumpRecordedFrame> _frames = [];
+        private readonly int? _maxFrames;
 
         public ActiveDumpRecording(
             string name,
             string dumpDirectory,
-            DateTimeOffset startedAt)
+            DateTimeOffset startedAt,
+            int? maxFrames)
         {
             Name = name;
             DumpDirectory = dumpDirectory;
             StartedAt = startedAt;
+            _maxFrames = maxFrames;
         }
 
         public string Name { get; }
@@ -339,19 +631,104 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
         public int DroppedFrameCount { get; private set; }
 
-        public void AddFrame(GameDebugSnapshotMessage message)
+        public void AddFrame(GameDebugDumpRecordedFrame frame)
         {
-            _frames.Enqueue(message);
+            _frames.Enqueue(frame);
+            if (_maxFrames is not { } maxFrames)
+            {
+                return;
+            }
+
+            while (_frames.Count > maxFrames)
+            {
+                _frames.Dequeue();
+                DroppedFrameCount++;
+            }
         }
 
-        public IReadOnlyList<GameDebugSnapshotMessage> SnapshotFrames()
+        public IReadOnlyList<GameDebugDumpRecordedFrame> SnapshotFrames()
         {
-            return _frames.ToArray();
+            return _frames
+                .Select((frame, index) => frame.Blocks is null
+                    ? frame
+                    : frame with
+                    {
+                        Blocks = frame.Blocks with
+                        {
+                            Index = index,
+                        },
+                    })
+                .ToArray();
         }
     }
 
-    private sealed record ActiveDumpPlayback(
-        string Id,
-        GameDebugDumpDocument Document,
-        string? Path);
+    private sealed record GameDebugDumpRecordedFrame(
+        GameDebugSnapshotMessage Message,
+        GameDebugDumpFrameBlocks? Blocks);
+
+    private sealed class ActiveDumpPlayback
+    {
+        private readonly Dictionary<string, Array> _blockValues = new(StringComparer.Ordinal);
+        private readonly Queue<string> _blockValueKeys = [];
+
+        public ActiveDumpPlayback(
+            string id,
+            GameDebugDumpDocument document,
+            string? path)
+        {
+            Id = id;
+            Document = document;
+            Path = path;
+        }
+
+        public string Id { get; }
+
+        public GameDebugDumpDocument Document { get; }
+
+        public string? Path { get; }
+
+        public bool TryGetBlockValues(
+            string cacheKey,
+            GameDebugDumpComponentStoreBlock block,
+            out Array values,
+            out string? error)
+        {
+            if (_blockValues.TryGetValue(cacheKey, out values!))
+            {
+                error = null;
+                return true;
+            }
+
+            try
+            {
+                values = GameDebugComponentStoreBlockSerializer.DeserializeValues(block);
+                AddBlockValues(cacheKey, values);
+                error = null;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                values = null!;
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        private void AddBlockValues(string cacheKey, Array values)
+        {
+            if (_blockValues.ContainsKey(cacheKey))
+            {
+                return;
+            }
+
+            _blockValues.Add(cacheKey, values);
+            _blockValueKeys.Enqueue(cacheKey);
+
+            while (_blockValues.Count > MaxCachedPlaybackBlocks)
+            {
+                var oldest = _blockValueKeys.Dequeue();
+                _blockValues.Remove(oldest);
+            }
+        }
+    }
 }

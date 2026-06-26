@@ -1,10 +1,12 @@
 using NKGGameFramework.Ecs;
+using OdinSerializer;
 
 namespace NKGGameFramework.Gameplay;
 
 [ComponentGraph(Group = "Gameplay/Buffs", Order = 10)]
 public struct BuffCollectionComponent : IComponent
 {
+    [OdinSerialize]
     private List<BuffInstance>? _buffs;
 
     public BuffCollectionComponent()

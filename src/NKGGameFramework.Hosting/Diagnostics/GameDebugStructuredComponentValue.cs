@@ -1,18 +1,19 @@
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
+using NKGGameFramework.Core;
+using NKGGameFramework.Ecs;
 
 namespace NKGGameFramework.Hosting.Diagnostics;
 
 internal static class GameDebugStructuredComponentValue
 {
-    private const int MaxDepth = 8;
-    private static readonly ConcurrentDictionary<Type, DebugMember[]> DebugMemberCache = [];
-
-    public static ComponentValueDebugNode Capture(object value)
+    public static ComponentValueDebugNode Capture(
+        object value,
+        GameDebugStructuredComponentValueCaptureOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(value);
+        options ??= GameDebugStructuredComponentValueCaptureOptions.Default;
 
         var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
         return CaptureNode(
@@ -21,7 +22,8 @@ internal static class GameDebugStructuredComponentValue
             value.GetType(),
             editable: true,
             depth: 0,
-            seen);
+            seen,
+            options);
     }
 
     public static object Apply(ComponentValueDebugNode node, object target, Type expectedType)
@@ -39,7 +41,8 @@ internal static class GameDebugStructuredComponentValue
         Type declaredType,
         bool editable,
         int depth,
-        HashSet<object> seen)
+        HashSet<object> seen,
+        GameDebugStructuredComponentValueCaptureOptions options)
     {
         var valueType = Nullable.GetUnderlyingType(declaredType) ?? value?.GetType() ?? declaredType;
         var type = value?.GetType() ?? valueType;
@@ -52,20 +55,29 @@ internal static class GameDebugStructuredComponentValue
             };
         }
 
-        if (TryFormatScalar(value, type, out var scalarKind, out var scalarValue, out var options))
+        if (TryFormatScalar(value, type, out var scalarKind, out var scalarValue, out var scalarOptions))
         {
             return CreateNode(scalarKind, name, type, editable) with
             {
                 Value = scalarValue,
-                Options = options,
+                Options = scalarOptions,
             };
         }
 
-        if (depth >= MaxDepth)
+        if (options.StopAtRuntimeReferences && depth > 0 && IsRuntimeReferenceBoundary(type))
+        {
+            return CreateNode("reference", name, type, editable: false) with
+            {
+                Value = FormatRuntimeReference(value),
+                Error = "Runtime reference boundary.",
+            };
+        }
+
+        if (depth >= options.MaxDepth)
         {
             return CreateNode("unsupported", name, type, editable: false) with
             {
-                Error = $"Maximum debug value depth ({MaxDepth}) was reached.",
+                Error = $"Maximum debug value depth ({options.MaxDepth}) was reached.",
             };
         }
 
@@ -79,10 +91,10 @@ internal static class GameDebugStructuredComponentValue
 
         if (TryGetListElementType(type, out var elementType) && value is IEnumerable enumerable)
         {
-            return CaptureList(name, value, type, elementType, enumerable, editable, depth, seen);
+            return CaptureList(name, value, type, elementType, enumerable, editable, depth, seen, options);
         }
 
-        var children = GetDebugMembers(type)
+        var children = GameDebugOdinSerialization.GetSerializedMembers(type)
             .Select(member =>
             {
                 try
@@ -93,7 +105,8 @@ internal static class GameDebugStructuredComponentValue
                         member.ValueType,
                         member.CanWrite,
                         depth + 1,
-                        seen);
+                        seen,
+                        options);
                 }
                 catch (Exception exception) when (exception is TargetInvocationException or ArgumentException)
                 {
@@ -119,49 +132,79 @@ internal static class GameDebugStructuredComponentValue
         IEnumerable enumerable,
         bool editable,
         int depth,
-        HashSet<object> seen)
+        HashSet<object> seen,
+        GameDebugStructuredComponentValueCaptureOptions options)
     {
         var index = 0;
         var children = new List<ComponentValueDebugNode>();
+        var truncated = false;
+        string? error = null;
 
-        foreach (var item in enumerable)
+        try
         {
-            children.Add(CaptureNode(
-                $"[{index}]",
-                item,
-                elementType,
-                editable,
-                depth + 1,
-                seen));
-            index++;
+            foreach (var item in enumerable)
+            {
+                if (options.MaxCollectionItems is { } maxItems && index >= maxItems)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                children.Add(CaptureNode(
+                    $"[{index}]",
+                    item,
+                    elementType,
+                    editable,
+                    depth + 1,
+                    seen,
+                    options));
+                index++;
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.InnerException?.Message ?? exception.Message;
         }
 
         return CreateNode("list", name, type, editable) with
         {
-            Children = children,
+            Children = truncated
+                ? children
+                    .Append(CreateNode("unsupported", $"[{index}+]", elementType, editable: false) with
+                    {
+                        Error = $"Collection preview was truncated at {options.MaxCollectionItems} item(s).",
+                    })
+                    .ToArray()
+                : children,
             ElementType = DebugSnapshotTypeNames.Create(elementType),
-            ElementTemplate = CaptureTemplate(elementType, depth + 1, seen),
+            ElementTemplate = options.CaptureElementTemplate
+                ? CaptureTemplate(elementType, depth + 1, seen, options)
+                : null,
+            Error = error ?? (truncated
+                ? $"Collection preview was truncated at {options.MaxCollectionItems} item(s)."
+                : null),
         };
     }
 
     private static ComponentValueDebugNode? CaptureTemplate(
         Type elementType,
         int depth,
-        HashSet<object> seen)
+        HashSet<object> seen,
+        GameDebugStructuredComponentValueCaptureOptions options)
     {
-        if (depth >= MaxDepth)
+        if (depth >= options.MaxDepth)
         {
             return null;
         }
 
         if (TryCreateDefaultValue(elementType, out var value))
         {
-            return CaptureNode("New Item", value, elementType, editable: true, depth, seen);
+            return CaptureNode("New Item", value, elementType, editable: true, depth, seen, options);
         }
 
         if (IsScalarType(elementType))
         {
-            return CaptureNode("New Item", GetScalarDefault(elementType), elementType, editable: true, depth, seen);
+            return CaptureNode("New Item", GetScalarDefault(elementType), elementType, editable: true, depth, seen, options);
         }
 
         return CreateNode("unsupported", "New Item", elementType, editable: false) with
@@ -196,7 +239,7 @@ internal static class GameDebugStructuredComponentValue
                 continue;
             }
 
-            if (!TryGetDebugMember(effectiveType, child.Name, out var member))
+            if (!GameDebugOdinSerialization.TryGetSerializedMember(effectiveType, child.Name, out var member))
             {
                 continue;
             }
@@ -250,6 +293,17 @@ internal static class GameDebugStructuredComponentValue
             }
 
             return target;
+        }
+
+        if (TryPopulateGenericCollection(target, elementType, node))
+        {
+            return target;
+        }
+
+        if (TryCreateCollectionValue(listType, elementType, out var collection) &&
+            TryPopulateGenericCollection(collection, elementType, node))
+        {
+            return collection;
         }
 
         var concreteListType = typeof(List<>).MakeGenericType(elementType);
@@ -440,7 +494,19 @@ internal static class GameDebugStructuredComponentValue
 
         foreach (var candidate in type.GetInterfaces().Append(type))
         {
-            if (candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IList<>))
+            if (!candidate.IsGenericType)
+            {
+                continue;
+            }
+
+            var definition = candidate.GetGenericTypeDefinition();
+            if (definition == typeof(IList<>) ||
+                definition == typeof(IReadOnlyList<>) ||
+                definition == typeof(ISet<>) ||
+                definition == typeof(IReadOnlySet<>) ||
+                definition == typeof(ICollection<>) ||
+                definition == typeof(IReadOnlyCollection<>) ||
+                definition == typeof(IEnumerable<>))
             {
                 elementType = candidate.GetGenericArguments()[0];
                 return true;
@@ -451,60 +517,93 @@ internal static class GameDebugStructuredComponentValue
         return false;
     }
 
-    private static IReadOnlyList<DebugMember> GetDebugMembers(Type type)
+    private static bool IsRuntimeReferenceBoundary(Type type)
     {
-        return DebugMemberCache.GetOrAdd(type, CreateDebugMembers);
+        var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
+        return effectiveType == typeof(World)
+            || effectiveType == typeof(Scene)
+            || effectiveType == typeof(SystemGroup)
+            || effectiveType == typeof(RuntimeContext)
+            || typeof(ISystem).IsAssignableFrom(effectiveType)
+            || typeof(NKGGameFramework.Core.Module).IsAssignableFrom(effectiveType)
+            || typeof(IEventBus).IsAssignableFrom(effectiveType);
     }
 
-    private static DebugMember[] CreateDebugMembers(Type type)
+    private static string FormatRuntimeReference(object value)
     {
-        const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance;
-        var members = new List<DebugMember>();
-
-        foreach (var field in type.GetFields(flags).OrderBy(static field => field.MetadataToken))
+        return value switch
         {
-            if (field.IsLiteral)
-            {
-                continue;
-            }
-
-            members.Add(new DebugMember(
-                field.Name,
-                field.FieldType,
-                target => field.GetValue(target),
-                (target, value) => field.SetValue(target, value),
-                CanWrite: !field.IsInitOnly));
-        }
-
-        foreach (var property in type.GetProperties(flags).OrderBy(static property => property.MetadataToken))
-        {
-            if (property.GetMethod is null || property.GetIndexParameters().Length != 0)
-            {
-                continue;
-            }
-
-            members.Add(new DebugMember(
-                property.Name,
-                property.PropertyType,
-                target => property.GetValue(target),
-                (target, value) => property.SetValue(target, value),
-                CanWrite: property.SetMethod is { IsPublic: true }));
-        }
-
-        return members.ToArray();
+            World world => world.Name,
+            Scene scene => scene.Name,
+            RuntimeContext runtime => runtime.IsDisposed ? "Disposed runtime" : "Runtime",
+            _ => value.GetType().Name,
+        };
     }
 
-    private static bool TryGetDebugMember(Type type, string name, out DebugMember member)
+    private static bool TryPopulateGenericCollection(
+        object target,
+        Type elementType,
+        ComponentValueDebugNode node)
     {
-        var found = GetDebugMembers(type).FirstOrDefault(candidate => StringComparer.Ordinal.Equals(candidate.Name, name));
-        if (found is null)
+        var collectionType = typeof(ICollection<>).MakeGenericType(elementType);
+        if (!collectionType.IsInstanceOfType(target))
         {
-            member = null!;
             return false;
         }
 
-        member = found;
+        collectionType.GetMethod(nameof(ICollection<object>.Clear))!.Invoke(target, []);
+        var add = collectionType.GetMethod(nameof(ICollection<object>.Add))!;
+        foreach (var child in node.Children)
+        {
+            var item = CreateFallbackValue(elementType);
+            add.Invoke(target, [ApplyNode(child, item, elementType)]);
+        }
+
         return true;
+    }
+
+    private static bool TryCreateCollectionValue(Type collectionType, Type elementType, out object collection)
+    {
+        if (!collectionType.IsInterface &&
+            collectionType.GetConstructor(Type.EmptyTypes) is not null &&
+            Activator.CreateInstance(collectionType) is { } concreteCollection)
+        {
+            collection = concreteCollection;
+            return true;
+        }
+
+        var hashSetType = typeof(HashSet<>).MakeGenericType(elementType);
+        if (IsSetLikeType(collectionType) && collectionType.IsAssignableFrom(hashSetType))
+        {
+            collection = Activator.CreateInstance(hashSetType)!;
+            return true;
+        }
+
+        var listType = typeof(List<>).MakeGenericType(elementType);
+        if (collectionType.IsAssignableFrom(listType))
+        {
+            collection = Activator.CreateInstance(listType)!;
+            return true;
+        }
+
+        if (collectionType.IsAssignableFrom(hashSetType))
+        {
+            collection = Activator.CreateInstance(hashSetType)!;
+            return true;
+        }
+
+        collection = null!;
+        return false;
+    }
+
+    private static bool IsSetLikeType(Type type)
+    {
+        return type.GetInterfaces()
+            .Append(type)
+            .Any(static candidate =>
+                candidate.IsGenericType &&
+                (candidate.GetGenericTypeDefinition() == typeof(ISet<>) ||
+                    candidate.GetGenericTypeDefinition() == typeof(IReadOnlySet<>)));
     }
 
     private static bool TryCreateDefaultValue(Type type, out object value)
@@ -566,10 +665,4 @@ internal static class GameDebugStructuredComponentValue
         };
     }
 
-    private sealed record DebugMember(
-        string Name,
-        Type ValueType,
-        Func<object, object?> GetValue,
-        Action<object, object?> SetValue,
-        bool CanWrite);
 }

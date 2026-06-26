@@ -1,4 +1,5 @@
 using NKGGameFramework.Ecs;
+using NKGGameFramework.Serialization;
 
 namespace NKGGameFramework.Ecs.Tests;
 
@@ -85,6 +86,67 @@ public sealed class EcsCompositionTests
 
         Assert.True(entity.Has<ViewBound>());
         Assert.Equal("hero", entity.Get<ViewBound>().Location);
+    }
+
+    [Fact]
+    public void Component_store_dump_blocks_export_entity_ids_and_values_by_component_type()
+    {
+        var scene = new Scene("dump-blocks");
+        var first = scene.CreateEntity()
+            .Add(new Position(1, 2))
+            .Add(new Velocity(3, 4));
+        var second = scene.CreateEntity()
+            .Add(new Position(5, 6));
+
+        var blocks = scene.ComponentStoreDumpBlocks;
+
+        var positionBlock = Assert.Single(blocks, block => block.ComponentType == typeof(Position));
+        var velocityBlock = Assert.Single(blocks, block => block.ComponentType == typeof(Velocity));
+        var positions = Assert.IsType<Position[]>(positionBlock.Values);
+        var velocities = Assert.IsType<Velocity[]>(velocityBlock.Values);
+        Assert.Equal([first.Id.Value, second.Id.Value], positionBlock.EntityIds);
+        Assert.Equal([first.Id.Value], velocityBlock.EntityIds);
+        Assert.Equal(1, positions[0].X);
+        Assert.Equal(6, positions[1].Y);
+        Assert.Equal(3, velocities[0].X);
+    }
+
+    [Fact]
+    public void Component_store_dump_blocks_are_odin_serializable_without_component_specific_code()
+    {
+        var scene = new Scene("dump-blocks");
+        var entity = scene.CreateEntity()
+            .Add(new Position(1, 2));
+        var block = Assert.Single(scene.ComponentStoreDumpBlocks);
+        var serializer = new OdinGameSerializer();
+
+        var payload = serializer.SerializeToBytes(block);
+        var restored = serializer.DeserializeFromBytes<EcsComponentStoreDumpBlock>(payload);
+
+        Assert.NotNull(restored);
+        Assert.Equal(typeof(Position), restored.ComponentType);
+        Assert.Equal([entity.Id.Value], restored.EntityIds);
+        var values = Assert.IsType<Position[]>(restored.Values);
+        Assert.Equal(1, values[0].X);
+        Assert.Equal(2, values[0].Y);
+    }
+
+    [Fact]
+    public void Component_type_debug_view_lists_entity_components_without_exporting_values()
+    {
+        var scene = new Scene("debug-types");
+        var entity = scene.CreateEntity()
+            .Add(new Position(1, 2))
+            .Add(new Velocity(3, 4));
+
+        var componentTypes = scene.GetComponentTypes(entity);
+
+        Assert.Contains(typeof(Position), componentTypes);
+        Assert.Contains(typeof(Velocity), componentTypes);
+        Assert.True(scene.TryGetComponent(entity, typeof(Position), out var component));
+        var position = Assert.IsType<Position>(component);
+        Assert.Equal(1, position.X);
+        Assert.False(scene.TryGetComponent(entity, typeof(ViewBound), out _));
     }
 
     private sealed class MovementSystem : QuerySystem<Position, Velocity>

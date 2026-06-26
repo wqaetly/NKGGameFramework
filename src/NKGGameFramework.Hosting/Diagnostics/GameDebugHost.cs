@@ -97,7 +97,7 @@ public sealed class GameDebugHost : IAsyncDisposable
             new GameDebugSnapshotProvider(session, serializer),
             debugStateGate);
         var mutations = new GameDebugMutationHandler(session, debugOptions, serializer);
-        var dumps = new GameDebugDumpRecorder(snapshots, control, frames, debugOptions);
+        var dumps = new GameDebugDumpRecorder(snapshots, control, frames, debugOptions, session, debugStateGate);
 
         var host = new GameDebugHost(
             listener,
@@ -425,12 +425,11 @@ public sealed class GameDebugHost : IAsyncDisposable
         if (IsPost(request, endpoint, "/mutations"))
         {
             var body = ReadJsonBody<GameDebugMutationRequest>(request);
-            var result = await ExecuteMutationOnNextFrameAsync(body, cancellationToken);
             await WriteJsonAsync(
                 stream,
                 200,
                 "OK",
-                result,
+                ExecuteDebugOperation(() => ExecutePausedMutation(body)),
                 cancellationToken);
             return;
         }
@@ -469,6 +468,29 @@ public sealed class GameDebugHost : IAsyncDisposable
             return;
         }
 
+        if (IsPost(request, endpoint, "/dump/analysis"))
+        {
+            var body = ReadJsonBody<GameDebugDumpPlaybackOpenRequest>(request);
+            await WriteJsonAsync(
+                stream,
+                200,
+                "OK",
+                ExecuteDebugOperation(() => _dumps.AnalyzeDump(body)),
+                cancellationToken);
+            return;
+        }
+
+        if (IsPost(request, endpoint, "/dump/analysis/upload"))
+        {
+            await WriteJsonAsync(
+                stream,
+                200,
+                "OK",
+                ExecuteDebugOperation(() => _dumps.AnalyzeDump(request.Body)),
+                cancellationToken);
+            return;
+        }
+
         if (IsGet(request, endpoint, "/dump/playback/frame"))
         {
             var frameIndex = GetInt(request.Query, "frameIndex") ?? GetInt(request.Query, "index") ?? 0;
@@ -477,6 +499,25 @@ public sealed class GameDebugHost : IAsyncDisposable
                 200,
                 "OK",
                 ExecuteDebugOperation(() => _dumps.GetPlaybackFrame(GetString(request.Query, "playbackId"), frameIndex)),
+                cancellationToken);
+            return;
+        }
+
+        if (IsGet(request, endpoint, "/dump/playback/component"))
+        {
+            var body = new GameDebugDumpPlaybackComponentRequest(
+                GetString(request.Query, "playbackId"),
+                GetInt(request.Query, "frameIndex") ?? GetInt(request.Query, "index") ?? 0,
+                GetString(request.Query, "worldName") ?? GetString(request.Query, "world") ?? string.Empty,
+                GetString(request.Query, "sceneName") ?? GetString(request.Query, "scene") ?? string.Empty,
+                GetInt(request.Query, "entityId") ?? 0,
+                GetString(request.Query, "componentTypeFullName") ?? GetString(request.Query, "component") ?? string.Empty,
+                GetString(request.Query, "componentAssemblyName") ?? GetString(request.Query, "componentAssembly"));
+            await WriteJsonAsync(
+                stream,
+                200,
+                "OK",
+                ExecuteDebugOperation(() => _dumps.GetPlaybackComponent(body)),
                 cancellationToken);
             return;
         }
@@ -533,36 +574,12 @@ public sealed class GameDebugHost : IAsyncDisposable
         }
     }
 
-    private async UniTask<GameDebugMutationResult> ExecuteMutationOnNextFrameAsync(
-        GameDebugMutationRequest request,
-        CancellationToken cancellationToken)
+    private GameDebugMutationResult ExecutePausedMutation(GameDebugMutationRequest request)
     {
-        var completion = new UniTaskCompletionSource<GameDebugMutationResult>();
-
-        void OnFrameEnding(GameDebugFrameInfo info)
-        {
-            _frames.FrameEnding -= OnFrameEnding;
-            try
-            {
-                completion.TrySetResult(ExecuteDebugOperation(() => _mutations.Execute(request)));
-            }
-            catch (Exception exception)
-            {
-                completion.TrySetException(exception);
-            }
-        }
-
-        _frames.FrameEnding += OnFrameEnding;
-        using var cancellationRegistration = cancellationToken.Register(() =>
-            completion.TrySetException(new OperationCanceledException(cancellationToken)));
-        try
-        {
-            return await completion.Task;
-        }
-        finally
-        {
-            _frames.FrameEnding -= OnFrameEnding;
-        }
+        var state = _control.GetState();
+        return state is { IsPaused: true, PendingStepCount: 0 }
+            ? _mutations.Execute(request)
+            : new GameDebugMutationResult(false, "Pause debug playback before editing components.");
     }
 
     private async UniTask StreamSnapshotsAsync(

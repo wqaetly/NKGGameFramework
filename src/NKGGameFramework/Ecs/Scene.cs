@@ -64,6 +64,20 @@ public sealed class Scene : IDisposable
         }
     }
 
+    public IReadOnlyList<EcsComponentStoreDumpBlock> ComponentStoreDumpBlocks
+    {
+        get
+        {
+            var blocks = new List<EcsComponentStoreDumpBlock>(_componentStores.Count);
+            foreach (var store in _componentStores.Values)
+            {
+                blocks.Add(store.CreateDumpBlock());
+            }
+
+            return blocks;
+        }
+    }
+
     internal bool IsQueryActive => _queryDepth > 0;
 
     public Entity CreateEntity()
@@ -191,6 +205,38 @@ public sealed class Scene : IDisposable
         }
 
         return components;
+    }
+
+    public IReadOnlyList<Type> GetComponentTypes(Entity entity)
+    {
+        EnsureEntity(entity);
+
+        var componentTypes = new List<Type>();
+        foreach (var store in _componentStores.Values)
+        {
+            if (store.Has(entity.Id.Value))
+            {
+                componentTypes.Add(store.ComponentType);
+            }
+        }
+
+        return componentTypes;
+    }
+
+    public bool TryGetComponent(Entity entity, Type componentType, out object component)
+    {
+        EnsureEntity(entity);
+        ArgumentNullException.ThrowIfNull(componentType);
+
+        if (_componentStores.TryGetValue(componentType, out var store) &&
+            store.Has(entity.Id.Value))
+        {
+            component = store.GetBoxed(entity.Id.Value);
+            return true;
+        }
+
+        component = null!;
+        return false;
     }
 
     public void SetComponent(Entity entity, Type componentType, object component)

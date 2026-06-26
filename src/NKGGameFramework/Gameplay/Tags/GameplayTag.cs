@@ -1,9 +1,12 @@
+using OdinSerializer;
+
 namespace NKGGameFramework.Gameplay;
 
 public readonly record struct GameplayTag : IComparable<GameplayTag>
 {
     public static readonly GameplayTag Empty = default;
 
+    [OdinSerialize]
     private readonly string? _name;
 
     private GameplayTag(string name)

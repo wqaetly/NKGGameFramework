@@ -27,22 +27,32 @@ import {
 } from 'lucide-react';
 import {
   createDebugSnapshotStream,
+  createDebugApiBaseUrl,
+  DEFAULT_DEBUG_API_CONNECTION,
   fetchDumpRecordingState,
   fetchDebugSnapshotMessage,
+  fetchDumpPlaybackComponent,
   fetchDumpPlaybackFrame,
   openDumpPlayback,
   postDebugControl,
   postDumpRecording,
   postDebugMutation,
+  setDebugApiBaseUrl,
+  uploadDumpAnalysis,
   uploadDumpPlayback,
+  type DebugApiConnection,
 } from './api';
 import { countComponentGroups, getComponentGraph, type ComponentMutationExecutor } from './componentGraphModel';
 import type {
   ComponentDebugSnapshot,
   ComponentStoreDebugSnapshot,
+  ComponentValueDebugNode,
+  DebugTypeInfo,
   EntityDebugSnapshot,
   GameDebugControlCommand,
   GameDebugControlState,
+  GameDebugDumpAnalysisEntry,
+  GameDebugDumpAnalysisReport,
   GameDebugDumpPlaybackFrame,
   GameDebugDumpPlaybackManifest,
   GameDebugDumpRecordingState,
@@ -90,12 +100,17 @@ type DockWorkspaceModel = {
   activeInspectorPanelId: string | null;
   componentInspectors: ComponentInspectorPanelState[];
   componentDetails: Record<string, ComponentDetailEntry>;
+  dumpAnalysis: GameDebugDumpAnalysisReport | null;
+  dumpAnalysisBusy: boolean;
+  isDumpAnalysisPanelOpen: boolean;
   isDumpMode: boolean;
   selectScene: (entry: SceneEntry) => void;
   selectEntity: (entityId: number) => void;
   inspectComponent: (entity: EntityDebugSnapshot, component: ComponentDebugSnapshot) => void;
   toggleInspectorLock: (panelId: string) => void;
   closeInspectorPanel: (panelId: string) => void;
+  closeDumpAnalysisPanel: () => void;
+  openDumpAnalysisFilePicker: () => void;
   reloadComponentDetail: (target: ComponentInspectorTarget) => void;
   onSaveComponent: ComponentMutationExecutor;
 };
@@ -199,6 +214,7 @@ type DockPanelProps = IDockviewPanelProps<DockPanelParams>;
 
 const DOCK_LAYOUT_STORAGE_KEY = 'nkg.webdebug.layout.v3';
 const LEGACY_DOCK_LAYOUT_STORAGE_KEYS = ['nkg.webdebug.layout.v1', 'nkg.webdebug.layout.v2'];
+const DEBUG_API_CONNECTION_STORAGE_KEY = 'nkg.webdebug.connection.v1';
 const FRAME_STREAM_STORAGE_KEY = 'nkg.webdebug.frameStream';
 const LEGACY_FRAME_POLLING_STORAGE_KEY = 'nkg.webdebug.framePolling';
 const LEGACY_AUTO_REFRESH_STORAGE_KEY = 'nkg.webdebug.autoRefresh';
@@ -215,6 +231,9 @@ const TIMELINE_RENDER_OVERSAMPLE = 1.25;
 const TIMELINE_TRACK_HEIGHT_PX = 104;
 const TIMELINE_CONTENT_HEIGHT_PX = 128;
 const DUMP_FILE_PICKER_ID = 'nkg-debug-dumps';
+const DUMP_ANALYSIS_FILE_PICKER_ID = 'nkg-debug-dump-analysis';
+const DUMP_ANALYSIS_PANEL_ID = 'dump-analysis';
+const SUPPORTED_DUMP_DOCUMENT_VERSIONS = new Set([1, 2]);
 const WEB_DUMP_DIRECTORY =
   typeof __NKG_WEB_DUMP_DIRECTORY__ === 'string' && __NKG_WEB_DUMP_DIRECTORY__.trim()
     ? __NKG_WEB_DUMP_DIRECTORY__
@@ -226,6 +245,7 @@ const DOCK_PANEL_TITLES: Record<string, string> = {
   entities: 'Entities',
   runtime: 'Runtime',
   diagnostics: 'Diagnostics',
+  [DUMP_ANALYSIS_PANEL_ID]: 'Dump Report',
 };
 
 const DEFAULT_INSPECTOR_PANEL_ID = 'inspector';
@@ -245,6 +265,7 @@ const dockPanelComponents = {
   inspector: ComponentInspectorDockPanel,
   runtime: RuntimeDockPanel,
   diagnostics: DiagnosticsDockPanel,
+  dumpAnalysis: DumpAnalysisDockPanel,
 } satisfies Record<string, React.FunctionComponent<DockPanelProps>>;
 
 const DockWorkspaceContext = createContext<DockWorkspaceModel | null>(null);
@@ -265,24 +286,37 @@ export function App() {
   const [activeInspectorPanelId, setActiveInspectorPanelId] = useState<string | null>(DEFAULT_INSPECTOR_PANEL_ID);
   const [dockRevision, setDockRevision] = useState(0);
   const [frameStream, setFrameStream] = useState(readStoredFrameStream);
+  const [debugApiConnection, setDebugApiConnection] = useState<DebugApiConnection>(readStoredDebugApiConnection);
+  const [debugApiDraft, setDebugApiDraft] = useState<DebugApiConnection>(debugApiConnection);
   const [dump, setDump] = useState<GameDebugDumpPlaybackManifest | null>(null);
   const [dumpFrameIndex, setDumpFrameIndex] = useState(0);
   const [dumpPlaying, setDumpPlaying] = useState(false);
   const [dumpRecording, setDumpRecording] = useState<GameDebugDumpRecordingState | null>(null);
   const [dumpBusy, setDumpBusy] = useState(false);
+  const [dumpAnalysis, setDumpAnalysis] = useState<GameDebugDumpAnalysisReport | null>(null);
+  const [dumpAnalysisBusy, setDumpAnalysisBusy] = useState(false);
+  const [dumpAnalysisPanelOpen, setDumpAnalysisPanelOpen] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const refreshInFlightRef = useRef(false);
   const componentDetailLoadKeysRef = useRef<Set<string>>(new Set());
   const activeSceneEntryRef = useRef<SceneEntry | null>(null);
   const snapshotRef = useRef<GameDebugSnapshot | null>(null);
+  const dumpRef = useRef<GameDebugDumpPlaybackManifest | null>(null);
+  const dumpFrameIndexRef = useRef(0);
   const componentInspectorsRef = useRef<ComponentInspectorPanelState[]>([]);
   const componentDetailsRef = useRef<Record<string, ComponentDetailEntry>>({});
   const dumpFileInputRef = useRef<HTMLInputElement | null>(null);
+  const dumpAnalysisFileInputRef = useRef<HTMLInputElement | null>(null);
   const dumpModeRef = useRef(false);
   const toastTimeoutRef = useRef<number | null>(null);
+  const refreshRevisionRef = useRef(0);
   const nextInspectorIdRef = useRef(1);
   const dumpFrames = dump?.frames ?? [];
   const dumpMode = dumpFrames.length > 0;
+  const debugApiBaseUrl = useMemo(
+    () => createDebugApiBaseUrl(debugApiConnection),
+    [debugApiConnection],
+  );
 
   const showToast = useCallback((title: string, body: string) => {
     if (toastTimeoutRef.current !== null) {
@@ -303,6 +337,10 @@ export function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    setDebugApiBaseUrl(debugApiBaseUrl);
+  }, [debugApiBaseUrl]);
 
   const commitSnapshotMessage = useCallback((
     message: GameDebugSnapshotMessage,
@@ -331,13 +369,14 @@ export function App() {
 
   const refresh = useCallback(async (
     signal?: AbortSignal,
-    options: { clearComponentDetails?: boolean } = {},
+    options: { clearComponentDetails?: boolean; waitForFrame?: boolean } = {},
   ) => {
     if (refreshInFlightRef.current) {
       return;
     }
 
     refreshInFlightRef.current = true;
+    const refreshRevision = refreshRevisionRef.current;
     setIsRefreshing(true);
     setLoadState((current) => (current === 'ready' ? current : 'loading'));
     setError(null);
@@ -346,8 +385,13 @@ export function App() {
       const next = await fetchDebugSnapshotMessage(signal, {
         includePayload: false,
         includeStructured: false,
+        waitForFrame: options.waitForFrame,
       });
       if (dumpModeRef.current) {
+        return;
+      }
+
+      if (refreshRevision !== refreshRevisionRef.current) {
         return;
       }
 
@@ -359,20 +403,36 @@ export function App() {
         return;
       }
 
+      if (refreshRevision !== refreshRevisionRef.current) {
+        return;
+      }
+
       setError(caught instanceof Error ? caught.message : String(caught));
       setLoadState('error');
     } finally {
-      refreshInFlightRef.current = false;
-      setIsRefreshing(false);
+      if (refreshRevision === refreshRevisionRef.current) {
+        refreshInFlightRef.current = false;
+        setIsRefreshing(false);
+      }
     }
-  }, [commitSnapshotMessage]);
+  }, [commitSnapshotMessage, debugApiBaseUrl]);
 
   const loadComponentDetail = useCallback(async (
     target: ComponentInspectorTarget,
     options: { force?: boolean; silent?: boolean; signal?: AbortSignal } = {},
   ) => {
     const detailKey = createComponentDetailKey(target);
-    if (componentDetailLoadKeysRef.current.has(detailKey)) {
+    const dumpRequest = dumpModeRef.current
+      ? {
+          id: dumpRef.current?.id ?? '',
+          frameIndex: dumpFrameIndexRef.current,
+        }
+      : null;
+    const loadKey = dumpRequest
+      ? `${detailKey}:dump:${dumpRequest.id}:${dumpRequest.frameIndex}`
+      : detailKey;
+
+    if (componentDetailLoadKeysRef.current.has(loadKey)) {
       return;
     }
 
@@ -381,7 +441,7 @@ export function App() {
       return;
     }
 
-    componentDetailLoadKeysRef.current.add(detailKey);
+    componentDetailLoadKeysRef.current.add(loadKey);
     if (!options.silent || !currentEntry) {
       setComponentDetails((current) => ({
         ...current,
@@ -394,14 +454,42 @@ export function App() {
     }
 
     try {
-      if (dumpModeRef.current) {
+      if (dumpRequest) {
         const currentSnapshot = snapshotRef.current;
+        const currentDump = dumpRef.current;
         const entity = currentSnapshot
           ? findEntityDetail(currentSnapshot, target.worldName, target.sceneName, target.entityId)
           : null;
-        const component = entity ? findComponentDetail(entity, target) : null;
-        if (!entity || !component) {
+        const snapshotComponent = entity ? findComponentDetail(entity, target) : null;
+        if (!entity || !currentDump || !snapshotComponent) {
           throw new Error('Component value was not recorded in this dump frame.');
+        }
+
+        let component: ComponentDebugSnapshot;
+        try {
+          component = await fetchDumpPlaybackComponent({
+            playbackId: currentDump.id,
+            frameIndex: dumpRequest.frameIndex,
+            worldName: target.worldName,
+            sceneName: target.sceneName,
+            entityId: target.entityId,
+            componentTypeFullName: target.componentTypeFullName,
+            componentAssemblyName: target.componentAssemblyName,
+          }, options.signal);
+        } catch (caught) {
+          if (!hasRecordedComponentValue(snapshotComponent)) {
+            throw caught;
+          }
+
+          component = snapshotComponent;
+        }
+
+        if (
+          !dumpModeRef.current ||
+          dumpRef.current?.id !== dumpRequest.id ||
+          dumpFrameIndexRef.current !== dumpRequest.frameIndex
+        ) {
+          return;
         }
 
         setComponentDetails((current) => ({
@@ -450,6 +538,15 @@ export function App() {
         return;
       }
 
+      if (
+        dumpRequest &&
+        (!dumpModeRef.current ||
+          dumpRef.current?.id !== dumpRequest.id ||
+          dumpFrameIndexRef.current !== dumpRequest.frameIndex)
+      ) {
+        return;
+      }
+
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       setComponentDetails((current) => ({
@@ -462,7 +559,7 @@ export function App() {
         },
       }));
     } finally {
-      componentDetailLoadKeysRef.current.delete(detailKey);
+      componentDetailLoadKeysRef.current.delete(loadKey);
     }
   }, []);
 
@@ -580,7 +677,7 @@ export function App() {
         // Older hosts can still serve the live inspector without dump recording.
       });
     return () => controller.abort();
-  }, []);
+  }, [debugApiBaseUrl]);
 
   useEffect(() => {
     if (!dumpMode || !dump) {
@@ -605,7 +702,7 @@ export function App() {
       });
 
     return () => controller.abort();
-  }, [commitSnapshotMessage, dump, dumpFrameIndex, dumpMode, reloadInspectorDetails]);
+  }, [commitSnapshotMessage, debugApiBaseUrl, dump, dumpFrameIndex, dumpMode, reloadInspectorDetails]);
 
   const scenes = useMemo(() => flattenScenes(snapshot), [snapshot]);
   const activeSceneEntry = useMemo(
@@ -647,6 +744,14 @@ export function App() {
   useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
+
+  useEffect(() => {
+    dumpRef.current = dump;
+  }, [dump]);
+
+  useEffect(() => {
+    dumpFrameIndexRef.current = dumpFrameIndex;
+  }, [dumpFrameIndex]);
 
   useEffect(() => {
     componentInspectorsRef.current = componentInspectors;
@@ -692,6 +797,7 @@ export function App() {
     };
   }, [
     commitSnapshotMessage,
+    debugApiBaseUrl,
     dumpMode,
     frameStream,
     reloadInspectorDetails,
@@ -773,6 +879,11 @@ export function App() {
         return;
       }
 
+      if (control?.isPaused !== true || control.pendingStepCount > 0) {
+        setError('Pause debug playback before editing components.');
+        return;
+      }
+
       const result = await postDebugMutation({
         worldName: activeSceneEntry.world.name,
         sceneName: activeSceneEntry.scene.name,
@@ -789,54 +900,13 @@ export function App() {
       }
 
       setComponentDetails({});
-      await refresh();
+      refreshRevisionRef.current += 1;
+      refreshInFlightRef.current = false;
+      await refresh(undefined, {
+        waitForFrame: false,
+      });
     },
-    [activeSceneEntry, dumpMode, refresh],
-  );
-
-  const dockModel = useMemo<DockWorkspaceModel>(
-    () => ({
-      snapshot,
-      totals,
-      scenes,
-      activeSceneEntry,
-      activeScene,
-      filteredEntities,
-      selectedEntity,
-      selectedComponentKey,
-      activeInspectorPanelId,
-      componentInspectors,
-      componentDetails,
-      isDumpMode: dumpMode,
-      selectScene,
-      selectEntity,
-      inspectComponent,
-      toggleInspectorLock,
-      closeInspectorPanel,
-      reloadComponentDetail,
-      onSaveComponent: executeComponentMutation,
-    }),
-    [
-      snapshot,
-      totals,
-      scenes,
-      activeSceneEntry,
-      activeScene,
-      filteredEntities,
-      selectedEntity,
-      selectedComponentKey,
-      activeInspectorPanelId,
-      componentInspectors,
-      componentDetails,
-      dumpMode,
-      selectScene,
-      selectEntity,
-      inspectComponent,
-      toggleInspectorLock,
-      closeInspectorPanel,
-      reloadComponentDetail,
-      executeComponentMutation,
-    ],
+    [activeSceneEntry, control, dumpMode, refresh],
   );
 
   const executeControl = useCallback(
@@ -912,6 +982,38 @@ export function App() {
     });
   }, [clearDumpPlayback, refresh]);
 
+  const connectDebugApi = useCallback((event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+
+    const nextConnection = normalizeDebugApiConnection(debugApiDraft);
+    if (!nextConnection) {
+      setError('Debug host requires a host and a port between 1 and 65535.');
+      return;
+    }
+
+    try {
+      setDebugApiBaseUrl(createDebugApiBaseUrl(nextConnection));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      return;
+    }
+
+    writeStoredDebugApiConnection(nextConnection);
+    refreshRevisionRef.current += 1;
+    refreshInFlightRef.current = false;
+    setDebugApiConnection(nextConnection);
+    setDebugApiDraft(nextConnection);
+    clearDumpPlayback();
+    setSnapshot(null);
+    setControl(null);
+    setComponentDetails({});
+    setError(null);
+    setLoadState('loading');
+    void refresh(undefined, {
+      clearComponentDetails: true,
+    });
+  }, [clearDumpPlayback, debugApiDraft, refresh]);
+
   const loadDumpFile = useCallback(async (file: File) => {
     setDumpBusy(true);
     setError(null);
@@ -924,6 +1026,21 @@ export function App() {
       setDumpBusy(false);
     }
   }, [loadDumpPlayback]);
+
+  const loadDumpAnalysisFile = useCallback(async (file: File) => {
+    setDumpAnalysisBusy(true);
+    setDumpAnalysisPanelOpen(true);
+    setError(null);
+    try {
+      const report = await uploadDumpAnalysis(await file.arrayBuffer());
+      setDumpAnalysis(report);
+      showToast('Dump analyzed', `${report.name} · ${formatBytes(report.serializedBytes)}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setDumpAnalysisBusy(false);
+    }
+  }, [showToast]);
 
   const openDumpFilePicker = useCallback(async () => {
     const picker = (window as FilePickerWindow).showOpenFilePicker;
@@ -959,6 +1076,41 @@ export function App() {
     dumpFileInputRef.current?.click();
   }, [loadDumpFile]);
 
+  const openDumpAnalysisFilePicker = useCallback(async () => {
+    setDumpAnalysisPanelOpen(true);
+    const picker = (window as FilePickerWindow).showOpenFilePicker;
+    if (picker) {
+      try {
+        const [handle] = await picker({
+          id: DUMP_ANALYSIS_FILE_PICKER_ID,
+          multiple: false,
+          excludeAcceptAllOption: false,
+          types: [{
+            description: 'NKG dump files',
+            accept: {
+              'application/octet-stream': ['.nkgdump'],
+            },
+          }],
+        });
+
+        if (handle) {
+          await loadDumpAnalysisFile(await handle.getFile());
+        }
+
+        return;
+      } catch (caught) {
+        if (isFilePickerAbort(caught)) {
+          return;
+        }
+
+        setError(caught instanceof Error ? caught.message : String(caught));
+        return;
+      }
+    }
+
+    dumpAnalysisFileInputRef.current?.click();
+  }, [loadDumpAnalysisFile]);
+
   const handleDumpFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -966,6 +1118,14 @@ export function App() {
       await loadDumpFile(file);
     }
   }, [loadDumpFile]);
+
+  const handleDumpAnalysisFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) {
+      await loadDumpAnalysisFile(file);
+    }
+  }, [loadDumpAnalysisFile]);
 
   const toggleDumpRecording = useCallback(async () => {
     const command = dumpRecording?.isRecording ? 'stop' : 'start';
@@ -1014,6 +1174,60 @@ export function App() {
     }
   }, [clearDumpPlayback, dumpRecording?.isRecording, loadDumpPlayback, refresh, showToast]);
 
+  const dockModel = useMemo<DockWorkspaceModel>(
+    () => ({
+      snapshot,
+      totals,
+      scenes,
+      activeSceneEntry,
+      activeScene,
+      filteredEntities,
+      selectedEntity,
+      selectedComponentKey,
+      activeInspectorPanelId,
+      componentInspectors,
+      componentDetails,
+      dumpAnalysis,
+      dumpAnalysisBusy,
+      isDumpAnalysisPanelOpen: dumpAnalysisPanelOpen,
+      isDumpMode: dumpMode,
+      selectScene,
+      selectEntity,
+      inspectComponent,
+      toggleInspectorLock,
+      closeInspectorPanel,
+      closeDumpAnalysisPanel: () => setDumpAnalysisPanelOpen(false),
+      openDumpAnalysisFilePicker,
+      reloadComponentDetail,
+      onSaveComponent: executeComponentMutation,
+    }),
+    [
+      snapshot,
+      totals,
+      scenes,
+      activeSceneEntry,
+      activeScene,
+      filteredEntities,
+      selectedEntity,
+      selectedComponentKey,
+      activeInspectorPanelId,
+      componentInspectors,
+      componentDetails,
+      dumpAnalysis,
+      dumpAnalysisBusy,
+      dumpAnalysisPanelOpen,
+      dumpMode,
+      selectScene,
+      selectEntity,
+      inspectComponent,
+      toggleInspectorLock,
+      closeInspectorPanel,
+      openDumpAnalysisFilePicker,
+      reloadComponentDetail,
+      executeComponentMutation,
+    ],
+  );
+
   const playbackPaused = dumpMode ? !dumpPlaying : control?.isPaused ?? false;
   const playbackCommand: GameDebugControlCommand = playbackPaused ? 'play' : 'pause';
   const playbackLabel = playbackPaused ? 'Play' : 'Pause';
@@ -1028,6 +1242,13 @@ export function App() {
         accept=".nkgdump,application/octet-stream"
         onChange={(event) => void handleDumpFileChange(event)}
       />
+      <input
+        ref={dumpAnalysisFileInputRef}
+        className="hidden-file-input"
+        type="file"
+        accept=".nkgdump,application/octet-stream"
+        onChange={(event) => void handleDumpAnalysisFileChange(event)}
+      />
       <header className="topbar">
         <div className="brand">
           <Bug size={22} aria-hidden />
@@ -1037,6 +1258,35 @@ export function App() {
           </div>
         </div>
         <div className="toolbar">
+          <form className="connection-form" onSubmit={(event) => connectDebugApi(event)}>
+            <input
+              value={debugApiDraft.host}
+              onChange={(event) =>
+                setDebugApiDraft((current) => ({
+                  ...current,
+                  host: event.target.value,
+                }))
+              }
+              aria-label="Debug host IP"
+              title="Debug host IP"
+            />
+            <input
+              value={debugApiDraft.port}
+              onChange={(event) =>
+                setDebugApiDraft((current) => ({
+                  ...current,
+                  port: event.target.value,
+                }))
+              }
+              inputMode="numeric"
+              aria-label="Debug host port"
+              title="Debug host port"
+            />
+            <button className="primary-button" type="submit" title={`Connect to ${debugApiBaseUrl}`}>
+              <Activity size={17} />
+              Connect
+            </button>
+          </form>
           <label className="search-field">
             <Search size={16} aria-hidden />
             <input
@@ -1054,6 +1304,15 @@ export function App() {
           >
             <Upload size={17} />
             Load Dump
+          </button>
+          <button
+            className={dumpAnalysisPanelOpen ? 'icon-button active' : 'icon-button'}
+            type="button"
+            onClick={() => setDumpAnalysisPanelOpen(true)}
+            title="Open dump analysis report"
+          >
+            <Sparkles size={17} />
+            Analyze Dump
           </button>
           <button
             className={dumpRecording?.isRecording ? 'icon-button active recording' : 'icon-button'}
@@ -1197,9 +1456,28 @@ function DockWorkspace({ model }: { model: DockWorkspaceModel }) {
       return;
     }
 
+    if (model.isDumpAnalysisPanelOpen) {
+      const panel = api.getPanel(DUMP_ANALYSIS_PANEL_ID);
+      if (panel) {
+        panel.api.setActive();
+      } else {
+        addDumpAnalysisDockPanel(api);
+      }
+
+      saveDockLayout(api);
+    }
+  }, [api, model.isDumpAnalysisPanelOpen]);
+
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
     const disposable = api.onDidRemovePanel((panel) => {
       if (isInspectorPanelId(panel.api.id)) {
         model.closeInspectorPanel(panel.api.id);
+      } else if (panel.api.id === DUMP_ANALYSIS_PANEL_ID) {
+        model.closeDumpAnalysisPanel();
       }
     });
     return () => disposable.dispose();
@@ -1648,13 +1926,14 @@ function ComponentInspectorDockPanel(props: DockPanelProps) {
   const entity = entry?.entity ?? null;
   const component = entry?.component ?? null;
   const busy = entry?.status === 'loading';
+  const entityVersion = entity?.version ?? target?.entityVersion;
 
   return (
     <DockPanelBody className="component-inspector-panel">
       <div className="inspector-heading">
         <div>
           <h2>{target?.componentTypeName ?? 'Inspector'}</h2>
-          <p>{target ? `Entity #${target.entityId} · Version ${target.entityVersion}` : 'No component'}</p>
+          <p>{target ? `Entity #${target.entityId} · Version ${entityVersion}` : 'No component'}</p>
         </div>
         <div className="inspector-actions">
           {target ? (
@@ -1723,6 +2002,151 @@ function DiagnosticsDockPanel(_props: DockPanelProps) {
       <PanelSearch value={diagnosticQuery} onChange={setDiagnosticQuery} placeholder="Search diagnostics" />
       <SceneDiagnostics scene={model.activeScene} query={diagnosticQuery} />
     </DockPanelBody>
+  );
+}
+
+function DumpAnalysisDockPanel(_props: DockPanelProps) {
+  const model = useDockModel();
+  const report = model.dumpAnalysis;
+  const topTypes = report?.types.slice(0, 8) ?? [];
+  const topFields = report?.fields.slice(0, 8) ?? [];
+  const topScenes = report?.scenes.slice(0, 5) ?? [];
+  const topEntities = report?.entities.slice(0, 5) ?? [];
+  const payloadPercent = report ? getPercent(report.total.payloadBytes, report.total.totalBytes) : 0;
+  const structuredPercent = report ? getPercent(report.total.structuredBytes, report.total.totalBytes) : 0;
+  const expandedRatio = report?.serializedBytes
+    ? report.total.totalBytes / Math.max(1, report.serializedBytes)
+    : 0;
+
+  return (
+    <DockPanelBody className="dump-analysis-panel">
+      <div className="dump-report-heading">
+        <div>
+          <h2>{report?.name ?? 'Dump Report'}</h2>
+          <p>
+            {report
+              ? `${report.frameCount} frames · file ${formatBytes(report.serializedBytes)} · expanded ${formatBytes(report.total.totalBytes)}`
+              : 'No dump analyzed'}
+          </p>
+        </div>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={model.openDumpAnalysisFilePicker}
+          disabled={model.dumpAnalysisBusy}
+          title="Load dump for analysis"
+        >
+          <Upload size={16} />
+          {model.dumpAnalysisBusy ? 'Analyzing' : 'Load Dump'}
+        </button>
+      </div>
+
+      {report ? (
+        <>
+          <div className="dump-report-summary">
+            <DumpReportMetric label="File Size" value={formatBytes(report.serializedBytes)} />
+            <DumpReportMetric label="Expanded" value={formatBytes(report.total.totalBytes)} />
+            <DumpReportMetric label="Payload" value={formatBytes(report.total.payloadBytes)} tone="payload" />
+            <DumpReportMetric label="Structured" value={formatBytes(report.total.structuredBytes)} tone="structured" />
+            <DumpReportMetric label="Frames" value={String(report.frameCount)} />
+          </div>
+
+          <section className="dump-report-section">
+            <div className="dump-report-section-title">
+              <strong>Expanded Size Mix</strong>
+              <span>
+                {payloadPercent.toFixed(1)}% payload · {structuredPercent.toFixed(1)}% structured · {expandedRatio.toFixed(1)}x file
+              </span>
+            </div>
+            <div className="dump-size-mix" aria-label="Dump size mix">
+              <span
+                className="payload"
+                style={{ width: `${payloadPercent}%` }}
+                title={`Payload ${formatBytes(report.total.payloadBytes)}`}
+              />
+              <span
+                className="structured"
+                style={{ width: `${structuredPercent}%` }}
+                title={`Structured ${formatBytes(report.total.structuredBytes)}`}
+              />
+            </div>
+          </section>
+
+          <div className="dump-report-grid">
+            <DumpReportRankList title="Heaviest Types" entries={topTypes} totalBytes={report.total.totalBytes} />
+            <DumpReportRankList title="Heaviest Fields" entries={topFields} totalBytes={report.total.structuredBytes || report.total.totalBytes} />
+            <DumpReportRankList title="Scenes" entries={topScenes} totalBytes={report.total.totalBytes} compact />
+            <DumpReportRankList title="Entities" entries={topEntities} totalBytes={report.total.totalBytes} compact />
+          </div>
+        </>
+      ) : (
+        <div className="empty-details dump-report-empty">
+          <Sparkles size={28} />
+          <span>{model.dumpAnalysisBusy ? 'Analyzing dump' : 'Load a dump file to inspect its size profile'}</span>
+        </div>
+      )}
+    </DockPanelBody>
+  );
+}
+
+function DumpReportMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'payload' | 'structured';
+}) {
+  return (
+    <div className={tone ? `dump-report-metric ${tone}` : 'dump-report-metric'}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DumpReportRankList({
+  title,
+  entries,
+  totalBytes,
+  compact = false,
+}: {
+  title: string;
+  entries: GameDebugDumpAnalysisEntry[];
+  totalBytes: number;
+  compact?: boolean;
+}) {
+  return (
+    <section className="dump-report-section">
+      <div className="dump-report-section-title">
+        <strong>{title}</strong>
+        <span>{entries.length} shown</span>
+      </div>
+      <div className={compact ? 'dump-rank-list compact' : 'dump-rank-list'}>
+        {entries.length ? entries.map((entry, index) => (
+          <div className="dump-rank-row" key={entry.key}>
+            <div className="dump-rank-row-head">
+              <span>{index + 1}</span>
+              <strong title={entry.key}>{entry.displayName ?? entry.key}</strong>
+              <em>{formatBytes(entry.size.totalBytes)}</em>
+            </div>
+            <div className="dump-rank-bar" aria-hidden>
+              <span style={{ width: `${getPercent(entry.size.totalBytes, totalBytes)}%` }} />
+            </div>
+            <div className="dump-rank-meta">
+              <span>{entry.count} samples</span>
+              <span>{formatBytes(entry.size.payloadBytes)} payload</span>
+              <span>{formatBytes(entry.size.structuredBytes)} structured</span>
+            </div>
+          </div>
+        )) : (
+          <div className="empty-details compact">
+            <span>No entries</span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2280,6 +2704,25 @@ function createTimelineSamples(frames: GameDebugDumpPlaybackFrame[], maxFps: num
   });
 }
 
+function addDumpAnalysisDockPanel(api: DockviewApi) {
+  const referencePanel = api.getPanel('diagnostics') ??
+    api.getPanel('components') ??
+    api.activePanel;
+
+  api.addPanel({
+    id: DUMP_ANALYSIS_PANEL_ID,
+    title: DOCK_PANEL_TITLES[DUMP_ANALYSIS_PANEL_ID],
+    component: 'dumpAnalysis',
+    initialHeight: 420,
+    position: referencePanel
+      ? {
+          referencePanel,
+          direction: referencePanel.api.id === 'diagnostics' ? 'within' : 'below',
+        }
+      : undefined,
+  });
+}
+
 function createTimelineFpsAxisTicks(maxFps: number): TimelineFpsTick[] {
   const normalizedMaxFps = readTimelineMaxFps(maxFps);
   const candidates = [20, 30, 60, 120, 240, 500, 1000, 2000].filter((fps) => fps <= normalizedMaxFps);
@@ -2557,6 +3000,27 @@ function formatSvgCoordinate(value: number) {
   return clamp(value, 0, 100).toFixed(3);
 }
 
+function getPercent(value: number, total: number) {
+  if (total <= 0 || value <= 0) {
+    return 0;
+  }
+
+  return clamp((value / total) * 100, 0, 100);
+}
+
+function formatBytes(value: number) {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = Math.max(0, value);
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  const precision = unitIndex === 0 || size >= 100 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
+}
+
 function areEntitySnapshotsEqual(left: EntityDebugSnapshot, right: EntityDebugSnapshot) {
   return left.id === right.id && left.version === right.version;
 }
@@ -2568,12 +3032,64 @@ function areComponentSnapshotsEqual(left: ComponentDebugSnapshot, right: Compone
     left.type.assemblyName === right.type.assemblyName &&
     left.value.format === right.value.format &&
     left.value.payload === right.value.payload &&
-    left.value.error === right.value.error
+    left.value.error === right.value.error &&
+    areDebugNodesEqual(left.value.structured, right.value.structured)
   );
 }
 
+function areDebugNodesEqual(
+  left: ComponentValueDebugNode | null,
+  right: ComponentValueDebugNode | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.kind === right.kind &&
+    left.name === right.name &&
+    left.editable === right.editable &&
+    left.value === right.value &&
+    left.error === right.error &&
+    areDebugTypesEqual(left.type, right.type) &&
+    areNullableDebugTypesEqual(left.elementType, right.elementType) &&
+    areStringArraysEqual(left.options, right.options) &&
+    left.children.length === right.children.length &&
+    left.children.every((child, index) => areDebugNodesEqual(child, right.children[index])) &&
+    areDebugNodesEqual(left.elementTemplate, right.elementTemplate)
+  );
+}
+
+function areNullableDebugTypesEqual(left: DebugTypeInfo | null, right: DebugTypeInfo | null) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return areDebugTypesEqual(left, right);
+}
+
+function areDebugTypesEqual(left: DebugTypeInfo, right: DebugTypeInfo) {
+  return (
+    left.name === right.name &&
+    left.fullName === right.fullName &&
+    left.assemblyName === right.assemblyName
+  );
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function validateDumpPlaybackManifest(dump: GameDebugDumpPlaybackManifest) {
-  if (!dump || dump.format !== 'nkg.debug.dump' || dump.version !== 1) {
+  if (!dump || dump.format !== 'nkg.debug.dump' || !SUPPORTED_DUMP_DOCUMENT_VERSIONS.has(dump.version)) {
     throw new Error('Unsupported debug dump file.');
   }
 
@@ -2614,6 +3130,44 @@ function writeStoredFrameStream(value: boolean) {
   } catch {
     // Frame stream preference is best-effort.
   }
+}
+
+function readStoredDebugApiConnection(): DebugApiConnection {
+  try {
+    const raw = window.localStorage.getItem(DEBUG_API_CONNECTION_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_DEBUG_API_CONNECTION;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<DebugApiConnection>;
+    return normalizeDebugApiConnection({
+      host: typeof parsed.host === 'string' ? parsed.host : DEFAULT_DEBUG_API_CONNECTION.host,
+      port: typeof parsed.port === 'string' ? parsed.port : DEFAULT_DEBUG_API_CONNECTION.port,
+    }) ?? DEFAULT_DEBUG_API_CONNECTION;
+  } catch {
+    return DEFAULT_DEBUG_API_CONNECTION;
+  }
+}
+
+function writeStoredDebugApiConnection(connection: DebugApiConnection) {
+  try {
+    window.localStorage.setItem(DEBUG_API_CONNECTION_STORAGE_KEY, JSON.stringify(connection));
+  } catch {
+    // Connection memory is best-effort.
+  }
+}
+
+function normalizeDebugApiConnection(connection: DebugApiConnection): DebugApiConnection | null {
+  const host = connection.host.trim();
+  const portNumber = Number(connection.port.trim());
+  if (!host || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+    return null;
+  }
+
+  return {
+    host,
+    port: String(portNumber),
+  };
 }
 
 function flattenScenes(snapshot: GameDebugSnapshot | null): SceneEntry[] {
@@ -2701,6 +3255,14 @@ function findComponentDetail(
     component.type.fullName === target.componentTypeFullName &&
     component.type.assemblyName === target.componentAssemblyName,
   ) ?? null;
+}
+
+function hasRecordedComponentValue(component: ComponentDebugSnapshot) {
+  return Boolean(
+    component.value.payload ||
+    component.value.structured ||
+    component.value.error,
+  );
 }
 
 function filterScenes(scenes: SceneEntry[], query: string) {

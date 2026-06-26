@@ -1,10 +1,14 @@
 using System.Collections;
+using OdinSerializer;
 
 namespace NKGGameFramework.Gameplay;
 
 public sealed class GameplayTagContainer : IReadOnlyCollection<GameplayTag>, IEquatable<GameplayTagContainer>
 {
+    [OdinSerialize]
     private readonly HashSet<GameplayTag> _tags = [];
+
+    [OdinSerialize]
     private readonly HashSet<GameplayTag> _parentTags = [];
 
     public GameplayTagContainer()

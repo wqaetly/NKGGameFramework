@@ -5,7 +5,7 @@ public sealed record GameDebugHostStartupOptions
     public static GameDebugHostStartupOptions Disabled { get; } = new();
 
     public static GameDebugHostStartupOptions Localhost(
-        int port = 5057,
+        int port = 5067,
         bool enableMutations = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(port);

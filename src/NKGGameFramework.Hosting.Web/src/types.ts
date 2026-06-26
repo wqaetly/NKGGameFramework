@@ -229,6 +229,16 @@ export interface GameDebugDumpPlaybackFrame {
   frame: GameDebugFrameInfo;
 }
 
+export interface GameDebugDumpPlaybackComponentRequest {
+  playbackId?: string | null;
+  frameIndex: number;
+  worldName: string;
+  sceneName: string;
+  entityId: number;
+  componentTypeFullName: string;
+  componentAssemblyName?: string | null;
+}
+
 export type GameDebugDumpRecordingCommand = 'start' | 'stop';
 
 export interface GameDebugDumpRecordingRequest {
@@ -250,4 +260,31 @@ export interface GameDebugDumpRecordingResult {
   succeeded: boolean;
   message: string;
   state: GameDebugDumpRecordingState;
+}
+
+export interface GameDebugDumpAnalysisReport {
+  format: string;
+  version: number;
+  name: string;
+  frameCount: number;
+  serializedBytes: number;
+  total: GameDebugDumpAnalysisSizeBreakdown;
+  types: GameDebugDumpAnalysisEntry[];
+  fields: GameDebugDumpAnalysisEntry[];
+  components: GameDebugDumpAnalysisEntry[];
+  entities: GameDebugDumpAnalysisEntry[];
+  scenes: GameDebugDumpAnalysisEntry[];
+}
+
+export interface GameDebugDumpAnalysisSizeBreakdown {
+  totalBytes: number;
+  payloadBytes: number;
+  structuredBytes: number;
+}
+
+export interface GameDebugDumpAnalysisEntry {
+  key: string;
+  displayName: string | null;
+  size: GameDebugDumpAnalysisSizeBreakdown;
+  count: number;
 }

@@ -32,10 +32,13 @@ public sealed class BehaviorTreeInstance : IDisposable
         Root.AttachTo(this, null);
     }
 
+    [field: NonSerialized]
     public BehaviorNode Root { get; }
 
+    [field: NonSerialized]
     public BehaviorActionRegistry Actions { get; }
 
+    [field: NonSerialized]
     public BehaviorTreeContext Context { get; }
 
     public BehaviorBlackboard Blackboard { get; }

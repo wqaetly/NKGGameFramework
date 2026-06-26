@@ -1,130 +1,113 @@
 # Debug and Dump Flow
 
-本文记录 dump 的最终实现方案。WebDebug 的 live inspector、自动刷新、组件编辑和 frame stream 仍按现有思路继续；这里重点只写两件事：
-
-1. dump 文件分析报告工具
-2. 点击停止录制时，对内存里的 dump 帧做关键帧和每帧差量处理，再写成真正的 `.nkgdump`
+本文记录 debug 和 dump 的当前实现方案。核心原则是：实时 WebDebug 走轻量 summary + 按需 detail；dump 录制走轻量 frame + `ComponentStoreBlock` 批量 Odin 序列化；分析报告基于真实 dump 文件做归因。
 
 ## Scope
 
 Debug 能力分三层：
 
 - WebDebug：在线检查器，用于查看当前运行态、暂停/单步、按需查看实体组件值、编辑组件字段。
-- Dump Analysis Report：离线分析工具，用于统计 dump 里哪些类、哪些字段、哪些组件值最占空间。
-- Debug Recorder / Dump：录制期先把完整帧留在内存，停止时再做 keyframe + delta 压缩并落盘。
+- Dump Recorder / Playback：录制 frame summary 和 ECS component store blocks，离线回放时按需 materialize 组件详情。
+- Dump Analysis Report：离线分析工具，用于统计 dump 里哪些类型、字段、组件值最占空间。
 
-这三层共享框架层 introspection 能力，但数据粒度不同。WebDebug 以“当前状态 + 懒加载 detail”为主；Report 以“静态归因和占比”为主；Recorder 以“内存里的完整帧 + 停止时压缩”为主。
+三层共享框架 introspection 能力，但数据粒度不同：
+
+- live summary 只需要组件类型、实体、系统、component store 计数等元数据。
+- live detail 才需要组件 payload / structured。
+- dump frame 只保存 UI 回放需要的轻量 snapshot。
+- dump block 保存真实组件值，按 component store 批量存储。
+- report 读取 dump block，并按需展开 structured 做字段排行。
 
 ## Terms
 
-- `payload`：`ComponentValueDebugSnapshot` 里的主序列化结果，面向保存、回放和写回。
-- `structured`：同一份 `ComponentValueDebugSnapshot` 里的树形视图，面向 WebDebug 展示、编辑和兜底重建。
-- `keyframe`：周期性的完整快照，作为后续差量重建的锚点。
-- `delta`：某一帧相对 keyframe 或前一帧的变化量。
+- `payload`：组件值的主序列化结果。live detail 使用 `odin-json`；dump 使用 store-level `odin-binary-array`。
+- `structured`：组件值的树形视图，面向 WebDebug 展示、编辑、报告字段排行。
+- `light snapshot`：不包含逐组件 payload / structured 的 snapshot frame。
+- `ComponentStoreBlock`：一个 scene 下同一组件类型的 `entityIds + TComponent[]`。
+- `materialize`：从 payload 或 block row 还原结构化预览。
 
-## Dump Analysis Report
+debug 组件值统一使用 `GameDebugOdinSerializationPolicy`：默认只包含 public field、public auto property backing field 和显式 `[OdinSerialize]` 成员，并排除 `[NonSerialized]`。auto property 需要排除时使用 `[field: NonSerialized]` 标到 backing field。live detail、dump block、playback materialize 和 report structured 展开都遵循同一套成员缓存，避免把集合自身的 `Count`、`Comparer` 或运行时缓存字段统计进报告。
 
-分析报告工具只做一件事：读 dump，算占比，告诉我们哪里最胖。
+## Live Snapshot
 
-```mermaid
-flowchart TD
-    File[".nkgdump"] --> Parser["dump parser"]
-    Parser --> Stats["size statistics"]
-    Stats --> Report["analysis report"]
-    Report --> UI["table / JSON / export"]
-```
-
-报告至少要给出这些信息：
-
-- 总帧数、关键帧数、差量帧数、压缩后文件大小。
-- `payload` 和 `structured` 各自占了多少。
-- 按类统计的空间排行，能直接看到最重的类型。
-- 按字段统计的空间排行，能直接看到最重的字段路径。
-- 按 component / entity / scene 聚合出来的热点。
-
-这个工具是诊断用的，不参与录制写盘，也不反向修改 dump 格式。它的价值是把“哪里浪费了”说清楚，然后让我们再去决定要不要加序列化属性或收敛数据结构。
-
-特别是 `SkillDefinition`、`BehaviorTreeDefinition` 这类对象，录制器不做任何特化处理，它们就是普通对象；如果它们真的很大，就应该在 report 里被看见，而不是在 recorder 里偷偷绕开。
-
-## Stop-Recording Compaction
-
-录制阶段保持简单：每帧完整 snapshot 先留在内存里，不在 gameplay 运行时做差量整合，也不引入临时文件。
-停止录制时，再把这批内存数据一次性处理成更紧凑的写盘结果。
+实时 snapshot 分两种路径：
 
 ```mermaid
 flowchart TD
-    Frame["RuntimeContext.Update completed"] --> Capture["append full frame snapshot in memory"]
-    Capture --> Stop{"stop recording?"}
-    Stop -->|yes| Freeze["freeze in-memory dump frames"]
-    Freeze --> Keyframe["build keyframes"]
-    Keyframe --> Delta["build per-frame deltas"]
-    Delta --> Serialize["serialize compact dump"]
-    Serialize --> File["write .nkgdump"]
+    Request["/snapshot or /stream"] --> Summary{"payload/structured?"}
+    Summary -->|false/false| Types["Scene.GetComponentTypes"]
+    Types --> Light["component list with empty value"]
+    Summary -->|detail| Values["Scene.GetComponents"]
+    Values --> Odin["Odin payload / structured"]
+    Light --> Response["snapshot response"]
+    Odin --> Response
 ```
 
-处理顺序建议是：
+summary 路径不会对普通自定义组件做值序列化。技能书和 BUFF 这类已有摘要 UI 通过内部 entity summary provider 生成附加摘要，不参与通用组件值序列化。
 
-1. 停止录制，先把内存里的帧列表冻结成不可变输入。
-2. 按固定间隔切关键帧，初版可以先用 60 帧一组，后续再调。
-3. 以最近的关键帧为基准，计算后续每一帧的差量。
-4. 把关键帧和差量一起写进真正的 `.nkgdump`。
-5. 写盘和压缩可以放到后台线程做，但输入必须是已经冻结好的内存快照。
+detail 路径保持通用：用户新增自己的 `IComponent` 后，只要 Odin 能处理，就能在 WebDebug 里查看 structured，也能通过 mutation 写回。
 
-这里不做这些事：
+## Dump Recording
 
-- 不做 temp file spool。
-- 不做奇怪的 frame reference table。
-- 不在录制时引入业务特化的存储结构。
-- 不要求 `SkillDefinition`、`BehaviorTreeDefinition` 走特殊路径。
-- 不把 delta 整合塞回 gameplay 运行帧里。
+录制时不再保存逐组件 snapshot payload。每个 frame 记录两部分：
 
-这样做的核心好处是，运行时链路还是原来的全量对象捕获，保持通用；真正的体积优化只发生在 stop 这一刻，既能利用多线程，也不会把复杂度散进业务代码。
-
-## Replay Model
-
-回放时不需要一次读完整个文件，也不需要重新跑录制逻辑。
-读 dump 的基本顺序是：
-
-1. 先读头部和索引。
-2. 找到目标帧前最近的关键帧。
-3. 读取该关键帧的完整状态。
-4. 依次应用后续帧的差量，重建目标帧。
+1. `Frames`：轻量 `GameDebugSnapshotMessage`，用于回放时间轴和实体/组件列表。
+2. `BlockFrames`：每个 world/scene/component store 的 Odin binary block。
 
 ```mermaid
-flowchart LR
-    File[".nkgdump"] --> Header["header + indexes"]
-    Header --> Keyframe["nearest keyframe"]
-    Keyframe --> Delta["apply deltas"]
-    Delta --> View["render selected frame"]
+flowchart TD
+    Tick["FramePublished"] --> Lock["debug state gate"]
+    Lock --> Snapshot["capture light snapshot"]
+    Lock --> Stores["capture Scene.ComponentStoreDumpBlocks"]
+    Stores --> Odin["serialize TComponent[] as Odin binary"]
+    Snapshot --> Document["GameDebugDumpDocument"]
+    Odin --> Document
+    Document --> File["NKGDUMP3 gzip .nkgdump"]
 ```
 
-这和 WebDebug 的懒加载思路一致：先读摘要，再在需要时读具体值。区别只是这里的“具体值”来自离线文件，而不是 live world。
+这个设计避免了逐组件 payload 带来的重复类型信息、重复字段结构、字符串 payload 和大量临时对象。录制器也不需要知道 `SkillDefinition`、`BehaviorTreeDefinition` 或用户业务组件。默认录制保留全部帧；需要窗口化时可配置 `GameDebugOptions.MaxRecordedDumpFrames`，录制器会丢弃最旧帧并累计 `DroppedFrameCount`。
 
-## Entry Points
+## Dump Playback
 
-当前录制和回放入口保持现有形态：
+回放接口保持面向 Web UI 的形态：
 
-- `POST /_nkg/debug/dump/recording`：`start` / `stop`
-- `GET /_nkg/debug/dump/recording`
 - `POST /_nkg/debug/dump/playback`
 - `POST /_nkg/debug/dump/playback/upload`
 - `GET /_nkg/debug/dump/playback/frame`
+- `GET /_nkg/debug/dump/playback/component`
 
-## Current Boundary
+frame 接口返回轻量 snapshot。组件详情接口根据 `worldName`、`sceneName`、`entityId`、`componentType` 找到对应 block，再从 `entityIds` 定位 row，反序列化数组并生成 structured。playback 会缓存最近使用的 block array，避免反复打开同一 store 时重复反序列化。
 
-当前实现和最终方案之间的边界很简单：
+## Dump Analysis Report
 
-- live WebDebug 继续按现有方式工作。
-- dump 录制继续先把完整帧留在内存。
-- stop 时再做 keyframe + delta 压缩。
-- analysis report 只负责读文件和归因，不碰写盘链路。
+分析报告工具读取真实 `.nkgdump`：
 
-这套约束能保证 recorder 还是通用的，优化也还是数据驱动的。
+- `serializedBytes` 是文件实际大小。
+- `payloadBytes` 是 block payload 保存成本。
+- `structuredBytes` 是分析/预览时展开出来的结构化视图成本。
+- 排行维度包括 type、field、component、entity、scene。
+
+报告可以通过 API 获取，也可以在 Web 的 `Dump Report` dockview 里加载 dump 文件查看。
+
+## Entry Points
+
+- `GET /_nkg/debug/snapshot`
+- `GET /_nkg/debug/stream`
+- `POST /_nkg/debug/mutations`
+- `GET /_nkg/debug/dump/recording`
+- `POST /_nkg/debug/dump/recording`
+- `POST /_nkg/debug/dump/playback`
+- `POST /_nkg/debug/dump/playback/upload`
+- `GET /_nkg/debug/dump/playback/frame`
+- `GET /_nkg/debug/dump/playback/component`
+- `POST /_nkg/debug/dump/analysis`
+- `POST /_nkg/debug/dump/analysis/upload`
 
 ## Non-Goals
 
-- 不做 temp file。
+- 不兼容旧 dump 格式。
+- 不做 temp file spool。
 - 不做 frame reference table。
 - 不在 gameplay 运行时做增量整合。
-- 不为 `SkillDefinition`、`BehaviorTreeDefinition` 写特化录制逻辑。
+- 不为业务组件写特化 recorder。
 - 不让 report 工具参与写盘。

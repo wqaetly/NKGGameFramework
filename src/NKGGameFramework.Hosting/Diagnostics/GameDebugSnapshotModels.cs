@@ -42,6 +42,22 @@ public sealed record GameDebugComponentValueSerializationOptions
     public bool IncludePayload { get; init; } = true;
 
     public bool IncludeStructured { get; init; } = true;
+
+    public GameDebugStructuredComponentValueCaptureOptions StructuredCaptureOptions { get; init; } =
+        GameDebugStructuredComponentValueCaptureOptions.Default;
+}
+
+public sealed record GameDebugStructuredComponentValueCaptureOptions
+{
+    public static GameDebugStructuredComponentValueCaptureOptions Default { get; } = new();
+
+    public int MaxDepth { get; init; } = 6;
+
+    public int? MaxCollectionItems { get; init; }
+
+    public bool CaptureElementTemplate { get; init; } = true;
+
+    public bool StopAtRuntimeReferences { get; init; } = true;
 }
 
 public sealed record RuntimeContextDebugSnapshot(

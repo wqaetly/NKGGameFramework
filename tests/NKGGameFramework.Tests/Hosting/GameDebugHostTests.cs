@@ -4,6 +4,7 @@ using System.Text.Json;
 using NKGGameFramework.Core;
 using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
+using NKGGameFramework.Gameplay;
 using NKGGameFramework.Hosting.Diagnostics;
 
 namespace NKGGameFramework.Tests.Hosting;
@@ -171,7 +172,7 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
-    public async Task Host_mutations_apply_at_runtime_frame_boundary()
+    public async Task Host_mutations_apply_immediately_when_debug_playback_is_paused()
     {
         GameDebugRuntimeRegistry.Clear();
         GameDebugController.Shared.Reset();
@@ -179,7 +180,6 @@ public sealed class GameDebugHostTests
 
         try
         {
-            using var runtime = new RuntimeContext();
             using var world = new World("mutation-boundary-world");
             var scene = world.CreateScene("battle");
             var entity = scene.CreateEntity()
@@ -205,34 +205,33 @@ public sealed class GameDebugHostTests
                 componentType.Assembly.GetName().Name!,
                 valueSerializer.Serialize(new PositionComponent(99, 34)));
 
-            var mutationTask = PostMutationAsync(client, mutation, timeout.Token);
-            await Task.Delay(50, timeout.Token);
+            var playingResult = await PostMutationAsync(client, mutation, timeout.Token);
 
-            Assert.False(mutationTask.IsCompleted);
+            Assert.False(playingResult.Succeeded);
+            Assert.Equal("Pause debug playback before editing components.", playingResult.Message);
             Assert.Equal(12, entity.Get<PositionComponent>().X);
 
-            var frame = 0;
-            for (var attempt = 0; attempt < 10 && !mutationTask.IsCompleted; attempt++)
-            {
-                runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame));
-                await Task.Delay(10, timeout.Token);
-            }
-
-            var result = await mutationTask.WaitAsync(timeout.Token);
+            var pauseResponse = await client.PostAsJsonAsync(
+                "/_nkg/debug/control",
+                new GameDebugControlRequest("pause"),
+                JsonOptions,
+                timeout.Token);
+            pauseResponse.EnsureSuccessStatusCode();
+            var result = await PostMutationAsync(client, mutation, timeout.Token);
 
             Assert.True(result.Succeeded);
             Assert.Equal(99, entity.Get<PositionComponent>().X);
 
-            var snapshot = await GetSnapshotAfterRuntimeFrameAsync(
-                client,
+            var snapshot = await client.GetFromJsonAsync<GameDebugSnapshotMessage>(
                 CreateSnapshotPath(
                     world,
                     scene,
                     includePayload: true,
                     includeStructured: true,
-                    entityId: entity.Id.Value),
-                () => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, ++frame)),
-                timeout.Token);
+                    entityId: entity.Id.Value) + "&waitForFrame=false",
+                JsonOptions,
+                timeout.Token)
+                ?? throw new JsonException("The debug snapshot response was empty.");
             var snapshotScene = FindSceneSnapshot(snapshot.Snapshot, world, scene);
             var snapshotEntity = Assert.Single(snapshotScene.Entities);
             var snapshotComponent = Assert.Single(
@@ -509,6 +508,16 @@ public sealed class GameDebugHostTests
             var scene = world.CreateScene("battle");
             var tracked = scene.CreateEntity()
                 .Add(new PositionComponent(0, 0));
+            var buffSource = scene.CreateEntity();
+            var buffTarget = scene.CreateEntity();
+            BuffManager.Apply(buffSource, buffTarget, new BuffDefinition
+            {
+                Id = "burn",
+                DisplayName = "Burn",
+                EffectKey = "dot",
+                Duration = TimeSpan.FromSeconds(5),
+                MaxStacks = 3,
+            }, level: 2, stacks: 2);
             runtime.RegisterModule(new FrameMutationModule(scene, tracked));
             await using var host = await GameDebugHost.StartAsync(options =>
             {
@@ -550,6 +559,26 @@ public sealed class GameDebugHostTests
             Assert.True(File.Exists(savedPath));
             Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
             Assert.NotEqual((byte)'{', File.ReadAllBytes(savedPath)[0]);
+            var savedDump = GameDebugDumpFile.Deserialize(await File.ReadAllBytesAsync(savedPath));
+            Assert.NotNull(savedDump.BlockFrames);
+            Assert.Equal(2, savedDump.BlockFrames!.Count);
+            Assert.Contains(
+                savedDump.BlockFrames[1].Worlds[0].Scenes[0].ComponentStores,
+                store => store.Type.Name == nameof(PositionComponent)
+                    && store.Payload.Length > 0
+                    && store.EntityIds.Contains(tracked.Id.Value));
+
+            var analysisResponse = await client.PostAsJsonAsync(
+                "/_nkg/debug/dump/analysis",
+                new GameDebugDumpPlaybackOpenRequest(savedPath),
+                JsonOptions);
+            var blockReport = await analysisResponse.Content.ReadFromJsonAsync<GameDebugDumpAnalysisReport>(JsonOptions);
+
+            Assert.True(analysisResponse.IsSuccessStatusCode);
+            Assert.NotNull(blockReport);
+            Assert.True(blockReport.Total.PayloadBytes > 0);
+            Assert.True(blockReport.Total.StructuredBytes > 0);
+            Assert.Contains(blockReport.Fields, entry => entry.DisplayName == $"{nameof(PositionComponent)}.X");
 
             var openResponse = await client.PostAsJsonAsync(
                 "/_nkg/debug/dump/playback",
@@ -560,7 +589,7 @@ public sealed class GameDebugHostTests
             Assert.True(openResponse.IsSuccessStatusCode);
             Assert.NotNull(playback);
             Assert.Equal("nkg.debug.dump", playback.Format);
-            Assert.Equal(1, playback.Version);
+            Assert.Equal(2, playback.Version);
             Assert.Equal(2, playback.Frames.Count);
             Assert.All(playback.Frames, frame => Assert.Equal(nameof(RuntimeContext), frame.Frame.Source));
             Assert.All(playback.Frames, frame =>
@@ -580,6 +609,50 @@ public sealed class GameDebugHostTests
             Assert.Contains(
                 lastFrame.Snapshot.Worlds,
                 worldSnapshot => worldSnapshot.Name == world.Name);
+            var lastScene = Assert.Single(Assert.Single(lastFrame.Snapshot.Worlds).Scenes);
+            var lastEntity = Assert.Single(lastScene.Entities, entity => entity.Id == tracked.Id.Value);
+            var lastComponent = Assert.Single(
+                lastEntity.Components,
+                component => component.Type.Name == nameof(PositionComponent));
+            Assert.Null(lastComponent.Value.Payload);
+            Assert.Null(lastComponent.Value.Structured);
+
+            var componentType = typeof(PositionComponent);
+            var componentDetail = await client.GetFromJsonAsync<ComponentDebugSnapshot>(
+                "/_nkg/debug/dump/playback/component" +
+                $"?playbackId={playback.Id}" +
+                "&frameIndex=1" +
+                $"&worldName={Uri.EscapeDataString(world.Name)}" +
+                $"&sceneName={Uri.EscapeDataString(scene.Name)}" +
+                $"&entityId={tracked.Id.Value}" +
+                $"&componentTypeFullName={Uri.EscapeDataString(componentType.FullName!)}" +
+                $"&componentAssemblyName={Uri.EscapeDataString(componentType.Assembly.GetName().Name!)}",
+                JsonOptions);
+            Assert.NotNull(componentDetail);
+            Assert.NotNull(componentDetail.Value.Structured);
+            Assert.Equal(nameof(PositionComponent), componentDetail.Type.Name);
+            var componentX = FindChild(componentDetail.Value.Structured!, nameof(PositionComponent.X));
+            Assert.Equal(2, double.Parse(componentX.Value!, CultureInfo.InvariantCulture));
+
+            var buffComponentType = typeof(BuffCollectionComponent);
+            var buffComponentDetail = await client.GetFromJsonAsync<ComponentDebugSnapshot>(
+                "/_nkg/debug/dump/playback/component" +
+                $"?playbackId={playback.Id}" +
+                "&frameIndex=1" +
+                $"&worldName={Uri.EscapeDataString(world.Name)}" +
+                $"&sceneName={Uri.EscapeDataString(scene.Name)}" +
+                $"&entityId={buffTarget.Id.Value}" +
+                $"&componentTypeFullName={Uri.EscapeDataString(buffComponentType.FullName!)}" +
+                $"&componentAssemblyName={Uri.EscapeDataString(buffComponentType.Assembly.GetName().Name!)}",
+                JsonOptions);
+            Assert.NotNull(buffComponentDetail);
+            Assert.True(
+                buffComponentDetail.Value.Structured is not null,
+                buffComponentDetail.Value.Error ?? "BuffCollectionComponent structured value was not returned.");
+            Assert.Equal(nameof(BuffCollectionComponent), buffComponentDetail.Type.Name);
+            var buffs = FindChild(buffComponentDetail.Value.Structured!, "_buffs");
+            Assert.Equal("list", buffs.Kind);
+            Assert.Single(buffs.Children);
 
             using var uploadContent = new ByteArrayContent(await File.ReadAllBytesAsync(savedPath));
             uploadContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -725,6 +798,140 @@ public sealed class GameDebugHostTests
             GameDebugController.Shared.Reset();
             GameDebugFramePublisher.Shared.Reset();
         }
+    }
+
+    [Fact]
+    public void Dump_recorder_can_bound_recorded_frames_and_reports_dropped_count()
+    {
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+        string? savedPath = null;
+
+        try
+        {
+            using var runtime = new RuntimeContext();
+            using var recorder = new GameDebugDumpRecorder(
+                new EmptySnapshotProvider(),
+                GameDebugController.Shared,
+                GameDebugFramePublisher.Shared,
+                new GameDebugOptions
+                {
+                    MaxRecordedDumpFrames = 2,
+                });
+
+            var start = recorder.Execute(new GameDebugDumpRecordingRequest("start", "bounded-window-test"));
+            Assert.True(start.Succeeded);
+
+            for (var frame = 1; frame <= 5; frame++)
+            {
+                runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame));
+            }
+
+            var recording = recorder.GetState();
+            Assert.True(recording.IsRecording);
+            Assert.Equal(2, recording.FrameCount);
+            Assert.Equal(3, recording.DroppedFrameCount);
+
+            var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
+            savedPath = stop.State.LastDumpPath;
+
+            Assert.True(stop.Succeeded);
+            Assert.False(string.IsNullOrWhiteSpace(savedPath));
+            var playback = recorder.OpenPlayback(new GameDebugDumpPlaybackOpenRequest(savedPath));
+
+            Assert.Equal(3, playback.DroppedFrameCount);
+            Assert.Equal(2, playback.Frames.Count);
+            Assert.Equal(4, playback.Frames[0].Frame.Frame);
+            Assert.Equal(5, playback.Frames[1].Frame.Frame);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(savedPath) && File.Exists(savedPath))
+            {
+                File.Delete(savedPath);
+            }
+
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
+    public void Dump_file_writes_compressed_dump_and_reconstructs_frames()
+    {
+        var dump = CreateSyntheticDump(frameCount: 90);
+        var payload = GameDebugDumpFile.Serialize(dump);
+        var fullDocumentPayload = JsonSerializer.SerializeToUtf8Bytes(dump, JsonOptions);
+
+        Assert.NotEqual((byte)'{', payload[0]);
+        Assert.True(payload.Length < fullDocumentPayload.Length);
+
+        var reopened = GameDebugDumpFile.Deserialize(payload);
+
+        Assert.Equal(dump.Format, reopened.Format);
+        Assert.Equal(dump.Version, reopened.Version);
+        Assert.Equal(dump.Frames.Count, reopened.Frames.Count);
+        Assert.Equal(1, reopened.Frames[0].Frame.Frame);
+        Assert.Equal(61, reopened.Frames[60].Frame.Frame);
+        Assert.Equal(90, reopened.Frames[89].Frame.Frame);
+        Assert.Equal(
+            dump.Frames[89].Snapshot.Worlds[0].Scenes[0].Entities[0].Components[0].Value.Payload,
+            reopened.Frames[89].Snapshot.Worlds[0].Scenes[0].Entities[0].Components[0].Value.Payload);
+    }
+
+    [Fact]
+    public void Dump_file_rejects_unsupported_payloads()
+    {
+        var dump = CreateSyntheticDump(frameCount: 1);
+        var fullDocumentPayload = JsonSerializer.SerializeToUtf8Bytes(dump, JsonOptions);
+
+        var exception = Assert.Throws<InvalidDataException>(() => GameDebugDumpFile.Deserialize(fullDocumentPayload));
+
+        Assert.Equal("The debug dump file was not a supported NKG dump.", exception.Message);
+    }
+
+    [Fact]
+    public void Dump_analyzer_reports_payload_structured_and_field_sizes()
+    {
+        var payload = GameDebugDumpFile.Serialize(CreateSyntheticDump(frameCount: 3));
+
+        var report = GameDebugDumpAnalyzer.Analyze(payload);
+        var json = GameDebugDumpAnalyzer.ToJson(report);
+        var table = GameDebugDumpAnalyzer.ToTable(report, limit: 3);
+
+        Assert.Equal(3, report.FrameCount);
+        Assert.True(report.Total.PayloadBytes > 0);
+        Assert.True(report.Total.StructuredBytes > 0);
+        Assert.Contains(report.Types, entry => entry.DisplayName == nameof(PositionComponent));
+        Assert.Contains(report.Fields, entry => entry.DisplayName == $"{nameof(PositionComponent)}.X");
+        Assert.Contains("payloadBytes", json, StringComparison.Ordinal);
+        Assert.Contains("structuredBytes", json, StringComparison.Ordinal);
+        Assert.Contains("Payload", table, StringComparison.Ordinal);
+        Assert.Contains(nameof(PositionComponent), table, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Host_serves_dump_analysis_upload()
+    {
+        await using var host = await GameDebugHost.StartAsync(options =>
+        {
+            options.Url = "http://127.0.0.1:0";
+        });
+        using var client = new HttpClient
+        {
+            BaseAddress = host.BaseAddress,
+        };
+        using var content = new ByteArrayContent(GameDebugDumpFile.Serialize(CreateSyntheticDump(frameCount: 3)));
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+
+        var response = await client.PostAsync("/_nkg/debug/dump/analysis/upload", content);
+        var report = await response.Content.ReadFromJsonAsync<GameDebugDumpAnalysisReport>(JsonOptions);
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.NotNull(report);
+        Assert.Equal(3, report.FrameCount);
+        Assert.True(report.Total.PayloadBytes > 0);
+        Assert.Contains(report.Types, entry => entry.DisplayName == nameof(PositionComponent));
     }
 
     [Fact]
@@ -876,6 +1083,113 @@ public sealed class GameDebugHostTests
     private static ComponentValueDebugNode FindChild(ComponentValueDebugNode node, string name)
     {
         return Assert.Single(node.Children, child => child.Name == name);
+    }
+
+    private static GameDebugDumpDocument CreateSyntheticDump(int frameCount)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var frames = Enumerable.Range(1, frameCount)
+            .Select(frame => CreateSyntheticFrame(frame, now.AddMilliseconds(frame)))
+            .ToArray();
+
+        return new GameDebugDumpDocument(
+            "nkg.debug.dump",
+            1,
+            "synthetic-dump",
+            now,
+            now,
+            now.AddMilliseconds(frameCount),
+            0,
+            frames);
+    }
+
+    private static GameDebugSnapshotMessage CreateSyntheticFrame(int frame, DateTimeOffset capturedAt)
+    {
+        var componentType = CreateDebugTypeInfo(typeof(PositionComponent));
+        var component = new ComponentDebugSnapshot(
+            componentType,
+            new ComponentValueDebugSnapshot(
+                "odin-json",
+                new string('x', 4096),
+                null,
+                new ComponentValueDebugNode
+                {
+                    Kind = "object",
+                    Name = nameof(PositionComponent),
+                    Type = componentType,
+                    Editable = true,
+                    Children =
+                    [
+                        new ComponentValueDebugNode
+                        {
+                            Kind = "number",
+                            Name = "X",
+                            Type = CreateDebugTypeInfo(typeof(double)),
+                            Editable = true,
+                            Value = "12",
+                        },
+                        new ComponentValueDebugNode
+                        {
+                            Kind = "number",
+                            Name = "Y",
+                            Type = CreateDebugTypeInfo(typeof(double)),
+                            Editable = true,
+                            Value = "34",
+                        },
+                    ],
+                }),
+            new ComponentGraphDebugSnapshot(
+                $"{componentType.AssemblyName}:{componentType.FullName}",
+                null,
+                null,
+                "Debug/Test",
+                0));
+        var snapshot = new GameDebugSnapshot(
+            capturedAt,
+            [],
+            [
+                new WorldDebugSnapshot(
+                    "synthetic-world",
+                    1,
+                    [
+                        new SceneDebugSnapshot(
+                            "battle",
+                            1,
+                            [],
+                            [
+                                new ComponentStoreDebugSnapshot(
+                                    componentType,
+                                    1,
+                                    [1]),
+                            ],
+                            [
+                                new EntityDebugSnapshot(
+                                    1,
+                                    1,
+                                    [component],
+                                    [],
+                                    []),
+                            ]),
+                    ]),
+            ]);
+
+        return new GameDebugSnapshotMessage(
+            new GameDebugFrameInfo(
+                frame,
+                nameof(RuntimeContext),
+                frame,
+                capturedAt,
+                new GameDebugFrameMetrics(0.016, 0.016, 1, 1000)),
+            snapshot,
+            new GameDebugControlState(false, 0, 0, null));
+    }
+
+    private static DebugTypeInfo CreateDebugTypeInfo(Type type)
+    {
+        return new DebugTypeInfo(
+            type.Name,
+            type.FullName ?? type.Name,
+            type.Assembly.GetName().Name ?? string.Empty);
     }
 
     private static async Task<GameDebugSnapshotMessage> GetSnapshotAfterRuntimeFrameAsync(
