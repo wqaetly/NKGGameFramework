@@ -153,6 +153,10 @@ Skill/Buff 定义支持 `Required*Tags` / `Blocked*Tags` gate，也支持 `Gamep
 
 ## Web Debug Inspector
 
+<p align="center">
+  <img src="pic/webdebug.png" alt="Web Debug Inspector" width="960" />
+</p>
+
 调试链路包含：
 
 - `GameDebugRuntimeRegistry`：主框架自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`，Web Debug 默认从这里发现可调试运行态。
