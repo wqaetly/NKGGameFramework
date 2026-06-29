@@ -29,11 +29,15 @@ std::string to_std_string(const String& value)
 
 NkgLeanClrPlaneHost::NkgLeanClrPlaneHost() = default;
 
-NkgLeanClrPlaneHost::~NkgLeanClrPlaneHost() = default;
+NkgLeanClrPlaneHost::~NkgLeanClrPlaneHost()
+{
+    debug_server.stop();
+}
 
 void NkgLeanClrPlaneHost::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("get_bridge_status"), &NkgLeanClrPlaneHost::get_bridge_status);
+    ClassDB::bind_method(D_METHOD("get_debug_port"), &NkgLeanClrPlaneHost::get_debug_port);
     ClassDB::bind_method(D_METHOD("get_object_count"), &NkgLeanClrPlaneHost::get_object_count);
     ClassDB::bind_method(D_METHOD("get_bullet_count"), &NkgLeanClrPlaneHost::get_bullet_count);
     ClassDB::bind_method(D_METHOD("get_max_bullet_count"), &NkgLeanClrPlaneHost::get_max_bullet_count);
@@ -48,11 +52,14 @@ void NkgLeanClrPlaneHost::_ready()
     add_child(hud_label);
 
     initialize_bridge();
+    initialize_debug_server();
     set_process(true);
 }
 
 void NkgLeanClrPlaneHost::_process(double p_delta)
 {
+    process_debug_requests();
+
     if (!bridge.is_valid() || !bridge->is_ready())
     {
         queue_redraw();
@@ -73,6 +80,8 @@ void NkgLeanClrPlaneHost::_process(double p_delta)
 
     if (stepped)
     {
+        process_debug_requests();
+        publish_debug_stream_snapshots();
         update_hud();
     }
     queue_redraw();
@@ -92,6 +101,11 @@ void NkgLeanClrPlaneHost::_draw()
 String NkgLeanClrPlaneHost::get_bridge_status() const
 {
     return bridge_status;
+}
+
+int32_t NkgLeanClrPlaneHost::get_debug_port() const
+{
+    return static_cast<int32_t>(debug_server.get_port());
 }
 
 int32_t NkgLeanClrPlaneHost::get_object_count() const
@@ -139,6 +153,73 @@ void NkgLeanClrPlaneHost::initialize_bridge()
     bridge_status = "native object host ok";
     apply_snapshot(bridge->step_session());
     update_hud();
+}
+
+void NkgLeanClrPlaneHost::initialize_debug_server()
+{
+    if (!bridge.is_valid() || !bridge->is_ready())
+    {
+        return;
+    }
+
+    if (!debug_server.start(static_cast<uint16_t>(debug_port)))
+    {
+        bridge_status += " debug server failed: " + String(debug_server.get_last_error().c_str());
+        return;
+    }
+
+    bridge_status += " debug http://127.0.0.1:" + String::num_int64(debug_server.get_port());
+}
+
+void NkgLeanClrPlaneHost::process_debug_requests()
+{
+    if (!debug_server.is_running())
+    {
+        return;
+    }
+
+    NkgDebugHttpServer::PendingRequest request;
+    int32_t guard = 0;
+    while (guard++ < 32 && debug_server.pop_pending_request(request))
+    {
+        if (!bridge.is_valid() || !bridge->is_ready())
+        {
+            debug_server.complete_request(
+                request.id,
+                NkgDebugHttpServer::Response{
+                    503,
+                    "Service Unavailable",
+                    "application/json; charset=utf-8",
+                    "{\"message\":\"LeanCLR bridge is not ready.\"}"});
+            continue;
+        }
+
+        const std::string payload = request.method + "\n" + request.target + "\n" + request.body;
+        const String managed_response = bridge->handle_debug_request(String::utf8(payload.c_str(), payload.size()));
+        debug_server.complete_request(
+            request.id,
+            NkgDebugHttpServer::parse_managed_response(to_std_string(managed_response)));
+    }
+}
+
+void NkgLeanClrPlaneHost::publish_debug_stream_snapshots()
+{
+    if (!debug_server.is_running() || !bridge.is_valid() || !bridge->is_ready())
+    {
+        return;
+    }
+
+    const auto targets = debug_server.get_stream_snapshot_targets();
+    for (const auto& target : targets)
+    {
+        const std::string payload = "GET\n" + target + "\n";
+        const String managed_response = bridge->handle_debug_request(String::utf8(payload.c_str(), payload.size()));
+        const auto response = NkgDebugHttpServer::parse_managed_response(to_std_string(managed_response));
+        if (response.status_code == 200)
+        {
+            debug_server.broadcast_snapshot(target, response.body);
+        }
+    }
 }
 
 void NkgLeanClrPlaneHost::pump_input()
@@ -282,6 +363,7 @@ void NkgLeanClrPlaneHost::update_hud()
 
     hud_label->set_text(
         "Controls: arrows move  Space/Enter fire\nLeanCLR " + bridge_status +
+        "\nWebDebug http://127.0.0.1:" + String::num_int64(debug_server.get_port()) +
         "\nscore " + String::num_int64(score) + "  lives " + String::num_int64(lives) +
         "  enemies/bullets " + String::num_int64(static_cast<int64_t>(visuals.size())));
 }

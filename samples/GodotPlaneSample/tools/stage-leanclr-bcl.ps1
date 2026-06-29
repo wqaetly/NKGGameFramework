@@ -23,8 +23,10 @@ if (-not (Test-Path $runtimeDir)) {
 
 New-Item -ItemType Directory -Force $BclTargetDir | Out-Null
 Copy-Item -Force -Path (Join-Path $runtimeDir "System*.dll") -Destination $BclTargetDir
+Copy-Item -Force -Path (Join-Path $runtimeDir "Microsoft*.dll") -Destination $BclTargetDir
 
-$files = Get-ChildItem -Path $BclTargetDir -Filter "System*.dll"
+$files = Get-ChildItem -Path (Join-Path $BclTargetDir "*.dll") |
+    Where-Object { $_.Name -like "System*.dll" -or $_.Name -like "Microsoft*.dll" }
 $totalBytes = ($files | Measure-Object -Property Length -Sum).Sum
 $totalMb = [math]::Round($totalBytes / 1MB, 2)
 

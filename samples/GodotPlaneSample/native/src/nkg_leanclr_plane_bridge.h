@@ -35,6 +35,7 @@ public:
     void press_down();
     void press_fire();
     String step_session();
+    String handle_debug_request(const String& p_request);
     String get_status();
     String get_last_error() const;
     bool is_ready() const;
@@ -46,6 +47,7 @@ private:
     bool bind_managed_methods();
     bool invoke_void(const leanclr::metadata::RtMethodInfo* p_method);
     String invoke_string(const leanclr::metadata::RtMethodInfo* p_method);
+    String invoke_string_arg(const leanclr::metadata::RtMethodInfo* p_method, const String& p_arg);
     void set_error(const String& p_message);
 
     PackedStringArray library_dirs;
@@ -59,6 +61,7 @@ private:
     const leanclr::metadata::RtMethodInfo* press_down_method = nullptr;
     const leanclr::metadata::RtMethodInfo* press_fire_method = nullptr;
     const leanclr::metadata::RtMethodInfo* step_method = nullptr;
+    const leanclr::metadata::RtMethodInfo* debug_request_method = nullptr;
     const leanclr::metadata::RtMethodInfo* status_method = nullptr;
     String last_error;
     bool ready = false;

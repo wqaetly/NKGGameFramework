@@ -14,9 +14,9 @@
 #include "vm/class.h"
 #include "vm/method.h"
 #include "vm/rt_exception.h"
+#include "vm/rt_string.h"
 #include "vm/runtime.h"
 #include "vm/settings.h"
-#include "vm/rt_string.h"
 
 using namespace leanclr;
 
@@ -79,7 +79,7 @@ godot::String rt_string_to_godot(vm::RtString* value)
     return godot::String::utf8(builder.get_const_chars());
 }
 
-const metadata::RtMethodInfo* find_static_method(metadata::RtModuleDef* module, const char* type_name, const char* method_name)
+const metadata::RtMethodInfo* find_static_method(metadata::RtModuleDef* module, const char* type_name, const char* method_name, size_t param_count)
 {
     if (module == nullptr)
     {
@@ -99,7 +99,7 @@ const metadata::RtMethodInfo* find_static_method(metadata::RtModuleDef* module, 
     }
 
     const metadata::RtMethodInfo* method = vm::Method::find_matched_method_in_class_by_name(klass, method_name);
-    if (method == nullptr || !vm::Method::is_static(method) || vm::Method::get_param_count_include_this(method) != 0)
+    if (method == nullptr || !vm::Method::is_static(method) || vm::Method::get_param_count_include_this(method) != param_count)
     {
         return nullptr;
     }
@@ -130,6 +130,7 @@ void NkgLeanClrPlaneBridge::_bind_methods()
     ClassDB::bind_method(D_METHOD("press_down"), &NkgLeanClrPlaneBridge::press_down);
     ClassDB::bind_method(D_METHOD("press_fire"), &NkgLeanClrPlaneBridge::press_fire);
     ClassDB::bind_method(D_METHOD("step_session"), &NkgLeanClrPlaneBridge::step_session);
+    ClassDB::bind_method(D_METHOD("handle_debug_request", "request"), &NkgLeanClrPlaneBridge::handle_debug_request);
     ClassDB::bind_method(D_METHOD("get_status"), &NkgLeanClrPlaneBridge::get_status);
     ClassDB::bind_method(D_METHOD("get_last_error"), &NkgLeanClrPlaneBridge::get_last_error);
     ClassDB::bind_method(D_METHOD("is_ready"), &NkgLeanClrPlaneBridge::is_ready);
@@ -273,6 +274,16 @@ String NkgLeanClrPlaneBridge::step_session()
     return invoke_string(step_method);
 }
 
+String NkgLeanClrPlaneBridge::handle_debug_request(const String& p_request)
+{
+    if (!ready && !initialize_runtime())
+    {
+        return String("500\nInternal Server Error\napplication/json; charset=utf-8\n{\"message\":\"LeanCLR bridge is not ready.\"}");
+    }
+
+    return invoke_string_arg(debug_request_method, p_request);
+}
+
 String NkgLeanClrPlaneBridge::get_status()
 {
     if (!ready && !initialize_runtime())
@@ -296,21 +307,22 @@ bool NkgLeanClrPlaneBridge::is_ready() const
 bool NkgLeanClrPlaneBridge::bind_managed_methods()
 {
     constexpr const char* type_name = "NKGGameFramework.GodotPlaneSample.PlaneGameBridge";
-    reset_method = find_static_method(module, type_name, "ResetSession");
-    clear_input_method = find_static_method(module, type_name, "ClearInput");
-    press_left_method = find_static_method(module, type_name, "PressLeft");
-    press_right_method = find_static_method(module, type_name, "PressRight");
-    press_up_method = find_static_method(module, type_name, "PressUp");
-    press_down_method = find_static_method(module, type_name, "PressDown");
-    press_fire_method = find_static_method(module, type_name, "PressFire");
-    step_method = find_static_method(module, type_name, "StepSession");
-    status_method = find_static_method(module, type_name, "GetSessionStatus");
+    reset_method = find_static_method(module, type_name, "ResetSession", 0);
+    clear_input_method = find_static_method(module, type_name, "ClearInput", 0);
+    press_left_method = find_static_method(module, type_name, "PressLeft", 0);
+    press_right_method = find_static_method(module, type_name, "PressRight", 0);
+    press_up_method = find_static_method(module, type_name, "PressUp", 0);
+    press_down_method = find_static_method(module, type_name, "PressDown", 0);
+    press_fire_method = find_static_method(module, type_name, "PressFire", 0);
+    step_method = find_static_method(module, type_name, "StepSession", 0);
+    debug_request_method = find_static_method(module, type_name, "HandleDebugRequest", 1);
+    status_method = find_static_method(module, type_name, "GetSessionStatus", 0);
 
     if (reset_method == nullptr || clear_input_method == nullptr || press_left_method == nullptr ||
         press_right_method == nullptr || press_up_method == nullptr || press_down_method == nullptr ||
-        press_fire_method == nullptr || step_method == nullptr || status_method == nullptr)
+        press_fire_method == nullptr || step_method == nullptr || debug_request_method == nullptr || status_method == nullptr)
     {
-        set_error("LeanCLR failed to bind PlaneGameBridge session methods.");
+        set_error("LeanCLR failed to bind PlaneGameBridge session/debug methods.");
         return false;
     }
 
@@ -348,6 +360,27 @@ String NkgLeanClrPlaneBridge::invoke_string(const metadata::RtMethodInfo* p_meth
     {
         set_error("LeanCLR managed string invocation failed.");
         return String();
+    }
+
+    return rt_string_to_godot(reinterpret_cast<vm::RtString*>(invoke_result.unwrap()));
+}
+
+String NkgLeanClrPlaneBridge::invoke_string_arg(const metadata::RtMethodInfo* p_method, const String& p_arg)
+{
+    if (p_method == nullptr)
+    {
+        set_error("LeanCLR managed string method is not bound.");
+        return String();
+    }
+
+    const std::string arg = to_std_string(p_arg);
+    vm::RtString* managed_arg = vm::String::create_string_from_utf8chars(arg.data(), static_cast<int32_t>(arg.size()));
+    vm::RtObject* args[] = {reinterpret_cast<vm::RtObject*>(managed_arg)};
+    auto invoke_result = vm::Runtime::invoke_object_arguments_with_run_cctor(p_method, nullptr, args, 1);
+    if (invoke_result.is_err())
+    {
+        set_error("LeanCLR managed string invocation with argument failed.");
+        return String("500\nInternal Server Error\napplication/json; charset=utf-8\n{\"message\":\"LeanCLR managed debug invocation failed.\"}");
     }
 
     return rt_string_to_godot(reinterpret_cast<vm::RtString*>(invoke_result.unwrap()));

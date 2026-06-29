@@ -24,6 +24,7 @@ add_subdirectory("${GODOT_CPP_ROOT}" "${CMAKE_BINARY_DIR}/godot-cpp")
 add_subdirectory("${LEANCLR_ROOT}/src/runtime" "${CMAKE_BINARY_DIR}/leanclr-runtime")
 
 add_library(nkg_leanclr_bridge SHARED
+    src/nkg_debug_http_server.cpp
     src/nkg_leanclr_plane_bridge.cpp
     src/nkg_leanclr_plane_host.cpp
     src/register_types.cpp
@@ -49,4 +50,8 @@ set_target_properties(nkg_leanclr_bridge PROPERTIES
 
 if(MSVC)
     target_compile_options(nkg_leanclr_bridge PRIVATE /utf-8)
+endif()
+
+if(WIN32)
+    target_link_libraries(nkg_leanclr_bridge PRIVATE ws2_32)
 endif()

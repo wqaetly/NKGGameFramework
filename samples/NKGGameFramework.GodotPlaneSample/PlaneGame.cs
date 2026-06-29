@@ -31,6 +31,10 @@ internal sealed class PlaneGame : IDisposable
 
     public bool IsGameOver => State.Lives <= 0 || State.Frame >= 10800;
 
+    public RuntimeContext Runtime => _runtime;
+
+    public World World => _world;
+
     private PlaneGameState State => _scene.GetOrCreateSceneComponent<PlaneGameState>();
 
     public void Start()
@@ -58,8 +62,13 @@ internal sealed class PlaneGame : IDisposable
 
     public void Update(double deltaSeconds)
     {
+        var previousRuntimeFrame = _runtime.Time.Frame;
         var runtimeTime = GameFrameTime.Advance(_runtime.Time, deltaSeconds, deltaSeconds);
         _runtime.Update(in runtimeTime);
+        if (_runtime.Time.Frame == previousRuntimeFrame)
+        {
+            return;
+        }
 
         var worldTime = GameFrameTime.Advance(_world.Time, deltaSeconds, deltaSeconds);
         _world.Update(in worldTime);
