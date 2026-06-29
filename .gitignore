@@ -1,6 +1,10 @@
 bin/
 obj/
+out/
+.godot/
+samples/GodotPlaneSample/leanclr_bcl/
 .vs/
+.vscode/
 .idea/
 *.user
 *.suo

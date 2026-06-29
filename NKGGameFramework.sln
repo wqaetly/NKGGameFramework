@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKGGameFramework.Hosting", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKGGameFramework.Diagnostics", "src\NKGGameFramework.Diagnostics\NKGGameFramework.Diagnostics.csproj", "{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKGGameFramework.GodotPlaneSample", "samples\NKGGameFramework.GodotPlaneSample\NKGGameFramework.GodotPlaneSample.csproj", "{1F68FF1C-2962-4E44-B535-7A3414A79BAD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -151,6 +153,18 @@ Global
 		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x64.Build.0 = Release|Any CPU
 		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x86.ActiveCfg = Release|Any CPU
 		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x86.Build.0 = Release|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Debug|x64.Build.0 = Debug|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Debug|x86.Build.0 = Debug|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Release|x64.ActiveCfg = Release|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Release|x64.Build.0 = Release|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Release|x86.ActiveCfg = Release|Any CPU
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -167,5 +181,6 @@ Global
 		{9DB5C8F6-3D7D-4B73-8B31-A870147F72AA} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{E176C6B9-87E2-433D-90F0-7CFE0E8B905E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{1F68FF1C-2962-4E44-B535-7A3414A79BAD} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 	EndGlobalSection
 EndGlobal
