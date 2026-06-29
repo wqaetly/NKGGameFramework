@@ -1,7 +1,7 @@
 using NKGGameFramework.Ecs;
 using OdinSerializer;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 internal static class GameDebugComponentStoreBlockSerializer
 {

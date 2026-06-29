@@ -1,7 +1,7 @@
 using System.Text;
 using OdinSerializer;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentValueSerializer
 {

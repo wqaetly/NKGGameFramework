@@ -14,6 +14,7 @@ src/
     Runtime/
     Async/
     Serialization/
+  NKGGameFramework.Diagnostics/
   NKGGameFramework.Hosting/
     Diagnostics/
   NKGGameFramework.Hosting.Web/
@@ -44,10 +45,11 @@ Adapter.Unity / Adapter.Godot
   v
 Engine runtime packages
 
-NKGGameFramework.Hosting -> NKGGameFramework
+NKGGameFramework.Diagnostics -> NKGGameFramework
+NKGGameFramework.Hosting -> NKGGameFramework.Diagnostics + NKGGameFramework
 NKGGameFramework.Hosting.Web -> NKGGameFramework.Hosting HTTP endpoints
 
-NKGGameFramework.Tests -> NKGGameFramework + NKGGameFramework.Hosting
+NKGGameFramework.Tests -> NKGGameFramework + NKGGameFramework.Diagnostics + NKGGameFramework.Hosting
 ```
 
 Rules:
@@ -57,7 +59,8 @@ Rules:
 - `NKGGameFramework` 直接引用 UniTask NuGet 包，作为项目通用 async/await awaitable 底座。
 - `Nodes` 是主包内的跨平台节点图底座，承载可变节点图、节点/端口/连线、动态端口、连接规则、事件、撤销重做、校验和遍历，不依赖 Unity GraphView、Odin Inspector 或任何编辑器 UI。
 - `Adapter.Unity` / `Adapter.Godot` 引用主包，主包不反向引用 Adapter。
-- `NKGGameFramework.Hosting` 是可选轻量调试宿主包，用于 Web Debug Inspector，不进入主包。
+- `NKGGameFramework.Diagnostics` 是 transport-independent 调试领域包，提供 snapshot、mutation、dump、playback 和 analysis，不进入主包。
+- `NKGGameFramework.Hosting` 是可选轻量 HTTP/SSE 调试宿主包，用于 Web Debug Inspector，不进入主包，也不承载调试领域模型。
 - `NKGGameFramework.Hosting.Web` 是 React/Vite 调试面板源码，通过 `/_nkg/debug/*` HTTP API 读取快照。
 - Unity/Godot/YooAsset/HybridCLR/Luban 等引擎或生成管线依赖只能出现在 Adapter 的实际引擎实现包中，不能出现在主包。
 - React、Vite 等前端工具链依赖只能出现在 Web 包中，不能出现在主包。
@@ -89,16 +92,16 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 - 生命周期事件：实体创建销毁、组件增删改会发布到 Scene 级 `EventBus`。
 - 调试枚举：`Scene.Entities`、`Scene.ComponentStores` 和 `Scene.GetComponents` 提供只读 DebugView，允许 Hosting 快照展示所有实体、组件类型和组件值；这些 API 面向调试工具，不改变 ECS 热路径仍以泛型组件存储为主的设计。
 
-## Hosting
+## Diagnostics And Hosting
 
-调试链路提供不绑定具体游戏引擎的调试宿主工具：
+调试链路分成 transport-independent 的 Diagnostics 包和 HTTP/SSE Hosting 包：
 
 - `GameDebugRuntimeRegistry`：主框架自动跟踪当前进程内创建的 `RuntimeContext` 和 `World`，让 Web Debug 在没有宿主手动注册时也能发现运行态对象。
-- `GameDebugHost`：框架自带的本地 Debug Host，负责启动轻量 loopback HTTP/SSE transport 并暴露 Web Debug 所需的 `/_nkg/debug/*` API。
-- `GameDebugSession`：注册一个或多个 `RuntimeContext` / `World`。
-- `GameDebugSnapshotProvider`：从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件值封装成 `ComponentValueDebugSnapshot`。其中 `payload` 是可写回的主序列化结果，`structured` 是同一值的树形视图。
-- `GameDebugMutationHandler`：接收某个 entity/component 的 `ComponentValueDebugSnapshot`，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
-- `GameDebugDumpRecorder`：订阅 frame publisher，录制期只把完整帧留在内存；停止时把内存里的帧做 keyframe + delta 压缩后写出 `.nkgdump` 供 Web Debug Timeline 回放。
+- `GameDebugSession`：Diagnostics 包中注册一个或多个 `RuntimeContext` / `World`。
+- `GameDebugSnapshotProvider`：Diagnostics 包中从核心公开的 introspection API 收集 modules、procedures、systems、entities、components、skills、buffs，并把每个组件值封装成 `ComponentValueDebugSnapshot`。其中 `payload` 是可写回的主序列化结果，`structured` 是同一值的树形视图。
+- `GameDebugMutationHandler`：Diagnostics 包中接收某个 entity/component 的 `ComponentValueDebugSnapshot`，按 scene 中已有组件类型反序列化，再通过 ECS `SetComponent(Entity, Type, object)` 写回；这是一条通用组件编辑链路，不为 Skill/Buff 编写特化命令。
+- `GameDebugDumpRecorder`：Diagnostics 包中订阅 frame publisher，录制期只把完整帧留在内存；停止时把内存里的帧做 keyframe + delta 压缩后写出 `.nkgdump` 供 Web Debug Timeline 回放。
+- `GameDebugHost`：Hosting 包中的本地 Debug Host，负责启动轻量 loopback HTTP/SSE transport 并暴露 Web Debug 所需的 `/_nkg/debug/*` API。
 
 ### Component Value Snapshot Model
 
@@ -110,9 +113,9 @@ ECS 提供轻量、单线程、引擎无关的数据组合模型：
 
 WebDebug 的 pause / step / frame stream 以 `RuntimeContext.Update` 为唯一帧入口；`World.Update` 和 `Scene.Update` 只是 Runtime 帧内部被模块驱动的执行细节，不单独消费调试步进，也不单独发布 WebDebug frame event。
 
-React/Vite 面板放在 `NKGGameFramework.Hosting.Web`，保持前端依赖与 .NET 核心编译解耦；没有 Node 环境时仍可构建和测试核心框架与 Hosting 包。
+React/Vite 面板放在 `NKGGameFramework.Hosting.Web`，保持前端依赖与 .NET 核心编译解耦；没有 Node 环境时仍可构建和测试核心框架、Diagnostics 包与 Hosting 包。
 
-`GameDebugSession.Register(...)` 只用于显式限定调试范围；没有显式注册时，Hosting 默认读取框架 registry 自动发现的运行态对象。
+`GameDebugSession.Register(...)` 只用于显式限定调试范围；没有显式注册时，Diagnostics 默认读取框架 registry 自动发现的运行态对象。
 宿主游戏只需要启动 `GameDebugHost` 或使用 `GameDebugHostAutoStart`，不需要接入额外 Web 框架；浏览器面板继续按 `/_nkg/debug/*` API 访问同一套调试协议。
 真实宿主通过 `GameDebugHostStartupOptions` 作为普通代码配置项接入，例如 `GameDebugHostAutoStart.TryStartAsync(GameDebugHostStartupOptions.Localhost(5067))`。
 Mutation 默认关闭；本地开发可以通过 `GameDebugHostOptions.EnableMutations`、`GameDebugOptions.EnableMutations` 或 `GameDebugHostStartupOptions.EnableMutations` 显式开启。

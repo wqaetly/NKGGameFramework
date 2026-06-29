@@ -2,7 +2,7 @@ using NKGGameFramework.Core;
 using NKGGameFramework.Ecs;
 using NKGGameFramework.Gameplay;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
 {

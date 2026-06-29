@@ -44,18 +44,18 @@ Managed/LeanCLR 侧继续拥有：
 
 ## Package Boundaries
 
-当前 `NKGGameFramework.Hosting` 同时包含调试领域模型和 HTTP/SSE transport。LeanCLR/Godot 接入时需要把职责边界拆清楚。
+`NKGGameFramework.Diagnostics` 已从 `NKGGameFramework.Hosting` 中拆出，用于承载调试领域模型；`NKGGameFramework.Hosting` 保留为 HTTP/SSE transport 包。LeanCLR/Godot 接入时应引用 Diagnostics，不应依赖 Hosting。
 
 | Package | Responsibility | LeanCLR target |
 | --- | --- | --- |
 | `NKGGameFramework` | 引擎无关 runtime、ECS、Gameplay、Nodes、Serialization、Runtime contracts | 必选 |
 | `NKGGameFramework.Adapter.Godot` | managed contracts，定义 Godot 宿主服务抽象，不引用 GodotSharp | 必选 |
-| `NKGGameFramework.Diagnostics` 或现有 Hosting 中的 domain 子集 | debug DTO、session、snapshot、mutation、dump、control、debug command API | 必选 |
-| `NKGGameFramework.Hosting.Http` 或现有 `GameDebugHost` | loopback HTTP/SSE 默认桌面 transport | 可选，LeanCLR Web/mobile 不启用 |
+| `NKGGameFramework.Diagnostics` | debug DTO、session、snapshot、mutation、dump、control、后续 debug command API | 必选 |
+| `NKGGameFramework.Hosting` | loopback HTTP/SSE 默认桌面 transport | 可选，LeanCLR Web/mobile 不启用 |
 | `leanclr-godot` | GDExtension/native runtime loader、host bridge、Godot transport | 必选 |
 | `NKGGameFramework.Hosting.Web` | React/Vite WebDebug 面板 | 工具链可选，运行时不进 LeanCLR |
 
-重构时优先做命名和依赖边界，不必一次性搬空文件。第一阶段可以保留项目名 `NKGGameFramework.Hosting`，但在代码层把 `GameDebugHost` 和 debug domain API 解耦。
+基础包拆分完成后，后续重点是把 `GameDebugHost` 内的 endpoint dispatch 抽成 transport-independent command API，让 Godot native/Web transport 不需要复用 HTTP path/query 解析。
 
 ## Debug Boundary
 
@@ -260,9 +260,10 @@ Acceptance:
 - NKG sampler 能通过 host services 访问基本资源和场景能力。
 - Web/mobile 编译时不引入 Godot 官方 C# 扩展。
 
-### Phase 3: Debug Domain API Split
+### Phase 3: Debug Command API Split
 
-- 从 `GameDebugHost` 中抽出 transport-independent debug command API。
+- `NKGGameFramework.Diagnostics` 已承载 snapshot、mutation、dump、control 等领域类型。
+- 从 `GameDebugHost` 中继续抽出 transport-independent debug command API。
 - `snapshot`、`control`、`mutation`、`dump` 操作可以在没有 HTTP server 的情况下被调用。
 - `GameDebugJson` 或替代 JSON writer 明确归属 debug domain。
 - 保留现有 HTTP/SSE 行为作为一个 adapter。
@@ -336,7 +337,7 @@ Acceptance:
 ## Open Decisions
 
 - Godot desktop transport 首版使用 native HTTP/SSE 还是 outbound WebSocket。
-- Debug domain 是否从 `NKGGameFramework.Hosting` 拆出独立 `NKGGameFramework.Diagnostics` 项目。
+- Debug command API 第一版是否覆盖全部 dump/playback/analysis endpoint，还是先覆盖 live snapshot/control/mutation。
 - LeanCLR 侧 JSON 输出继续使用 `System.Text.Json`、Odin JSON，还是自研固定 DTO writer。
 - WebDebug 前端是否引入 `DebugTransport` 抽象，统一 HTTP、WebSocket、JS bridge。
 - `.nkgdump` 在 Web/mobile 上的存储、导出和上传路径。

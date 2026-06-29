@@ -2,7 +2,7 @@ using System.Globalization;
 using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed class GameDebugDumpRecorder : IDisposable
 {

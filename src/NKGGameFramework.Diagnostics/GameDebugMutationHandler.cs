@@ -1,6 +1,6 @@
 using NKGGameFramework.Ecs;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed class GameDebugMutationHandler : IGameDebugMutationHandler
 {

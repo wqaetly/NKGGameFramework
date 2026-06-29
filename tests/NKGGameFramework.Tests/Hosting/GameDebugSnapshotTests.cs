@@ -2,7 +2,6 @@ using NKGGameFramework.Core;
 using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
 using NKGGameFramework.Gameplay;
-using NKGGameFramework.Hosting.Diagnostics;
 using OdinSerializer;
 
 namespace NKGGameFramework.Tests.Hosting;

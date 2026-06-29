@@ -1,4 +1,4 @@
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public interface IGameDebugComponentValueSerializer
 {

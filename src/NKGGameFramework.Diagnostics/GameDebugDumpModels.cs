@@ -1,6 +1,6 @@
 using NKGGameFramework.Diagnostics;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed record GameDebugDumpDocument(
     string Format,

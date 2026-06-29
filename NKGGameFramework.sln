@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKGGameFramework.SkillSyste
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKGGameFramework.Hosting", "src\NKGGameFramework.Hosting\NKGGameFramework.Hosting.csproj", "{E176C6B9-87E2-433D-90F0-7CFE0E8B905E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKGGameFramework.Diagnostics", "src\NKGGameFramework.Diagnostics\NKGGameFramework.Diagnostics.csproj", "{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -137,6 +139,18 @@ Global
 		{E176C6B9-87E2-433D-90F0-7CFE0E8B905E}.Release|x64.Build.0 = Release|Any CPU
 		{E176C6B9-87E2-433D-90F0-7CFE0E8B905E}.Release|x86.ActiveCfg = Release|Any CPU
 		{E176C6B9-87E2-433D-90F0-7CFE0E8B905E}.Release|x86.Build.0 = Release|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Debug|x64.Build.0 = Debug|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Debug|x86.Build.0 = Debug|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x64.ActiveCfg = Release|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x64.Build.0 = Release|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x86.ActiveCfg = Release|Any CPU
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -152,5 +166,6 @@ Global
 		{107B0040-AB06-4292-AF16-BA06C9897961} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{9DB5C8F6-3D7D-4B73-8B31-A870147F72AA} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{E176C6B9-87E2-433D-90F0-7CFE0E8B905E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{325625F2-3D16-4C42-BB08-D0B1E0B0DCFC} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

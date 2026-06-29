@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed record GameDebugDumpAnalysisReport(
     string Format,

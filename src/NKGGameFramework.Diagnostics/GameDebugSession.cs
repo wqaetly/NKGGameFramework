@@ -2,7 +2,7 @@ using NKGGameFramework.Core;
 using NKGGameFramework.Diagnostics;
 using NKGGameFramework.Ecs;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 public sealed class GameDebugSession
 {

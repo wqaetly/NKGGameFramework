@@ -1,7 +1,7 @@
 using System.Reflection;
 using OdinSerializer;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 internal static class GameDebugOdinSerializationPolicy
 {

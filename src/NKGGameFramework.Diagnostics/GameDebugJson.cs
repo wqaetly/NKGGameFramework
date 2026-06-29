@@ -1,8 +1,8 @@
 using System.Text.Json;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
-internal static class GameDebugJson
+public static class GameDebugJson
 {
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {

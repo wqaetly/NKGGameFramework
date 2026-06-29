@@ -4,7 +4,7 @@ using System.Reflection;
 using NKGGameFramework.Core;
 using NKGGameFramework.Ecs;
 
-namespace NKGGameFramework.Hosting.Diagnostics;
+namespace NKGGameFramework.Diagnostics;
 
 internal static class GameDebugStructuredComponentValue
 {

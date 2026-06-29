@@ -7,9 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="UniTask" Version="2.5.11" />
-
-    <ProjectReference Include="..\NKGGameFramework.Diagnostics\NKGGameFramework.Diagnostics.csproj" />
     <ProjectReference Include="..\NKGGameFramework\NKGGameFramework.csproj" />
   </ItemGroup>
 
