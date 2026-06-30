@@ -44,4 +44,4 @@ Native build inputs are kept outside this repository by default:
 
 `tools/ensure-godot-4.7.ps1` downloads the official Godot 4.7 stable Windows build and clones/updates official `godot-cpp` when those local cache entries are missing.
 
-The next integration step is to add a managed `GodotHost` facade over the generic object commands and move the plane sample from snapshot-style `NODE2D` commands toward reusable create/transform/visibility commands.
+The next integration step is to add minimal property/Variant commands so the plane sample can move from snapshot-style `NODE2D` commands toward reusable create/transform/visibility commands without losing `Polygon2D` shape and color setup.

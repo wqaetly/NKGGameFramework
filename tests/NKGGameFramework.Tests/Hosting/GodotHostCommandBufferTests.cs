@@ -120,6 +120,23 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal(255, reader.ReadByte());
     }
 
+    [Fact]
+    public void Godot_host_commands_facade_writes_node_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+        var commands = new GodotHostCommands(buffer);
+
+        var node = commands.CreateNode(10, "Node2D", "Player");
+        node.SetParent(GodotObjectId.Root);
+        node.SetTransform2D(12.5, 30.25, rotation: 0.5, scaleX: 2, scaleY: 3);
+        node.SetVisible(true);
+        node.Destroy();
+
+        Assert.Equal(
+            "CREATE_NODE 10 Node2D Player\nSET_PARENT 10 0\nSET_TRANSFORM2D 10 12.5 30.25 0.5 2 3\nSET_VISIBLE 10 1\nDESTROY_OBJECT 10\nEND",
+            buffer.BuildText());
+    }
+
     private static string ReadString(BinaryReader reader)
     {
         var length = reader.ReadInt32();

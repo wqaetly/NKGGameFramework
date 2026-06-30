@@ -42,7 +42,7 @@ C# / LeanCLR gameplay code
 
 - Host API 仍有样例专用部分：输入映射、飞机图形创建、HUD 和 plane-specific frame counters。
 - C# 到 C++ 已从内部 snapshot string 推进为 direct `byte[]` binary command buffer。
-- 已有 Object/Resource registry 基础、第一批通用 Godot object command opcode 和最小 native command applier；还没有完整 Variant marshalling 和生成式 API 覆盖。
+- 已有 Object/Resource registry 基础、第一批通用 Godot object command opcode、最小 native command applier 和 managed facade；还没有完整 Variant marshalling 和生成式 API 覆盖。
 - 没有 Variant marshalling 体系。
 - 没有生成器。
 - 没有信号、方法调用、属性读写、资源加载、场景实例化等通用能力。
@@ -227,7 +227,7 @@ SceneTree
 - 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgGodotDebugTransport`、`NkgGodotObjectRegistry`、`NkgGodotResourceRegistry`、`GodotHostCommandBuffer`、`NkgGodotHost` 已进入 Adapter.Godot。
 - 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、HUD 和视觉策略。
 - 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible` 的最小通路。
-- 待完成：C# 侧提供手写 facade。
+- 已完成部分：C# 侧提供最小 `GodotHostCommands` / `GodotNode` 手写 facade。
 - 待完成：扩大 native 创建类型、属性/方法/Variant 支持，并让打飞机样例改用通用 host API，不再保留 plane-specific host 主流程。
 
 验收：
@@ -310,11 +310,11 @@ SceneTree
 
 ## Recommended Next Step
 
-下一次继续做这条线时，优先补 C# 手写 facade 和样例迁移：
+下一次继续做这条线时，优先补属性/Variant 命令，让样例可以迁移：
 
 ```text
-在 Adapter.Godot managed 侧提供 GodotHost facade，
-让 PlaneGame 输出通用 CreateNode / SetTransform2D / SetVisible 命令。
+补 SetProperty / Color / PackedVector2Array 等最小 Variant payload，
+让 PlaneGame 可以用通用 CreateNode + SetProperty 创建 Polygon2D。
 ```
 
 这一步完成后，当前样例才会从“通过通用中间层承载的项目专用 host”进一步进入“可复用 Godot host binding”的轨道。

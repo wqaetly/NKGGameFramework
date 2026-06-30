@@ -212,6 +212,8 @@ Managed simulation step: fixed 144Hz
 
 当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 direct byte buffer ABI；native host 调用 `StepSessionCommandBytes()` 获得 managed `byte[]`，再由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。`StepSession()` 仍保留 `NKGCB1` base64 string envelope，作为 GDScript smoke 和调试兼容路径。
 
+`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible` 命令。飞机样例当前仍使用 snapshot-style `NODE2D` path，因为 `Polygon2D` 的 polygon/color 还需要后续 `SetProperty` / Variant payload 支持。
+
 ## Build And Verification Flow
 
 ```mermaid
@@ -259,7 +261,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 在 managed 侧补手写 `GodotHost` facade，并让样例逐步输出通用 object command。
+- 补 `SetProperty` / Variant payload，并让样例逐步输出通用 object command。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。
