@@ -16,6 +16,8 @@ constexpr uint8_t SET_TRANSFORM2D_COMMAND = 6;
 constexpr uint8_t SET_VISIBLE_COMMAND = 7;
 constexpr uint8_t SET_PROPERTY_COMMAND = 8;
 constexpr uint8_t CALL_METHOD_COMMAND = 9;
+constexpr uint8_t LOAD_RESOURCE_COMMAND = 10;
+constexpr uint8_t RELEASE_RESOURCE_COMMAND = 11;
 constexpr uint8_t END_COMMAND = 255;
 
 std::string to_std_string(const godot::String& value)
@@ -204,6 +206,12 @@ public:
             value.kind = godot::NkgGodotHostCommandReader::VariantKind::Vector2;
             return read_f64(value.vector2.x) &&
                 read_f64(value.vector2.y);
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::Resource))
+        {
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::Resource;
+            return read_i32(value.resource_id);
         }
 
         return false;
@@ -415,6 +423,37 @@ bool NkgGodotHostCommandReader::read(
             continue;
         }
 
+        if (opcode == LOAD_RESOURCE_COMMAND)
+        {
+            LoadResourceCommand command;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_string(command.path))
+            {
+                return false;
+            }
+
+            if (p_handlers.load_resource)
+            {
+                p_handlers.load_resource(command);
+            }
+            continue;
+        }
+
+        if (opcode == RELEASE_RESOURCE_COMMAND)
+        {
+            ReleaseResourceCommand command;
+            if (!cursor.read_i32(command.id))
+            {
+                return false;
+            }
+
+            if (p_handlers.release_resource)
+            {
+                p_handlers.release_resource(command);
+            }
+            continue;
+        }
+
         return false;
     }
 
@@ -596,6 +635,11 @@ bool NkgGodotHostCommandReader::read(
                 command.value.kind = VariantKind::Vector2;
                 stream >> command.value.vector2.x >> command.value.vector2.y;
             }
+            else if (variant_kind == "RESOURCE")
+            {
+                command.value.kind = VariantKind::Resource;
+                stream >> command.value.resource_id;
+            }
             else
             {
                 return false;
@@ -680,6 +724,11 @@ bool NkgGodotHostCommandReader::read(
                     argument_command.value.kind = VariantKind::Vector2;
                     stream >> argument_command.value.vector2.x >> argument_command.value.vector2.y;
                 }
+                else if (variant_kind == "RESOURCE")
+                {
+                    argument_command.value.kind = VariantKind::Resource;
+                    stream >> argument_command.value.resource_id;
+                }
                 else
                 {
                     return false;
@@ -690,6 +739,28 @@ bool NkgGodotHostCommandReader::read(
             if (p_handlers.call_method)
             {
                 p_handlers.call_method(command);
+            }
+            continue;
+        }
+
+        if (tag == "LOAD_RESOURCE")
+        {
+            LoadResourceCommand command;
+            stream >> command.id >> command.path;
+            if (p_handlers.load_resource)
+            {
+                p_handlers.load_resource(command);
+            }
+            continue;
+        }
+
+        if (tag == "RELEASE_RESOURCE")
+        {
+            ReleaseResourceCommand command;
+            stream >> command.id;
+            if (p_handlers.release_resource)
+            {
+                p_handlers.release_resource(command);
             }
             continue;
         }

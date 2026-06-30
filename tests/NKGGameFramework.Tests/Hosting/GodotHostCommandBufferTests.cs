@@ -170,9 +170,10 @@ public sealed class GodotHostCommandBufferTests
         buffer.SetProperty(12, "count", GodotVariant.FromInteger(42));
         buffer.SetProperty(12, "ratio", GodotVariant.FromFloat(0.625));
         buffer.SetProperty(12, "offset", GodotVariant.FromVector2(new GodotVector2(4, -8)));
+        buffer.SetProperty(12, "texture", GodotVariant.FromResource(new GodotResourceId(77)));
 
         Assert.Equal(
-            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nSET_PROPERTY 11 text STRING SGVsbG8gSFVE\nSET_PROPERTY 12 disabled BOOL 1\nSET_PROPERTY 12 count INTEGER 42\nSET_PROPERTY 12 ratio FLOAT 0.625\nSET_PROPERTY 12 offset VECTOR2 4 -8\nEND",
+            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nSET_PROPERTY 11 text STRING SGVsbG8gSFVE\nSET_PROPERTY 12 disabled BOOL 1\nSET_PROPERTY 12 count INTEGER 42\nSET_PROPERTY 12 ratio FLOAT 0.625\nSET_PROPERTY 12 offset VECTOR2 4 -8\nSET_PROPERTY 12 texture RESOURCE 77\nEND",
             buffer.BuildText());
     }
 
@@ -195,6 +196,7 @@ public sealed class GodotHostCommandBufferTests
         buffer.SetProperty(12, "count", GodotVariant.FromInteger(42));
         buffer.SetProperty(12, "ratio", GodotVariant.FromFloat(0.625));
         buffer.SetProperty(12, "offset", GodotVariant.FromVector2(new GodotVector2(4, -8)));
+        buffer.SetProperty(12, "texture", GodotVariant.FromResource(new GodotResourceId(77)));
 
         using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
 
@@ -248,6 +250,12 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal(4, reader.ReadDouble());
         Assert.Equal(-8, reader.ReadDouble());
 
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(12, reader.ReadInt32());
+        Assert.Equal("texture", ReadString(reader));
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(77, reader.ReadInt32());
+
         Assert.Equal(255, reader.ReadByte());
     }
 
@@ -281,6 +289,37 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal(1, reader.ReadInt32());
         Assert.Equal(3, reader.ReadByte());
         Assert.Equal("Hello method", ReadString(reader));
+        Assert.Equal(255, reader.ReadByte());
+    }
+
+    [Fact]
+    public void Command_buffer_writes_resource_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.LoadResource(new GodotResourceId(77), "res://textures/player.png");
+        buffer.ReleaseResource(new GodotResourceId(77));
+
+        Assert.Equal(
+            "LOAD_RESOURCE 77 res://textures/player.png\nRELEASE_RESOURCE 77\nEND",
+            buffer.BuildText());
+    }
+
+    [Fact]
+    public void Command_buffer_encodes_resource_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.LoadResource(new GodotResourceId(77), "res://textures/player.png");
+        buffer.ReleaseResource(new GodotResourceId(77));
+
+        using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
+
+        Assert.Equal(10, reader.ReadByte());
+        Assert.Equal(77, reader.ReadInt32());
+        Assert.Equal("res://textures/player.png", ReadString(reader));
+        Assert.Equal(11, reader.ReadByte());
+        Assert.Equal(77, reader.ReadInt32());
         Assert.Equal(255, reader.ReadByte());
     }
 

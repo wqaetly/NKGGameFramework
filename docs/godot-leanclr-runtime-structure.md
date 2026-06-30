@@ -182,13 +182,13 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 direct byte buffer，并兼容 `NKGCB1` binary envelope、旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。当前 reader 已识别第一批通用 object command：`CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 direct byte buffer，并兼容 `NKGCB1` binary envelope、旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。当前 reader 已识别第一批通用 object/resource command：`CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod`、`LoadResource`、`ReleaseResource`。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotObjectRegistry` 是 Godot object host registry 基础。它负责按稳定 key 管理 `Object*`，并提供当前 `Node2D` 同步 convenience path：标记每帧可见对象，在安全点 `queue_free` 本帧未出现的节点。飞机样例仍然决定具体创建 `Polygon2D` 的形状、颜色和位置。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`；`LoadResource` / `ReleaseResource` 命令已接入 `ResourceLoader`，并可通过 Resource Variant handle 传入 `SetProperty` / `CallMethod`。`InstantiateScene` 和 typed resource helper 仍是后续扩展点。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod` 的最小对象命令。`CreateNode` 通过 Godot `ClassDB` 实例化 type name；`SetProperty` 和 `CallMethod` 将 command payload 转换为 Godot `Variant` 后统一调用 `Object::set` / `Object::callv`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod`、`LoadResource`、`ReleaseResource` 的最小对象/资源命令。`CreateNode` 通过 Godot `ClassDB` 实例化 type name；`SetProperty` 和 `CallMethod` 将 command payload 转换为 Godot `Variant` 后统一调用 `Object::set` / `Object::callv`。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotInputPump` 和 `NkgGodotStatusFields` 是当前样例 host 复用的 Godot input/status helper。前者负责从 Godot `Input` action 执行回调，后者负责解析 managed `key=value` status 字符串。
 
@@ -217,7 +217,7 @@ Managed simulation step: fixed 144Hz
 
 当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 direct byte buffer ABI；native host 调用 `StepSessionCommandBytes()` 获得 managed `byte[]`，再由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。`StepSession()` 仍保留 `NKGCB1` base64 string envelope，作为 GDScript smoke 和调试兼容路径。
 
-`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 命令。Variant payload 当前覆盖 `Color`、`PackedVector2Array`、`string`、`bool`、`integer`、`float` 和 `Vector2`。飞机样例 visual 输出和 HUD `Label` 已改为通用 object command path；snapshot-style `NODE2D` 仍保留为 reader 兼容路径和底层 command buffer 测试覆盖。
+`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod`、`LoadResource`、`ReleaseResource` 命令。Variant payload 当前覆盖 `Color`、`PackedVector2Array`、`string`、`bool`、`integer`、`float`、`Vector2` 和 resource handle。飞机样例 visual 输出和 HUD `Label` 已改为通用 object command path；snapshot-style `NODE2D` 仍保留为 reader 兼容路径和底层 command buffer 测试覆盖。
 
 ## Build And Verification Flow
 

@@ -71,7 +71,8 @@ public:
         Bool = 4,
         Integer = 5,
         Float = 6,
-        Vector2 = 7
+        Vector2 = 7,
+        Resource = 8
     };
 
     struct Vector2Value
@@ -91,6 +92,7 @@ public:
         int64_t integer = 0;
         double number = 0;
         Vector2Value vector2;
+        int32_t resource_id = 0;
         std::string text;
         std::vector<Vector2Value> vector2_array;
     };
@@ -109,6 +111,17 @@ public:
         std::vector<VariantValue> arguments;
     };
 
+    struct LoadResourceCommand
+    {
+        int32_t id = 0;
+        std::string path;
+    };
+
+    struct ReleaseResourceCommand
+    {
+        int32_t id = 0;
+    };
+
     using FrameHandler = std::function<void(const FrameCommand& p_command)>;
     using Node2DHandler = std::function<void(const Node2DCommand& p_command)>;
     using CreateNodeHandler = std::function<void(const CreateNodeCommand& p_command)>;
@@ -118,6 +131,8 @@ public:
     using SetVisibleHandler = std::function<void(const SetVisibleCommand& p_command)>;
     using SetPropertyHandler = std::function<void(const SetPropertyCommand& p_command)>;
     using CallMethodHandler = std::function<void(const CallMethodCommand& p_command)>;
+    using LoadResourceHandler = std::function<void(const LoadResourceCommand& p_command)>;
+    using ReleaseResourceHandler = std::function<void(const ReleaseResourceCommand& p_command)>;
 
     struct Handlers
     {
@@ -130,6 +145,8 @@ public:
         SetVisibleHandler set_visible;
         SetPropertyHandler set_property;
         CallMethodHandler call_method;
+        LoadResourceHandler load_resource;
+        ReleaseResourceHandler release_resource;
     };
 
     bool read(const std::vector<uint8_t>& p_commands, const Handlers& p_handlers) const;

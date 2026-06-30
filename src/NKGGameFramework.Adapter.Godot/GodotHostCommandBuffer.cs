@@ -16,6 +16,8 @@ public sealed class GodotHostCommandBuffer
     private const byte SetVisibleCommand = 7;
     private const byte SetPropertyCommand = 8;
     private const byte CallMethodCommand = 9;
+    private const byte LoadResourceCommand = 10;
+    private const byte ReleaseResourceCommand = 11;
     private const byte EndCommand = 255;
 
     private readonly MemoryStream _binaryStream;
@@ -169,6 +171,28 @@ public sealed class GodotHostCommandBuffer
         _textBuilder.Append('\n');
     }
 
+    public void LoadResource(GodotResourceId id, string path)
+    {
+        ThrowIfEnded();
+        ValidateToken(path, nameof(path));
+
+        _binaryWriter.Write(LoadResourceCommand);
+        _binaryWriter.Write(id.Value);
+        WriteBinaryString(path);
+
+        _textBuilder.Append(CultureInfo.InvariantCulture, $"LOAD_RESOURCE {id.Value} {path}\n");
+    }
+
+    public void ReleaseResource(GodotResourceId id)
+    {
+        ThrowIfEnded();
+
+        _binaryWriter.Write(ReleaseResourceCommand);
+        _binaryWriter.Write(id.Value);
+
+        _textBuilder.Append(CultureInfo.InvariantCulture, $"RELEASE_RESOURCE {id.Value}\n");
+    }
+
     public string Build()
     {
         EnsureEnded();
@@ -256,6 +280,9 @@ public sealed class GodotHostCommandBuffer
                 _binaryWriter.Write(value.Vector2.X);
                 _binaryWriter.Write(value.Vector2.Y);
                 break;
+            case GodotVariantKind.Resource:
+                _binaryWriter.Write(value.ResourceId.Value);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.");
         }
@@ -274,6 +301,7 @@ public sealed class GodotHostCommandBuffer
             GodotVariantKind.Integer => string.Create(CultureInfo.InvariantCulture, $"INTEGER {value.Integer}"),
             GodotVariantKind.Float => string.Create(CultureInfo.InvariantCulture, $"FLOAT {value.Number:0.###}"),
             GodotVariantKind.Vector2 => string.Create(CultureInfo.InvariantCulture, $"VECTOR2 {value.Vector2.X:0.###} {value.Vector2.Y:0.###}"),
+            GodotVariantKind.Resource => string.Create(CultureInfo.InvariantCulture, $"RESOURCE {value.ResourceId.Value}"),
             _ => throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.")
         };
     }

@@ -155,7 +155,12 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
 {
     constexpr int32_t object_id = 990001;
     constexpr int32_t label_id = 990002;
+    constexpr int32_t resource_id = 990003;
     std::vector<uint8_t> commands;
+
+    write_u8(commands, 10);
+    write_i32(commands, resource_id);
+    write_string(commands, "res://scenes/main.tscn");
 
     write_u8(commands, 3);
     write_i32(commands, object_id);
@@ -212,6 +217,9 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
     write_i32(commands, 1);
     write_u8(commands, 3);
     write_string(commands, "generic method ok");
+
+    write_u8(commands, 11);
+    write_i32(commands, resource_id);
 
     write_u8(commands, 255);
 

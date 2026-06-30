@@ -21,6 +21,18 @@ public sealed class GodotHostCommands
         return new GodotNode(id, this);
     }
 
+    public GodotResourceId LoadResource(int id, string path)
+    {
+        var resourceId = new GodotResourceId(id);
+        _buffer.LoadResource(resourceId, path);
+        return resourceId;
+    }
+
+    public void ReleaseResource(GodotResourceId id)
+    {
+        _buffer.ReleaseResource(id);
+    }
+
     public void Destroy(GodotObjectId id)
     {
         _buffer.DestroyObject(id.Value);

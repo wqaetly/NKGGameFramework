@@ -229,7 +229,7 @@ SceneTree
 - 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgLeanClrManagedBridge`、`NkgGodotDebugTransport`、`NkgGodotObjectRegistry`、`NkgGodotResourceRegistry`、`GodotHostCommandBuffer`、`NkgGodotHost` 已进入 Adapter.Godot。
 - 已完成部分：Godot input action pump 和 status key/value parser 已进入 Adapter.Godot。
 - 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、host/debug context 和生命周期胶水。
-- 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod` 的最小通路。
+- 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod`、`LoadResource`、`ReleaseResource` 的最小通路。
 - 已完成部分：C# 侧提供最小 `GodotHostCommands` / `GodotNode` 手写 facade。
 - 已完成部分：打飞机样例 visual 输出和 HUD `Label` 已改用通用 `CreateNode` / `SetProperty` / `SetTransform2D` 命令，native host 不再负责 plane-specific Polygon2D/Label 创建。
 - 待完成：扩大属性/方法/Variant 支持，并继续收敛剩余 plane-specific status/smoke 状态访问器。
@@ -245,7 +245,7 @@ SceneTree
 
 - 已完成部分：替换当前内部 snapshot string 为 direct `byte[]` binary command buffer。
 - 已完成部分：native reader 将 byte buffer 解码为 typed frame/node command，并保留 `NKGCB1` / 旧文本格式 fallback。
-- 待完成：扩大 command set，支持更多 Godot object/resource 操作。
+- 待完成：扩大 command set，支持 scene instancing 和更多 Godot object/resource 操作。
 - 支持批量提交和主线程 flush。
 - 提供错误诊断：未知对象、类型错误、方法不存在、资源加载失败。
 
@@ -257,7 +257,7 @@ SceneTree
 
 ### Phase 3: Resource And Scene Services
 
-- 支持 `LoadResource(path)`。
+- 支持 `LoadResource(path)`。已完成最小 `LoadResource` / `ReleaseResource` 命令和 Resource Variant handle。
 - 支持 `InstantiateScene(path)`。
 - 支持 `Texture2D`、`PackedScene`、`Material`、`AudioStream`。
 - 支持资源引用计数和释放策略。

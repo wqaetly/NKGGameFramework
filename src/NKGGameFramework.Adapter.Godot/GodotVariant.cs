@@ -10,7 +10,8 @@ public readonly struct GodotVariant
         bool boolean,
         long integer,
         double number,
-        GodotVector2 vector2)
+        GodotVector2 vector2,
+        GodotResourceId resourceId)
     {
         Kind = kind;
         Color = color;
@@ -20,6 +21,7 @@ public readonly struct GodotVariant
         Integer = integer;
         Number = number;
         Vector2 = vector2;
+        ResourceId = resourceId;
     }
 
     public GodotVariantKind Kind { get; }
@@ -38,41 +40,48 @@ public readonly struct GodotVariant
 
     public GodotVector2 Vector2 { get; }
 
+    public GodotResourceId ResourceId { get; }
+
     public static GodotVariant FromColor(GodotColor value)
     {
-        return new GodotVariant(GodotVariantKind.Color, value, null, null, false, 0, 0, default);
+        return new GodotVariant(GodotVariantKind.Color, value, null, null, false, 0, 0, default, default);
     }
 
     public static GodotVariant FromPackedVector2Array(IReadOnlyList<GodotVector2> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return new GodotVariant(GodotVariantKind.PackedVector2Array, default, value, null, false, 0, 0, default);
+        return new GodotVariant(GodotVariantKind.PackedVector2Array, default, value, null, false, 0, 0, default, default);
     }
 
     public static GodotVariant FromString(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return new GodotVariant(GodotVariantKind.String, default, null, value, false, 0, 0, default);
+        return new GodotVariant(GodotVariantKind.String, default, null, value, false, 0, 0, default, default);
     }
 
     public static GodotVariant FromBool(bool value)
     {
-        return new GodotVariant(GodotVariantKind.Bool, default, null, null, value, 0, 0, default);
+        return new GodotVariant(GodotVariantKind.Bool, default, null, null, value, 0, 0, default, default);
     }
 
     public static GodotVariant FromInteger(long value)
     {
-        return new GodotVariant(GodotVariantKind.Integer, default, null, null, false, value, 0, default);
+        return new GodotVariant(GodotVariantKind.Integer, default, null, null, false, value, 0, default, default);
     }
 
     public static GodotVariant FromFloat(double value)
     {
-        return new GodotVariant(GodotVariantKind.Float, default, null, null, false, 0, value, default);
+        return new GodotVariant(GodotVariantKind.Float, default, null, null, false, 0, value, default, default);
     }
 
     public static GodotVariant FromVector2(GodotVector2 value)
     {
-        return new GodotVariant(GodotVariantKind.Vector2, default, null, null, false, 0, 0, value);
+        return new GodotVariant(GodotVariantKind.Vector2, default, null, null, false, 0, 0, value, default);
+    }
+
+    public static GodotVariant FromResource(GodotResourceId value)
+    {
+        return new GodotVariant(GodotVariantKind.Resource, default, null, null, false, 0, 0, default, value);
     }
 }
 
@@ -84,5 +93,6 @@ public enum GodotVariantKind : byte
     Bool = 4,
     Integer = 5,
     Float = 6,
-    Vector2 = 7
+    Vector2 = 7,
+    Resource = 8
 }

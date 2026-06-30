@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -100,6 +101,12 @@ bool NkgGodotHost::apply_commands(
     };
     handlers.call_method = [this, &applied](const NkgGodotHostCommandReader::CallMethodCommand& command) {
         applied = apply_call_method(command) && applied;
+    };
+    handlers.load_resource = [this, &applied](const NkgGodotHostCommandReader::LoadResourceCommand& command) {
+        applied = apply_load_resource(command) && applied;
+    };
+    handlers.release_resource = [this, &applied](const NkgGodotHostCommandReader::ReleaseResourceCommand& command) {
+        applied = apply_release_resource(command) && applied;
     };
 
     const bool read = command_reader.read(p_commands, handlers);
@@ -273,6 +280,29 @@ bool NkgGodotHost::apply_call_method(const NkgGodotHostCommandReader::CallMethod
     return true;
 }
 
+bool NkgGodotHost::apply_load_resource(const NkgGodotHostCommandReader::LoadResourceCommand& p_command)
+{
+    auto* loader = ResourceLoader::get_singleton();
+    if (loader == nullptr)
+    {
+        return false;
+    }
+
+    Ref<Resource> resource = loader->load(String(p_command.path.c_str()));
+    if (!resource.is_valid())
+    {
+        return false;
+    }
+
+    resources.bind_resource(p_command.id, resource);
+    return true;
+}
+
+bool NkgGodotHost::apply_release_resource(const NkgGodotHostCommandReader::ReleaseResourceCommand& p_command)
+{
+    return resources.release_resource(p_command.id);
+}
+
 bool NkgGodotHost::try_convert_variant(const NkgGodotHostCommandReader::VariantValue& p_value, Variant& p_variant) const
 {
     if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Color)
@@ -320,6 +350,18 @@ bool NkgGodotHost::try_convert_variant(const NkgGodotHostCommandReader::VariantV
     if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Vector2)
     {
         p_variant = Vector2(p_value.vector2.x, p_value.vector2.y);
+        return true;
+    }
+
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Resource)
+    {
+        Ref<Resource> resource = resources.get_resource(p_value.resource_id);
+        if (!resource.is_valid())
+        {
+            return false;
+        }
+
+        p_variant = resource;
         return true;
     }
 
