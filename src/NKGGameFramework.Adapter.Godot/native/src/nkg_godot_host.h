@@ -10,7 +10,8 @@
 
 #include "nkg_godot_debug_transport.h"
 #include "nkg_godot_host_command_reader.h"
-#include "nkg_godot_node_registry.h"
+#include "nkg_godot_object_registry.h"
+#include "nkg_godot_resource_registry.h"
 
 namespace godot
 {
@@ -48,7 +49,8 @@ private:
 
     NkgGodotDebugTransport debug_transport;
     NkgGodotHostCommandReader command_reader;
-    NkgGodotNodeRegistry nodes;
+    NkgGodotObjectRegistry objects;
+    NkgGodotResourceRegistry resources;
 };
 
 } // namespace godot

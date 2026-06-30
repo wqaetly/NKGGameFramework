@@ -9,7 +9,7 @@ NKGGameFramework/
   src/
     NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization、轻量 debug DTO/control/frame
     NKGGameFramework.Adapter.Godot/      # Godot managed contracts，不引用 GodotSharp
-      native/src/                       # Godot native adapter：LeanCLR runtime bridge、debug transport、host command reader、host/node registry
+      native/src/                       # Godot native adapter：LeanCLR runtime bridge、debug transport、host command reader、host/object/resource registry
     NKGGameFramework.Hosting/            # HTTP/SSE debug host，本样例不引用
     NKGGameFramework.Diagnostics/        # snapshot provider、mutation、dump、analysis、transport-independent WebDebug endpoint dispatcher
 
@@ -181,9 +181,11 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 direct byte buffer，并兼容 `NKGCB1` binary envelope、旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotNodeRegistry` 是最小 Godot object host registry。它负责按稳定 key 管理 `Node2D`、标记每帧可见对象，并在安全点 `queue_free` 本帧未出现的节点。飞机样例仍然决定具体创建 `Polygon2D` 的形状、颜色和位置。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotObjectRegistry` 是 Godot object host registry 基础。它负责按稳定 key 管理 `Object*`，并提供当前 `Node2D` 同步 convenience path：标记每帧可见对象，在安全点 `queue_free` 本帧未出现的节点。飞机样例仍然决定具体创建 `Polygon2D` 的形状、颜色和位置。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 `Node2D` registry 串成可复用主流程，并通过回调把样例专用的节点创建和更新策略留给 `NkgLeanClrPlaneHost`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
+
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程，并通过回调把样例专用的节点创建和更新策略留给 `NkgLeanClrPlaneHost`。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
@@ -257,7 +259,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 扩展 `NkgGodotHost` 的完整 Object/Resource registry。
+- 扩展 `GodotHostCommandBuffer` / `NkgGodotHostCommandReader` / `NkgGodotHost` 的通用 Godot command set。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

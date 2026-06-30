@@ -49,12 +49,12 @@ bool NkgGodotHost::apply_commands(
     const NodeFactory& p_node_factory,
     const NodeHandler& p_node_handler)
 {
-    nodes.begin_frame();
+    objects.begin_frame();
     const bool read = command_reader.read(
         p_commands,
         p_frame_handler,
         [this, &p_node_factory, &p_node_handler](const Node2DCommand& command) {
-            Node2D* node = nodes.sync_node(make_node_key(command), [&p_node_factory, &command]() {
+            Node2D* node = objects.sync_node2d(make_node_key(command), [&p_node_factory, &command]() {
                 return p_node_factory(command);
             });
             if (node != nullptr)
@@ -68,18 +68,18 @@ bool NkgGodotHost::apply_commands(
         return false;
     }
 
-    nodes.remove_stale_nodes();
+    objects.remove_stale_objects();
     return true;
 }
 
 size_t NkgGodotHost::get_node_count() const
 {
-    return nodes.size();
+    return objects.size();
 }
 
 int32_t NkgGodotHost::get_frame() const
 {
-    return nodes.frame();
+    return objects.frame();
 }
 
 std::string NkgGodotHost::make_node_key(const Node2DCommand& p_command) const
