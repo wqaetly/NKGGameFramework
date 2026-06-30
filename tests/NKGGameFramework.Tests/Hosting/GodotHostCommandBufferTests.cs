@@ -165,9 +165,13 @@ public sealed class GodotHostCommandBufferTests
                 new GodotVector2(-10, 8)
             ]));
         buffer.SetProperty(11, "text", GodotVariant.FromString("Hello HUD"));
+        buffer.SetProperty(12, "disabled", GodotVariant.FromBool(true));
+        buffer.SetProperty(12, "count", GodotVariant.FromInteger(42));
+        buffer.SetProperty(12, "ratio", GodotVariant.FromFloat(0.625));
+        buffer.SetProperty(12, "offset", GodotVariant.FromVector2(new GodotVector2(4, -8)));
 
         Assert.Equal(
-            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nSET_PROPERTY 11 text STRING SGVsbG8gSFVE\nEND",
+            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nSET_PROPERTY 11 text STRING SGVsbG8gSFVE\nSET_PROPERTY 12 disabled BOOL 1\nSET_PROPERTY 12 count INTEGER 42\nSET_PROPERTY 12 ratio FLOAT 0.625\nSET_PROPERTY 12 offset VECTOR2 4 -8\nEND",
             buffer.BuildText());
     }
 
@@ -186,6 +190,10 @@ public sealed class GodotHostCommandBufferTests
                 new GodotVector2(-10, 8)
             ]));
         buffer.SetProperty(11, "text", GodotVariant.FromString("Hello HUD"));
+        buffer.SetProperty(12, "disabled", GodotVariant.FromBool(true));
+        buffer.SetProperty(12, "count", GodotVariant.FromInteger(42));
+        buffer.SetProperty(12, "ratio", GodotVariant.FromFloat(0.625));
+        buffer.SetProperty(12, "offset", GodotVariant.FromVector2(new GodotVector2(4, -8)));
 
         using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
 
@@ -213,6 +221,31 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal("text", ReadString(reader));
         Assert.Equal(3, reader.ReadByte());
         Assert.Equal("Hello HUD", ReadString(reader));
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(12, reader.ReadInt32());
+        Assert.Equal("disabled", ReadString(reader));
+        Assert.Equal(4, reader.ReadByte());
+        Assert.Equal(1, reader.ReadByte());
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(12, reader.ReadInt32());
+        Assert.Equal("count", ReadString(reader));
+        Assert.Equal(5, reader.ReadByte());
+        Assert.Equal(42, reader.ReadInt64());
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(12, reader.ReadInt32());
+        Assert.Equal("ratio", ReadString(reader));
+        Assert.Equal(6, reader.ReadByte());
+        Assert.Equal(0.625, reader.ReadDouble());
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(12, reader.ReadInt32());
+        Assert.Equal("offset", ReadString(reader));
+        Assert.Equal(7, reader.ReadByte());
+        Assert.Equal(4, reader.ReadDouble());
+        Assert.Equal(-8, reader.ReadDouble());
 
         Assert.Equal(255, reader.ReadByte());
     }

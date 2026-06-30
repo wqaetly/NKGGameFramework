@@ -218,6 +218,19 @@ public sealed class GodotHostCommandBuffer
             case GodotVariantKind.String:
                 WriteBinaryString(value.Text ?? throw new ArgumentException("String variant requires text.", nameof(value)));
                 break;
+            case GodotVariantKind.Bool:
+                _binaryWriter.Write((byte)(value.Boolean ? 1 : 0));
+                break;
+            case GodotVariantKind.Integer:
+                _binaryWriter.Write(value.Integer);
+                break;
+            case GodotVariantKind.Float:
+                _binaryWriter.Write(value.Number);
+                break;
+            case GodotVariantKind.Vector2:
+                _binaryWriter.Write(value.Vector2.X);
+                _binaryWriter.Write(value.Vector2.Y);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.");
         }
@@ -232,6 +245,10 @@ public sealed class GodotHostCommandBuffer
                 $"COLOR {value.Color.R:0.###} {value.Color.G:0.###} {value.Color.B:0.###} {value.Color.A:0.###}"),
             GodotVariantKind.PackedVector2Array => FormatPackedVector2Array(value),
             GodotVariantKind.String => FormatString(value),
+            GodotVariantKind.Bool => value.Boolean ? "BOOL 1" : "BOOL 0",
+            GodotVariantKind.Integer => string.Create(CultureInfo.InvariantCulture, $"INTEGER {value.Integer}"),
+            GodotVariantKind.Float => string.Create(CultureInfo.InvariantCulture, $"FLOAT {value.Number:0.###}"),
+            GodotVariantKind.Vector2 => string.Create(CultureInfo.InvariantCulture, $"VECTOR2 {value.Vector2.X:0.###} {value.Vector2.Y:0.###}"),
             _ => throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.")
         };
     }

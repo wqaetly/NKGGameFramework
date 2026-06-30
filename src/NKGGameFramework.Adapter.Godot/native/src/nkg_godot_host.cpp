@@ -3,8 +3,6 @@
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/control.hpp>
-#include <godot_cpp/classes/label.hpp>
-#include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
@@ -233,38 +231,68 @@ bool NkgGodotHost::apply_set_visible(const NkgGodotHostCommandReader::SetVisible
 bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetPropertyCommand& p_command)
 {
     Object* object = objects.get_object(make_object_key(p_command.id));
-    Polygon2D* polygon = Object::cast_to<Polygon2D>(object);
-    if (polygon != nullptr &&
-        p_command.property_name == "color" &&
-        p_command.value.kind == NkgGodotHostCommandReader::VariantKind::Color)
+    if (object == nullptr)
     {
-        polygon->set_color(Color(
-            p_command.value.r,
-            p_command.value.g,
-            p_command.value.b,
-            p_command.value.a));
+        return false;
+    }
+
+    Variant value;
+    if (!try_convert_variant(p_command.value, value))
+    {
+        return false;
+    }
+
+    object->set(StringName(p_command.property_name.c_str()), value);
+    return true;
+}
+
+bool NkgGodotHost::try_convert_variant(const NkgGodotHostCommandReader::VariantValue& p_value, Variant& p_variant) const
+{
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Color)
+    {
+        p_variant = Color(p_value.r, p_value.g, p_value.b, p_value.a);
         return true;
     }
 
-    if (polygon != nullptr &&
-        p_command.property_name == "polygon" &&
-        p_command.value.kind == NkgGodotHostCommandReader::VariantKind::PackedVector2Array)
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::PackedVector2Array)
     {
         PackedVector2Array points;
-        for (const auto& point : p_command.value.vector2_array)
+        for (const auto& point : p_value.vector2_array)
         {
             points.push_back(Vector2(point.x, point.y));
         }
-        polygon->set_polygon(points);
+
+        p_variant = points;
         return true;
     }
 
-    Label* label = Object::cast_to<Label>(object);
-    if (label != nullptr &&
-        p_command.property_name == "text" &&
-        p_command.value.kind == NkgGodotHostCommandReader::VariantKind::String)
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::String)
     {
-        label->set_text(String(p_command.value.text.c_str()));
+        p_variant = String(p_value.text.c_str());
+        return true;
+    }
+
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Bool)
+    {
+        p_variant = p_value.boolean;
+        return true;
+    }
+
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Integer)
+    {
+        p_variant = p_value.integer;
+        return true;
+    }
+
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Float)
+    {
+        p_variant = p_value.number;
+        return true;
+    }
+
+    if (p_value.kind == NkgGodotHostCommandReader::VariantKind::Vector2)
+    {
+        p_variant = Vector2(p_value.vector2.x, p_value.vector2.y);
         return true;
     }
 

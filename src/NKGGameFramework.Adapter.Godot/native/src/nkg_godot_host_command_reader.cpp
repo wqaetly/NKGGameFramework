@@ -103,6 +103,11 @@ public:
         return read_pod(value);
     }
 
+    bool read_i64(int64_t& value)
+    {
+        return read_pod(value);
+    }
+
     bool read_f64(double& value)
     {
         return read_pod(value);
@@ -166,6 +171,38 @@ public:
         {
             value.kind = godot::NkgGodotHostCommandReader::VariantKind::String;
             return read_string(value.text);
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::Bool))
+        {
+            uint8_t boolean = 0;
+            if (!read_u8(boolean))
+            {
+                return false;
+            }
+
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::Bool;
+            value.boolean = boolean != 0;
+            return true;
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::Integer))
+        {
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::Integer;
+            return read_i64(value.integer);
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::Float))
+        {
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::Float;
+            return read_f64(value.number);
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::Vector2))
+        {
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::Vector2;
+            return read_f64(value.vector2.x) &&
+                read_f64(value.vector2.y);
         }
 
         return false;
@@ -505,6 +542,28 @@ bool NkgGodotHostCommandReader::read(
                     return false;
                 }
                 command.value.text.assign(reinterpret_cast<const char*>(decoded.data()), decoded.size());
+            }
+            else if (variant_kind == "BOOL")
+            {
+                int32_t boolean = 0;
+                command.value.kind = VariantKind::Bool;
+                stream >> boolean;
+                command.value.boolean = boolean != 0;
+            }
+            else if (variant_kind == "INTEGER")
+            {
+                command.value.kind = VariantKind::Integer;
+                stream >> command.value.integer;
+            }
+            else if (variant_kind == "FLOAT")
+            {
+                command.value.kind = VariantKind::Float;
+                stream >> command.value.number;
+            }
+            else if (variant_kind == "VECTOR2")
+            {
+                command.value.kind = VariantKind::Vector2;
+                stream >> command.value.vector2.x >> command.value.vector2.y;
             }
             else
             {

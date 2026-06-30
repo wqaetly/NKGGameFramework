@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 #include "nkg_godot_debug_transport.h"
 #include "nkg_godot_host_command_reader.h"
@@ -56,6 +57,7 @@ private:
     bool apply_set_transform2d(const NkgGodotHostCommandReader::SetTransform2DCommand& p_command);
     bool apply_set_visible(const NkgGodotHostCommandReader::SetVisibleCommand& p_command);
     bool apply_set_property(const NkgGodotHostCommandReader::SetPropertyCommand& p_command);
+    bool try_convert_variant(const NkgGodotHostCommandReader::VariantValue& p_value, Variant& p_variant) const;
     Object* create_object_by_type(const std::string& p_type_name) const;
     void release_object(Object* p_object) const;
 

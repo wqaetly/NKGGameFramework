@@ -67,7 +67,11 @@ public:
     {
         Color = 1,
         PackedVector2Array = 2,
-        String = 3
+        String = 3,
+        Bool = 4,
+        Integer = 5,
+        Float = 6,
+        Vector2 = 7
     };
 
     struct Vector2Value
@@ -83,6 +87,10 @@ public:
         double g = 0;
         double b = 0;
         double a = 1;
+        bool boolean = false;
+        int64_t integer = 0;
+        double number = 0;
+        Vector2Value vector2;
         std::string text;
         std::vector<Vector2Value> vector2_array;
     };
