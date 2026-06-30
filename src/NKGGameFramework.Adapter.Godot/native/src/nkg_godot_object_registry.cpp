@@ -13,7 +13,8 @@ void NkgGodotObjectRegistry::begin_frame()
 Object* NkgGodotObjectRegistry::sync_object(
     const std::string& p_key,
     const ObjectFactory& p_factory,
-    const ObjectReleaser& p_releaser)
+    const ObjectReleaser& p_releaser,
+    bool p_remove_when_stale)
 {
     auto found = entries.find(p_key);
     if (found == entries.end())
@@ -24,7 +25,7 @@ Object* NkgGodotObjectRegistry::sync_object(
             return nullptr;
         }
 
-        found = entries.emplace(p_key, Entry{object, sync_frame, p_releaser}).first;
+        found = entries.emplace(p_key, Entry{object, sync_frame, p_releaser, p_remove_when_stale}).first;
     }
 
     found->second.last_seen = sync_frame;
@@ -39,8 +40,13 @@ Node2D* NkgGodotObjectRegistry::sync_node2d(const std::string& p_key, const Node
             return p_factory();
         },
         [](Object* p_object) {
-            static_cast<Node2D*>(p_object)->queue_free();
-        });
+            Node2D* node = Object::cast_to<Node2D>(p_object);
+            if (node != nullptr)
+            {
+                node->queue_free();
+            }
+        },
+        true);
 
     return static_cast<Node2D*>(object);
 }
@@ -56,12 +62,28 @@ Object* NkgGodotObjectRegistry::get_object(const std::string& p_key) const
     return found->second.object;
 }
 
+bool NkgGodotObjectRegistry::release_object(const std::string& p_key)
+{
+    auto found = entries.find(p_key);
+    if (found == entries.end())
+    {
+        return false;
+    }
+
+    if (found->second.object != nullptr && found->second.releaser)
+    {
+        found->second.releaser(found->second.object);
+    }
+    entries.erase(found);
+    return true;
+}
+
 void NkgGodotObjectRegistry::remove_stale_objects()
 {
     std::vector<std::string> dead_keys;
     for (const auto& item : entries)
     {
-        if (item.second.last_seen != sync_frame)
+        if (item.second.remove_when_stale && item.second.last_seen != sync_frame)
         {
             dead_keys.push_back(item.first);
         }
@@ -75,11 +97,7 @@ void NkgGodotObjectRegistry::remove_stale_objects()
             continue;
         }
 
-        if (found->second.object != nullptr && found->second.releaser)
-        {
-            found->second.releaser(found->second.object);
-        }
-        entries.erase(found);
+        release_object(key);
     }
 }
 

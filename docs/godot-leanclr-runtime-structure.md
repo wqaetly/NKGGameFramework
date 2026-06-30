@@ -185,7 +185,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程，并通过回调把样例专用的节点创建和更新策略留给 `NkgLeanClrPlaneHost`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible` 的最小对象命令，同时继续通过回调把样例专用的 snapshot 节点创建和更新策略留给 `NkgLeanClrPlaneHost`。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
@@ -259,7 +259,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 把已进入 `GodotHostCommandBuffer` / `NkgGodotHostCommandReader` 的通用 object command 接到 `NkgGodotHost` applier。
+- 在 managed 侧补手写 `GodotHost` facade，并让样例逐步输出通用 object command。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

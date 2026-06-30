@@ -40,6 +40,8 @@ void NkgLeanClrPlaneHost::_bind_methods()
 
 void NkgLeanClrPlaneHost::_ready()
 {
+    host.set_root(this);
+
     hud_label = memnew(Label);
     hud_label->set_name("Hud");
     hud_label->set_position(Vector2(14, 10));

@@ -7,7 +7,7 @@
 #include <unordered_map>
 
 #include <godot_cpp/classes/node2d.hpp>
-#include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/core/object.hpp>
 
 namespace godot
 {
@@ -20,9 +20,14 @@ public:
     using Node2DFactory = std::function<Node2D*()>;
 
     void begin_frame();
-    Object* sync_object(const std::string& p_key, const ObjectFactory& p_factory, const ObjectReleaser& p_releaser);
+    Object* sync_object(
+        const std::string& p_key,
+        const ObjectFactory& p_factory,
+        const ObjectReleaser& p_releaser,
+        bool p_remove_when_stale = false);
     Node2D* sync_node2d(const std::string& p_key, const Node2DFactory& p_factory);
     Object* get_object(const std::string& p_key) const;
+    bool release_object(const std::string& p_key);
     void remove_stale_objects();
     size_t size() const;
     int32_t frame() const;
@@ -33,6 +38,7 @@ private:
         Object* object = nullptr;
         int32_t last_seen = 0;
         ObjectReleaser releaser;
+        bool remove_when_stale = false;
     };
 
     std::unordered_map<std::string, Entry> entries;
