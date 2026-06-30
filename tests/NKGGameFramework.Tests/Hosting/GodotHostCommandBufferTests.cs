@@ -46,6 +46,18 @@ public sealed class GodotHostCommandBufferTests
     }
 
     [Fact]
+    public void Command_buffer_can_return_raw_binary_payload()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.BeginFrame(12, 30, 4, isTerminal: false);
+
+        var payload = buffer.BuildBytes();
+        Assert.Equal(1, payload[0]);
+        Assert.Equal(255, payload[^1]);
+    }
+
+    [Fact]
     public void Command_buffer_rejects_node_kinds_with_whitespace()
     {
         var buffer = new GodotHostCommandBuffer();

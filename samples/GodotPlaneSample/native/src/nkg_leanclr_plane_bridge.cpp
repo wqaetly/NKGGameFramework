@@ -132,6 +132,18 @@ String NkgLeanClrPlaneBridge::step_session()
     return runtime.invoke_string(step_method);
 }
 
+std::vector<uint8_t> NkgLeanClrPlaneBridge::step_session_command_bytes()
+{
+    std::vector<uint8_t> buffer;
+    if (!ready && !initialize_runtime())
+    {
+        return buffer;
+    }
+
+    runtime.invoke_byte_array(step_bytes_method, buffer);
+    return buffer;
+}
+
 String NkgLeanClrPlaneBridge::handle_debug_request(const String& p_request)
 {
     if (!ready && !initialize_runtime())
@@ -176,12 +188,14 @@ bool NkgLeanClrPlaneBridge::bind_managed_methods()
     press_down_method = runtime.find_static_method(type_name, "PressDown", 0);
     press_fire_method = runtime.find_static_method(type_name, "PressFire", 0);
     step_method = runtime.find_static_method(type_name, "StepSession", 0);
+    step_bytes_method = runtime.find_static_method(type_name, "StepSessionCommandBytes", 0);
     debug_request_method = runtime.find_static_method(type_name, "HandleDebugRequest", 1);
     status_method = runtime.find_static_method(type_name, "GetSessionStatus", 0);
 
     if (reset_method == nullptr || clear_input_method == nullptr || press_left_method == nullptr ||
         press_right_method == nullptr || press_up_method == nullptr || press_down_method == nullptr ||
-        press_fire_method == nullptr || step_method == nullptr || debug_request_method == nullptr || status_method == nullptr)
+        press_fire_method == nullptr || step_method == nullptr || step_bytes_method == nullptr ||
+        debug_request_method == nullptr || status_method == nullptr)
     {
         return runtime.fail("LeanCLR failed to bind PlaneGameBridge session/debug methods.");
     }

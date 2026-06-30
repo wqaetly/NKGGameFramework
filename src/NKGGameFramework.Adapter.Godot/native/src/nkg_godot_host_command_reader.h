@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include <godot_cpp/variant/string.hpp>
 
@@ -31,6 +32,7 @@ public:
     using FrameHandler = std::function<void(const FrameCommand& p_command)>;
     using Node2DHandler = std::function<void(const Node2DCommand& p_command)>;
 
+    bool read(const std::vector<uint8_t>& p_commands, const FrameHandler& p_frame_handler, const Node2DHandler& p_node_handler) const;
     bool read(const String& p_commands, const FrameHandler& p_frame_handler, const Node2DHandler& p_node_handler) const;
 };
 

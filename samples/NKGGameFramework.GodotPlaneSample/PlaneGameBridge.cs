@@ -54,6 +54,19 @@ public static class PlaneGameBridge
         return s_session.CreateSnapshot();
     }
 
+    public static byte[] StepSessionCommandBytes()
+    {
+        s_session ??= CreateStartedSession();
+        s_debug ??= CreateDebugBridge(s_session);
+        if (!s_session.IsGameOver)
+        {
+            s_session.SetInput(ClampAxis(s_moveX), ClampAxis(s_moveY), s_fire);
+            s_session.Update(StepSeconds);
+        }
+
+        return s_session.CreateCommandBytes();
+    }
+
     public static string GetSessionStatus()
     {
         if (s_session is null)

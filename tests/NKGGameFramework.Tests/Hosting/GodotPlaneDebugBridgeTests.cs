@@ -24,6 +24,18 @@ public sealed class GodotPlaneDebugBridgeTests
     }
 
     [Fact]
+    public void Godot_plane_bridge_exposes_direct_command_bytes()
+    {
+        PlaneGameBridge.ResetSession();
+
+        var bytes = PlaneGameBridge.StepSessionCommandBytes();
+
+        Assert.NotEmpty(bytes);
+        Assert.Equal(1, bytes[0]);
+        Assert.Equal(255, bytes[^1]);
+    }
+
+    [Fact]
     public void Godot_bridge_routes_full_webdebug_endpoints_through_diagnostics_dispatcher()
     {
         GameDebugController.Shared.Reset();

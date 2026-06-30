@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <vector>
+
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -32,6 +35,7 @@ public:
     void press_down();
     void press_fire();
     String step_session();
+    std::vector<uint8_t> step_session_command_bytes();
     String handle_debug_request(const String& p_request);
     String get_status();
     String get_last_error() const;
@@ -52,6 +56,7 @@ private:
     const leanclr::metadata::RtMethodInfo* press_down_method = nullptr;
     const leanclr::metadata::RtMethodInfo* press_fire_method = nullptr;
     const leanclr::metadata::RtMethodInfo* step_method = nullptr;
+    const leanclr::metadata::RtMethodInfo* step_bytes_method = nullptr;
     const leanclr::metadata::RtMethodInfo* debug_request_method = nullptr;
     const leanclr::metadata::RtMethodInfo* status_method = nullptr;
     bool ready = false;

@@ -72,7 +72,7 @@ void NkgLeanClrPlaneHost::_process(double p_delta)
     while (step_accumulator >= MANAGED_STEP_SECONDS && guard < 4)
     {
         pump_input();
-        apply_snapshot(bridge->step_session());
+        apply_commands(bridge->step_session_command_bytes());
         step_accumulator -= MANAGED_STEP_SECONDS;
         stepped = true;
         guard++;
@@ -151,7 +151,7 @@ void NkgLeanClrPlaneHost::initialize_bridge()
     }
 
     bridge_status = "native object host ok";
-    apply_snapshot(bridge->step_session());
+    apply_commands(bridge->step_session_command_bytes());
     update_hud();
 }
 
@@ -214,11 +214,11 @@ void NkgLeanClrPlaneHost::pump_input()
     }
 }
 
-void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
+void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
 {
-    if (p_snapshot.is_empty())
+    if (p_commands.empty())
     {
-        bridge_status = "empty snapshot";
+        bridge_status = "empty command buffer";
         return;
     }
 
@@ -226,7 +226,7 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
     bullet_count = 0;
 
     command_reader.read(
-        p_snapshot,
+        p_commands,
         [this](const NkgGodotHostCommandReader::FrameCommand& command) {
             score = command.primary_value;
             lives = command.secondary_value;

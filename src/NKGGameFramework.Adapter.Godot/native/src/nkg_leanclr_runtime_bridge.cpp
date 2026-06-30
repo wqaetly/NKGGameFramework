@@ -10,6 +10,7 @@
 #include "metadata/module_def.h"
 #include "utils/string_builder.h"
 #include "vm/assembly.h"
+#include "vm/rt_array.h"
 #include "vm/class.h"
 #include "vm/method.h"
 #include "vm/rt_string.h"
@@ -201,6 +202,37 @@ String NkgLeanClrRuntimeBridge::invoke_string(const metadata::RtMethodInfo* p_me
     }
 
     return rt_string_to_godot(reinterpret_cast<vm::RtString*>(invoke_result.unwrap()));
+}
+
+bool NkgLeanClrRuntimeBridge::invoke_byte_array(const metadata::RtMethodInfo* p_method, std::vector<uint8_t>& p_output)
+{
+    p_output.clear();
+    if (p_method == nullptr)
+    {
+        return fail("LeanCLR managed byte array method is not bound.");
+    }
+
+    auto invoke_result = vm::Runtime::invoke_array_arguments_with_run_cctor(p_method, nullptr, nullptr);
+    if (invoke_result.is_err())
+    {
+        return fail("LeanCLR managed byte array invocation failed.");
+    }
+
+    auto* array = reinterpret_cast<vm::RtArray*>(invoke_result.unwrap());
+    if (array == nullptr)
+    {
+        return fail("LeanCLR managed byte array invocation returned null.");
+    }
+
+    const int32_t length = vm::Array::get_array_length(array);
+    if (length < 0)
+    {
+        return fail("LeanCLR managed byte array length was invalid.");
+    }
+
+    uint8_t* data = vm::Array::get_array_data_start_as<uint8_t>(array);
+    p_output.assign(data, data + static_cast<size_t>(length));
+    return true;
 }
 
 String NkgLeanClrRuntimeBridge::invoke_string_arg(

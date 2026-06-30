@@ -75,6 +75,16 @@ internal sealed class PlaneGame : IDisposable
 
     public string CreateSnapshot()
     {
+        return CreateCommandBuffer().Build();
+    }
+
+    public byte[] CreateCommandBytes()
+    {
+        return CreateCommandBuffer().BuildBytes();
+    }
+
+    public GodotHostCommandBuffer CreateCommandBuffer()
+    {
         var state = State;
         var commands = new GodotHostCommandBuffer();
         commands.BeginFrame(state.Frame, state.Score, state.Lives, IsGameOver);
@@ -91,7 +101,7 @@ internal sealed class PlaneGame : IDisposable
             AppendEntity(commands, "BULLET", entity, position);
         });
 
-        return commands.Build();
+        return commands;
     }
 
     public void Dispose()

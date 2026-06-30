@@ -31,7 +31,7 @@ C# / LeanCLR gameplay code
 - `NkgLeanClrRuntimeBridge`：通用 LeanCLR 调用器，负责加载 managed assembly、查找并调用 managed 方法。
 - `NkgLeanClrPlaneBridge`：样例专用 facade，负责把 `PlaneGameBridge` 的输入、session 和 debug 方法暴露给 Godot。
 - `GodotDebugEndpointBridge` / `NkgGodotDebugTransport`：Godot debug endpoint 默认策略和 native HTTP/SSE pump 已沉淀到 Adapter.Godot。
-- `GodotHostCommandBuffer` / `NkgGodotHostCommandReader`：managed 侧输出 `NKGCB1` binary command envelope，native 侧解码成 typed frame/node command。
+- `GodotHostCommandBuffer` / `NkgGodotHostCommandReader`：managed 侧输出 direct `byte[]` binary command buffer，native 侧解码成 typed frame/node command；`NKGCB1` string envelope 仅保留为调试兼容路径。
 - `NkgGodotNodeRegistry`：按稳定 key 管理 `Node2D` 生命周期，处理本帧同步和 stale node 清理。
 - `NkgLeanClrPlaneHost`：Godot 场景 root，读取输入、调用 C#、创建和更新 `Polygon2D` / `Label`。
 - `PlaneGameBridge`：C# 侧的输入和 ECS session 入口。
@@ -40,7 +40,7 @@ C# / LeanCLR gameplay code
 当前缺口：
 
 - Host API 仍有样例专用部分：输入映射、飞机图形创建、HUD 和 plane-specific frame counters。
-- C# 到 C++ 已从内部 snapshot string 推进为 `NKGCB1` binary command envelope，但仍借用 managed `string` 作为 LeanCLR 返回外壳。
+- C# 到 C++ 已从内部 snapshot string 推进为 direct `byte[]` binary command buffer。
 - 已有最小 `Node2D` registry；还没有完整 Object/Resource registry。
 - 没有 Variant marshalling 体系。
 - 没有生成器。
@@ -239,9 +239,9 @@ SceneTree
 
 ### Phase 2: Typed Command Buffer
 
-- 已完成部分：替换当前内部 snapshot string 为 `NKGCB1` binary command envelope。
-- 已完成部分：native reader 将 envelope 解码为 typed frame/node command，并保留旧文本格式 fallback。
-- 待完成：把 `string + base64` 外壳替换为 direct byte buffer ABI。
+- 已完成部分：替换当前内部 snapshot string 为 direct `byte[]` binary command buffer。
+- 已完成部分：native reader 将 byte buffer 解码为 typed frame/node command，并保留 `NKGCB1` / 旧文本格式 fallback。
+- 待完成：扩大 command set，支持更多 Godot object/resource 操作。
 - 支持批量提交和主线程 flush。
 - 提供错误诊断：未知对象、类型错误、方法不存在、资源加载失败。
 
@@ -310,12 +310,10 @@ SceneTree
 
 ## Recommended Next Step
 
-下一次继续做这条线时，优先推进 direct byte buffer ABI 和通用 `NkgGodotHost`：
+下一次继续做这条线时，优先推进通用 `NkgGodotHost`：
 
 ```text
-把 GodotHostCommandBuffer 的 NKGCB1 base64 string envelope
-替换成 LeanCLR/native direct byte buffer ABI；
-随后把 NkgLeanClrPlaneHost 拆成通用 NkgGodotHost，
+把 NkgLeanClrPlaneHost 拆成通用 NkgGodotHost，
 让打飞机样例只保留输入、HUD 和飞机形状策略。
 ```
 

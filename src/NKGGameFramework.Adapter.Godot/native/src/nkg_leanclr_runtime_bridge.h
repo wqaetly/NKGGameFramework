@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -28,6 +30,7 @@ public:
 
     bool invoke_void(const leanclr::metadata::RtMethodInfo* p_method);
     String invoke_string(const leanclr::metadata::RtMethodInfo* p_method);
+    bool invoke_byte_array(const leanclr::metadata::RtMethodInfo* p_method, std::vector<uint8_t>& p_output);
     String invoke_string_arg(
         const leanclr::metadata::RtMethodInfo* p_method,
         const String& p_arg,

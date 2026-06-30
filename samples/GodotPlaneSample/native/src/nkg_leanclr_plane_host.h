@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/node2d.hpp>
@@ -43,7 +44,7 @@ private:
     void process_debug_transport();
     void publish_debug_stream_snapshots();
     void pump_input();
-    void apply_snapshot(const String& p_snapshot);
+    void apply_commands(const std::vector<uint8_t>& p_commands);
     void sync_visual(const String& p_kind, int32_t p_id, double p_x, double p_y);
     Polygon2D* create_visual(const String& p_kind, int32_t p_id);
     void update_hud();

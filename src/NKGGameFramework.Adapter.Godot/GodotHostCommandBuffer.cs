@@ -64,6 +64,12 @@ public sealed class GodotHostCommandBuffer
         return BinaryEnvelopePrefix + Convert.ToBase64String(_binaryStream.ToArray());
     }
 
+    public byte[] BuildBytes()
+    {
+        EnsureEnded();
+        return _binaryStream.ToArray();
+    }
+
     public string BuildText()
     {
         EnsureEnded();

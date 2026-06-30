@@ -122,8 +122,8 @@ sequenceDiagram
         Bridge->>Managed: StepSession()
         Managed->>NKG: apply input + RuntimeContext.Update + World.Update
         NKG-->>Managed: ECS player/enemy/bullet state
-        Managed-->>Bridge: "NKGCB1 base64 binary command buffer"
-        Bridge-->>Host: host command buffer envelope
+        Managed-->>Bridge: byte[] binary command buffer
+        Bridge-->>Host: host command buffer
         Host->>Obj: create/update/destroy Polygon2D objects
         Host->>Obj: update HUD Label
     end
@@ -155,7 +155,8 @@ System.Net debug transport
 | `ClearInput()` | 清空本帧输入 |
 | `PressLeft()` / `PressRight()` / `PressUp()` / `PressDown()` | 写入本帧移动输入 |
 | `PressFire()` | 写入本帧开火输入 |
-| `StepSession()` | 推进一帧 NKG runtime/ECS，并返回 Godot host command buffer envelope |
+| `StepSession()` | 推进一帧 NKG runtime/ECS，并返回兼容调试用 `NKGCB1` string envelope |
+| `StepSessionCommandBytes()` | 推进一帧 NKG runtime/ECS，并返回 Godot host command byte buffer |
 | `GetSessionStatus()` | 返回分数、生命和结束状态 |
 | `HandleDebugRequest()` | 处理 native transport 转发的 WebDebug health/snapshot/stream/control/mutation/dump 请求 |
 
@@ -205,7 +206,7 @@ Pace: slow showcase tuning
 Managed simulation step: fixed 144Hz
 ```
 
-当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 `NKGCB1` base64 binary command buffer envelope；native 侧由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。它仍借用 `string` 作为 LeanCLR 返回外壳，下一步应把这层外壳替换成 direct byte buffer ABI 或生成式 host-service binding。
+当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 direct byte buffer ABI；native host 调用 `StepSessionCommandBytes()` 获得 managed `byte[]`，再由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。`StepSession()` 仍保留 `NKGCB1` base64 string envelope，作为 GDScript smoke 和调试兼容路径。
 
 ## Build And Verification Flow
 
@@ -254,7 +255,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 把 `GodotHostCommandBuffer` 的 `NKGCB1` base64 string envelope 替换成 direct byte buffer ABI。
+- 把 plane-specific host 主流程继续拆成通用 `NkgGodotHost`，并扩展完整 Object/Resource registry。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

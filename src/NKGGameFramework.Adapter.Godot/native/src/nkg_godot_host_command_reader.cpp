@@ -138,6 +138,58 @@ namespace godot
 {
 
 bool NkgGodotHostCommandReader::read(
+    const std::vector<uint8_t>& p_commands,
+    const FrameHandler& p_frame_handler,
+    const Node2DHandler& p_node_handler) const
+{
+    BinaryCursor cursor(p_commands);
+    uint8_t opcode = 0;
+    while (cursor.read_u8(opcode))
+    {
+        if (opcode == END_COMMAND)
+        {
+            return true;
+        }
+
+        if (opcode == FRAME_COMMAND)
+        {
+            FrameCommand command;
+            uint8_t terminal = 0;
+            if (!cursor.read_i32(command.frame) ||
+                !cursor.read_i32(command.primary_value) ||
+                !cursor.read_i32(command.secondary_value) ||
+                !cursor.read_u8(terminal))
+            {
+                return false;
+            }
+
+            command.terminal = terminal != 0;
+            p_frame_handler(command);
+            continue;
+        }
+
+        if (opcode == NODE2D_COMMAND)
+        {
+            Node2DCommand command;
+            if (!cursor.read_string(command.kind) ||
+                !cursor.read_i32(command.id) ||
+                !cursor.read_f64(command.x) ||
+                !cursor.read_f64(command.y))
+            {
+                return false;
+            }
+
+            p_node_handler(command);
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+bool NkgGodotHostCommandReader::read(
     const String& p_commands,
     const FrameHandler& p_frame_handler,
     const Node2DHandler& p_node_handler) const
@@ -151,51 +203,7 @@ bool NkgGodotHostCommandReader::read(
             return false;
         }
 
-        BinaryCursor cursor(payload);
-        uint8_t opcode = 0;
-        while (cursor.read_u8(opcode))
-        {
-            if (opcode == END_COMMAND)
-            {
-                return true;
-            }
-
-            if (opcode == FRAME_COMMAND)
-            {
-                FrameCommand command;
-                uint8_t terminal = 0;
-                if (!cursor.read_i32(command.frame) ||
-                    !cursor.read_i32(command.primary_value) ||
-                    !cursor.read_i32(command.secondary_value) ||
-                    !cursor.read_u8(terminal))
-                {
-                    return false;
-                }
-
-                command.terminal = terminal != 0;
-                p_frame_handler(command);
-                continue;
-            }
-
-            if (opcode == NODE2D_COMMAND)
-            {
-                Node2DCommand command;
-                if (!cursor.read_string(command.kind) ||
-                    !cursor.read_i32(command.id) ||
-                    !cursor.read_f64(command.x) ||
-                    !cursor.read_f64(command.y))
-                {
-                    return false;
-                }
-
-                p_node_handler(command);
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
+        return read(payload, p_frame_handler, p_node_handler);
     }
 
     std::istringstream stream(commands);
