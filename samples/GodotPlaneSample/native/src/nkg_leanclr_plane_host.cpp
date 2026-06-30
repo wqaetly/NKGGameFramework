@@ -1,7 +1,6 @@
 #include "nkg_leanclr_plane_host.h"
 
 #include <cstdint>
-#include <sstream>
 #include <vector>
 
 #include <godot_cpp/classes/input.hpp>
@@ -226,60 +225,23 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
     visuals.begin_frame();
     bullet_count = 0;
 
-    std::istringstream stream(to_std_string(p_snapshot));
-    std::string tag;
-    while (stream >> tag)
-    {
-        if (tag == "FRAME" || tag == "STATE")
-        {
-            int32_t frame = 0;
-            int32_t game_over = 0;
-            stream >> frame >> score >> lives >> game_over;
-            continue;
-        }
-
-        if (tag == "NODE2D")
-        {
-            std::string kind;
-            int32_t id = 0;
-            double x = 0;
-            double y = 0;
-            stream >> kind >> id >> x >> y;
-            sync_visual(String(kind.c_str()), id, x, y);
-            if (kind == "PLAYER")
+    command_reader.read(
+        p_snapshot,
+        [this](const NkgGodotHostCommandTextReader::FrameCommand& command) {
+            score = command.primary_value;
+            lives = command.secondary_value;
+        },
+        [this](const NkgGodotHostCommandTextReader::Node2DCommand& command) {
+            sync_visual(String(command.kind.c_str()), command.id, command.x, command.y);
+            if (command.kind == "PLAYER")
             {
-                player_x = x;
+                player_x = command.x;
             }
-            else if (kind == "BULLET")
+            else if (command.kind == "BULLET")
             {
                 bullet_count++;
             }
-            continue;
-        }
-
-        if (tag == "PLAYER" || tag == "ENEMY" || tag == "BULLET")
-        {
-            int32_t id = 0;
-            double x = 0;
-            double y = 0;
-            stream >> id >> x >> y;
-            sync_visual(String(tag.c_str()), id, x, y);
-            if (tag == "PLAYER")
-            {
-                player_x = x;
-            }
-            else if (tag == "BULLET")
-            {
-                bullet_count++;
-            }
-            continue;
-        }
-
-        if (tag == "END")
-        {
-            break;
-        }
-    }
+        });
 
     visuals.remove_stale_nodes();
     if (bullet_count > max_bullet_count)
