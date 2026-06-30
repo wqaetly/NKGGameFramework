@@ -26,6 +26,7 @@ internal sealed class PlaneGame : IDisposable
         _scene.Systems.Add(new BulletSpawnerSystem());
         _scene.Systems.Add(new MovementSystem());
         _scene.Systems.Add(new CollisionSystem());
+        _runtime.RegisterModule(new WorldUpdateModule(_world));
     }
 
     public int Score => State.Score;
@@ -92,16 +93,8 @@ internal sealed class PlaneGame : IDisposable
 
     public void Update(double deltaSeconds)
     {
-        var previousRuntimeFrame = _runtime.Time.Frame;
         var runtimeTime = GameFrameTime.Advance(_runtime.Time, deltaSeconds, deltaSeconds);
         _runtime.Update(in runtimeTime);
-        if (_runtime.Time.Frame == previousRuntimeFrame)
-        {
-            return;
-        }
-
-        var worldTime = GameFrameTime.Advance(_world.Time, deltaSeconds, deltaSeconds);
-        _world.Update(in worldTime);
     }
 
     public string CreateSnapshot()
@@ -240,5 +233,13 @@ internal sealed class PlaneGame : IDisposable
                 new GodotVector2(-6, 0)
             ]
         };
+    }
+
+    private sealed class WorldUpdateModule(World world) : Module, IUpdateModule
+    {
+        public void Update(in GameFrameTime time)
+        {
+            world.Update(in time);
+        }
     }
 }

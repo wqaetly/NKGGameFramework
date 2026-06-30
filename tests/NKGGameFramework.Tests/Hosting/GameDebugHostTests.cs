@@ -554,7 +554,7 @@ public sealed class GameDebugHostTests
             Assert.True(stop.Succeeded);
             Assert.False(stop.State.IsRecording);
 
-            savedPath = stop.State.LastDumpPath;
+            savedPath = await WaitForDumpPathAsync(client);
             Assert.False(string.IsNullOrWhiteSpace(savedPath));
             Assert.True(File.Exists(savedPath));
             Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
@@ -709,12 +709,13 @@ public sealed class GameDebugHostTests
 
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
             Assert.True(stop.Succeeded);
-            Assert.False(string.IsNullOrWhiteSpace(stop.State.LastDumpPath));
-            Assert.True(File.Exists(stop.State.LastDumpPath));
-            Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(stop.State.LastDumpPath));
+            var savedPath = WaitForDumpPath(recorder);
+            Assert.False(string.IsNullOrWhiteSpace(savedPath));
+            Assert.True(File.Exists(savedPath));
+            Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
             Assert.Equal(
                 Path.GetFullPath(dumpDirectory),
-                Path.GetDirectoryName(stop.State.LastDumpPath));
+                Path.GetDirectoryName(savedPath));
             Assert.False(Directory.Exists(fallbackDirectory));
         }
         finally
@@ -765,9 +766,9 @@ public sealed class GameDebugHostTests
             Assert.Equal(0, recording.DroppedFrameCount);
 
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
-            savedPath = stop.State.LastDumpPath;
 
             Assert.True(stop.Succeeded);
+            savedPath = WaitForDumpPath(recorder);
             Assert.False(string.IsNullOrWhiteSpace(savedPath));
             Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
             var playback = recorder.OpenPlayback(new GameDebugDumpPlaybackOpenRequest(savedPath));
@@ -833,9 +834,9 @@ public sealed class GameDebugHostTests
             Assert.Equal(3, recording.DroppedFrameCount);
 
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
-            savedPath = stop.State.LastDumpPath;
 
             Assert.True(stop.Succeeded);
+            savedPath = WaitForDumpPath(recorder);
             Assert.False(string.IsNullOrWhiteSpace(savedPath));
             var playback = recorder.OpenPlayback(new GameDebugDumpPlaybackOpenRequest(savedPath));
 
@@ -1257,6 +1258,53 @@ public sealed class GameDebugHostTests
                 data += line["data: ".Length..];
             }
         }
+    }
+
+    private static async Task<string> WaitForDumpPathAsync(HttpClient client)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!timeout.IsCancellationRequested)
+        {
+            var state = await client.GetFromJsonAsync<GameDebugDumpRecordingState>(
+                "/_nkg/debug/dump/recording",
+                JsonOptions,
+                timeout.Token);
+            if (state?.LastDumpError is { Length: > 0 } error)
+            {
+                throw new InvalidOperationException(error);
+            }
+
+            if (state?.IsFinalizing == false && !string.IsNullOrWhiteSpace(state.LastDumpPath))
+            {
+                return state.LastDumpPath;
+            }
+
+            await Task.Delay(25, timeout.Token);
+        }
+
+        throw new TimeoutException("Timed out waiting for the debug dump recording to finish saving.");
+    }
+
+    private static string WaitForDumpPath(GameDebugDumpRecorder recorder)
+    {
+        var timeoutAt = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < timeoutAt)
+        {
+            var state = recorder.GetState();
+            if (!string.IsNullOrWhiteSpace(state.LastDumpError))
+            {
+                throw new InvalidOperationException(state.LastDumpError);
+            }
+
+            if (!state.IsFinalizing && !string.IsNullOrWhiteSpace(state.LastDumpPath))
+            {
+                return state.LastDumpPath;
+            }
+
+            Thread.Sleep(25);
+        }
+
+        throw new TimeoutException("Timed out waiting for the debug dump recording to finish saving.");
     }
 
 }

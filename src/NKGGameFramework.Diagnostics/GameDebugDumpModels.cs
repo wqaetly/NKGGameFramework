@@ -43,7 +43,9 @@ public sealed record GameDebugDumpRecordingState(
     int FrameCount,
     int DroppedFrameCount,
     string? LastDumpName,
-    string? LastDumpPath);
+    string? LastDumpPath,
+    bool IsFinalizing = false,
+    string? LastDumpError = null);
 
 public sealed record GameDebugDumpRecordingResult(
     bool Succeeded,

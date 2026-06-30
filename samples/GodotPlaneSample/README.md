@@ -20,13 +20,15 @@ Controls:
 Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\samples\GodotPlaneSample\tools\run-godot-plane.ps1
+powershell -ExecutionPolicy Bypass -File .\samples\GodotPlaneSample\run-godot-plane.ps1
 ```
+
+The sample-local script performs a clean managed/native rebuild by default, stages the LeanCLR BCL closure, and then launches the Godot project. Use `-NoClean` for a faster incremental run or `-SkipNativeBuild` when only managed code changed.
 
 Headless verification:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\samples\GodotPlaneSample\tools\run-godot-plane.ps1 -HeadlessCheck
+powershell -ExecutionPolicy Bypass -File .\samples\GodotPlaneSample\run-godot-plane.ps1 -HeadlessCheck
 ```
 
 Expected smoke output includes:

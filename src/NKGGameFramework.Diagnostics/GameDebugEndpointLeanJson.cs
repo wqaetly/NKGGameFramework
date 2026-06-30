@@ -630,6 +630,9 @@ internal static class GameDebugEndpointLeanJson
         AppendNullableJsonString(builder, state.LastDumpName);
         builder.Append(",\"lastDumpPath\":");
         AppendNullableJsonString(builder, state.LastDumpPath);
+        builder.Append(",\"isFinalizing\":").Append(state.IsFinalizing ? "true" : "false")
+            .Append(",\"lastDumpError\":");
+        AppendNullableJsonString(builder, state.LastDumpError);
         builder.Append('}');
     }
 

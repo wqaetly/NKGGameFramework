@@ -18,9 +18,11 @@ public sealed class GameDebugDumpRecorder : IDisposable
     private readonly GameDebugSession? _session;
     private readonly object? _debugStateGate;
     private ActiveDumpRecording? _recording;
+    private FinalizingDumpRecording? _finalizing;
     private ActiveDumpPlayback? _playback;
     private string? _lastDumpName;
     private string? _lastDumpPath;
+    private string? _lastDumpError;
     private bool _disposed;
 
     public GameDebugDumpRecorder(
@@ -86,12 +88,21 @@ public sealed class GameDebugDumpRecorder : IDisposable
                     CreateState());
             }
 
+            if (_finalizing is not null)
+            {
+                return new GameDebugDumpRecordingResult(
+                    false,
+                    "A debug dump recording is still being saved.",
+                    CreateState());
+            }
+
             var now = DateTimeOffset.UtcNow;
             recording = new ActiveDumpRecording(
                 NormalizeDumpName(name, now),
                 ResolveDumpDirectory(dumpDirectory, _options.DumpDirectory),
                 now,
-                NormalizeMaxRecordedFrames(_options.MaxRecordedDumpFrames));
+                NormalizeMaxRecordedFrames(_options.MaxRecordedDumpFrames),
+                NormalizeRecordingFrameStride(_options.DumpRecordingFrameStride));
             _recording = recording;
             _frames.FramePublished += OnFramePublished;
         }
@@ -105,10 +116,19 @@ public sealed class GameDebugDumpRecorder : IDisposable
     private GameDebugDumpRecordingResult Stop()
     {
         ActiveDumpRecording recording;
+        DateTimeOffset endedAt;
         lock (_gate)
         {
             if (_recording is null)
             {
+                if (_finalizing is not null)
+                {
+                    return new GameDebugDumpRecordingResult(
+                        true,
+                        "Debug dump recording is still being saved.",
+                        CreateState());
+                }
+
                 return new GameDebugDumpRecordingResult(
                     false,
                     "No debug dump recording is running.",
@@ -118,16 +138,61 @@ public sealed class GameDebugDumpRecorder : IDisposable
             recording = _recording;
             _recording = null;
             _frames.FramePublished -= OnFramePublished;
+            endedAt = DateTimeOffset.UtcNow;
+            _finalizing = new FinalizingDumpRecording(
+                recording.Name,
+                recording.StartedAt,
+                endedAt,
+                recording.FrameCount,
+                recording.DroppedFrameCount);
+            _lastDumpName = recording.Name;
+            _lastDumpPath = null;
+            _lastDumpError = null;
         }
 
-        var endedAt = DateTimeOffset.UtcNow;
+        _ = Task.Run(() => FinalizeRecording(recording, endedAt));
+
+        return new GameDebugDumpRecordingResult(
+            true,
+            "Debug dump recording is being saved.",
+            GetState());
+    }
+
+    private void FinalizeRecording(ActiveDumpRecording recording, DateTimeOffset endedAt)
+    {
+        try
+        {
+            var path = SaveRecording(recording, endedAt);
+
+            lock (_gate)
+            {
+                _lastDumpName = recording.Name;
+                _lastDumpPath = path;
+                _lastDumpError = null;
+                _finalizing = null;
+            }
+        }
+        catch (Exception exception)
+        {
+            lock (_gate)
+            {
+                _lastDumpError = exception.Message;
+                _finalizing = null;
+            }
+        }
+    }
+
+    private string SaveRecording(ActiveDumpRecording recording, DateTimeOffset endedAt)
+    {
         var recordedFrames = recording.SnapshotFrames();
         var frames = recordedFrames
             .Select(static frame => frame.Message)
             .ToArray();
         var blockFrames = recordedFrames.Any(static frame => frame.Blocks is not null)
             ? recordedFrames
-                .Select(static frame => frame.Blocks)
+                .Select(static (frame, index) => frame.Blocks is null
+                    ? null
+                    : SerializeCapturedFrameBlocks(index, frame.Blocks))
                 .OfType<GameDebugDumpFrameBlocks>()
                 .ToArray()
             : null;
@@ -141,18 +206,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
             recording.DroppedFrameCount,
             frames,
             blockFrames);
-        var path = SaveDump(dump, recording.DumpDirectory);
-
-        lock (_gate)
-        {
-            _lastDumpName = dump.Name;
-            _lastDumpPath = path;
-        }
-
-        return new GameDebugDumpRecordingResult(
-            true,
-            $"Debug dump recording saved to '{path}'.",
-            GetState());
+        return SaveDump(dump, recording.DumpDirectory);
     }
 
     public GameDebugDumpPlaybackManifest OpenPlayback(GameDebugDumpPlaybackOpenRequest request)
@@ -164,7 +218,9 @@ public sealed class GameDebugDumpRecorder : IDisposable
             : Path.GetFullPath(request.Path.Trim());
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new InvalidDataException("No debug dump file has been recorded yet.");
+            throw new InvalidDataException(_finalizing is null
+                ? "No debug dump file has been recorded yet."
+                : "The debug dump recording is still being saved.");
         }
 
         var dump = GameDebugDumpFile.Deserialize(File.ReadAllBytes(path));
@@ -186,7 +242,9 @@ public sealed class GameDebugDumpRecorder : IDisposable
             : Path.GetFullPath(request.Path.Trim());
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new InvalidDataException("No debug dump file has been recorded yet.");
+            throw new InvalidDataException(_finalizing is null
+                ? "No debug dump file has been recorded yet."
+                : "The debug dump recording is still being saved.");
         }
 
         return GameDebugDumpAnalyzer.Analyze(File.ReadAllBytes(path));
@@ -324,6 +382,11 @@ public sealed class GameDebugDumpRecorder : IDisposable
         ActiveDumpRecording recording,
         GameDebugFrameInfo frame)
     {
+        if (!recording.ShouldCaptureFrame())
+        {
+            return;
+        }
+
         var captured = _session is null
             ? CaptureSnapshotFrame(frame)
             : CaptureBlockFrame(frame);
@@ -366,24 +429,41 @@ public sealed class GameDebugDumpRecorder : IDisposable
             frame,
             _snapshots.Capture(CreateDumpCaptureOptions()),
             _control.GetState());
-        var blocks = new GameDebugDumpFrameBlocks(
-            0,
+        var blocks = new CapturedDumpFrameBlocks(
             _session!.GetWorlds()
-                .Select(CaptureWorldBlocks)
+                .Select(CaptureWorldBlockInputs)
                 .ToArray());
 
         return new GameDebugDumpRecordedFrame(message, blocks);
     }
 
-    private static GameDebugDumpWorldBlocks CaptureWorldBlocks(World world)
+    private static CapturedDumpWorldBlocks CaptureWorldBlockInputs(World world)
     {
-        return new GameDebugDumpWorldBlocks(
+        return new CapturedDumpWorldBlocks(
             world.Name,
             world.Scenes
-                .Select(static scene => new GameDebugDumpSceneBlocks(
+                .Select(static scene => new CapturedDumpSceneBlocks(
                     scene.Name,
                     scene.ComponentStoreDumpBlocks
-                        .Select(GameDebugComponentStoreBlockSerializer.Serialize)
+                        .ToArray()))
+                .ToArray());
+    }
+
+    private static GameDebugDumpFrameBlocks SerializeCapturedFrameBlocks(
+        int index,
+        CapturedDumpFrameBlocks frame)
+    {
+        return new GameDebugDumpFrameBlocks(
+            index,
+            frame.Worlds
+                .Select(static world => new GameDebugDumpWorldBlocks(
+                    world.Name,
+                    world.Scenes
+                        .Select(static scene => new GameDebugDumpSceneBlocks(
+                            scene.Name,
+                            scene.ComponentStores
+                                .Select(GameDebugComponentStoreBlockSerializer.Serialize)
+                                .ToArray()))
                         .ToArray()))
                 .ToArray());
     }
@@ -399,6 +479,19 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
     private GameDebugDumpRecordingState CreateState()
     {
+        if (_recording is null && _finalizing is { } finalizing)
+        {
+            return new GameDebugDumpRecordingState(
+                false,
+                finalizing.StartedAt,
+                finalizing.FrameCount,
+                finalizing.DroppedFrameCount,
+                _lastDumpName ?? finalizing.Name,
+                _lastDumpPath,
+                IsFinalizing: true,
+                LastDumpError: _lastDumpError);
+        }
+
         return _recording is { } recording
             ? new GameDebugDumpRecordingState(
                 true,
@@ -406,14 +499,18 @@ public sealed class GameDebugDumpRecorder : IDisposable
                 recording.FrameCount,
                 recording.DroppedFrameCount,
                 _lastDumpName,
-                _lastDumpPath)
+                _lastDumpPath,
+                IsFinalizing: false,
+                LastDumpError: _lastDumpError)
             : new GameDebugDumpRecordingState(
                 false,
                 null,
                 0,
                 0,
                 _lastDumpName,
-                _lastDumpPath);
+                _lastDumpPath,
+                IsFinalizing: false,
+                LastDumpError: _lastDumpError);
     }
 
     private GameDebugSnapshotCaptureOptions CreateDumpCaptureOptions()
@@ -624,21 +721,34 @@ public sealed class GameDebugDumpRecorder : IDisposable
                 "The maximum recorded debug dump frame count must be positive.");
     }
 
+    private static int NormalizeRecordingFrameStride(int value)
+    {
+        return value > 0
+            ? value
+            : throw new ArgumentOutOfRangeException(
+                nameof(GameDebugOptions.DumpRecordingFrameStride),
+                "The debug dump recording frame stride must be positive.");
+    }
+
     private sealed class ActiveDumpRecording
     {
         private readonly Queue<GameDebugDumpRecordedFrame> _frames = [];
         private readonly int? _maxFrames;
+        private readonly int _frameStride;
+        private int _observedFrameCount;
 
         public ActiveDumpRecording(
             string name,
             string dumpDirectory,
             DateTimeOffset startedAt,
-            int? maxFrames)
+            int? maxFrames,
+            int frameStride)
         {
             Name = name;
             DumpDirectory = dumpDirectory;
             StartedAt = startedAt;
             _maxFrames = maxFrames;
+            _frameStride = frameStride;
         }
 
         public string Name { get; }
@@ -650,6 +760,12 @@ public sealed class GameDebugDumpRecorder : IDisposable
         public int FrameCount => _frames.Count;
 
         public int DroppedFrameCount { get; private set; }
+
+        public bool ShouldCaptureFrame()
+        {
+            var observed = Interlocked.Increment(ref _observedFrameCount);
+            return _frameStride <= 1 || (observed - 1) % _frameStride == 0;
+        }
 
         public void AddFrame(GameDebugDumpRecordedFrame frame)
         {
@@ -668,23 +784,32 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
         public IReadOnlyList<GameDebugDumpRecordedFrame> SnapshotFrames()
         {
-            return _frames
-                .Select((frame, index) => frame.Blocks is null
-                    ? frame
-                    : frame with
-                    {
-                        Blocks = frame.Blocks with
-                        {
-                            Index = index,
-                        },
-                    })
-                .ToArray();
+            return _frames.ToArray();
         }
+
     }
 
     private sealed record GameDebugDumpRecordedFrame(
         GameDebugSnapshotMessage Message,
-        GameDebugDumpFrameBlocks? Blocks);
+        CapturedDumpFrameBlocks? Blocks);
+
+    private sealed record FinalizingDumpRecording(
+        string Name,
+        DateTimeOffset StartedAt,
+        DateTimeOffset EndedAt,
+        int FrameCount,
+        int DroppedFrameCount);
+
+    private sealed record CapturedDumpFrameBlocks(
+        CapturedDumpWorldBlocks[] Worlds);
+
+    private sealed record CapturedDumpWorldBlocks(
+        string Name,
+        CapturedDumpSceneBlocks[] Scenes);
+
+    private sealed record CapturedDumpSceneBlocks(
+        string Name,
+        EcsComponentStoreDumpBlock[] ComponentStores);
 
     private sealed class ActiveDumpPlayback
     {

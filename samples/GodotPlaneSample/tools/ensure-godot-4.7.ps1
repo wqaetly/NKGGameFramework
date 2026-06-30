@@ -23,6 +23,50 @@ function Invoke-Checked {
     }
 }
 
+function Resolve-DefaultGodotExe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WorkspaceRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$CacheRoot
+    )
+
+    $candidatePaths = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($env:NKG_GODOT_EXE)) {
+        $candidatePaths.Add($env:NKG_GODOT_EXE)
+    }
+
+    Get-Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessName -like "Godot_v4.7*" -and -not [string]::IsNullOrWhiteSpace($_.Path) } |
+        ForEach-Object {
+            $processDir = Split-Path $_.Path -Parent
+            $candidatePaths.Add((Join-Path $processDir "Godot_v4.7-stable_win64_console.exe"))
+            $candidatePaths.Add($_.Path)
+        }
+
+    $ancestor = $WorkspaceRoot
+    for ($i = 0; $i -lt 4 -and -not [string]::IsNullOrWhiteSpace($ancestor); $i++) {
+        $candidatePaths.Add((Join-Path $ancestor "godot\GodotEngine\Godot_v4.7-stable_win64_console.exe"))
+        $candidatePaths.Add((Join-Path $ancestor "godot\GodotEngine\Godot_v4.7-stable_win64.exe"))
+        $parent = Split-Path $ancestor -Parent
+        if ($parent -eq $ancestor) {
+            break
+        }
+        $ancestor = $parent
+    }
+
+    $candidatePaths.Add((Join-Path (Join-Path $CacheRoot "godot\4.7-stable") "Godot_v4.7-stable_win64_console.exe"))
+
+    foreach ($candidate in $candidatePaths) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path (Join-Path $CacheRoot "godot\4.7-stable") "Godot_v4.7-stable_win64_console.exe"))
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $workspaceRoot = (Resolve-Path (Join-Path $repoRoot "..")).Path
 $cacheRoot = Join-Path $workspaceRoot ".cache"
@@ -34,7 +78,7 @@ if ([string]::IsNullOrWhiteSpace($LeanClrRoot)) {
     $LeanClrRoot = Join-Path $workspaceRoot "leanclr"
 }
 if ([string]::IsNullOrWhiteSpace($GodotExe)) {
-    $GodotExe = Join-Path (Join-Path $cacheRoot "godot\4.7-stable") "Godot_v4.7-stable_win64_console.exe"
+    $GodotExe = Resolve-DefaultGodotExe -WorkspaceRoot $workspaceRoot -CacheRoot $cacheRoot
 }
 
 $GodotCppRoot = [System.IO.Path]::GetFullPath($GodotCppRoot)

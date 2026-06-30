@@ -254,6 +254,8 @@ export interface GameDebugDumpRecordingState {
   droppedFrameCount: number;
   lastDumpName: string | null;
   lastDumpPath: string | null;
+  isFinalizing: boolean;
+  lastDumpError: string | null;
 }
 
 export interface GameDebugDumpRecordingResult {

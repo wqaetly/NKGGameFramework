@@ -51,6 +51,36 @@ public sealed class GodotPlaneDebugBridgeTests
     }
 
     [Fact]
+    public void Godot_plane_bridge_reports_world_update_inside_runtime_frame_metrics()
+    {
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+
+        try
+        {
+            PlaneGameBridge.ResetSession();
+            PlaneGameBridge.StepSession();
+
+            var snapshot = SendJson<GameDebugSnapshotMessage>(
+                "GET",
+                "/_nkg/debug/snapshot?includePayload=false&includeStructured=false&waitForFrame=false");
+            var runtime = Assert.Single(snapshot.Snapshot.Runtimes);
+
+            Assert.Contains(
+                runtime.Modules,
+                module => module.IsUpdateModule &&
+                    module.Type.Name.Contains("WorldUpdateModule", StringComparison.Ordinal));
+            Assert.NotNull(snapshot.Frame.Metrics);
+            Assert.True(snapshot.Frame.Metrics.LogicMilliseconds > 0d);
+        }
+        finally
+        {
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
+    [Fact]
     public void Godot_bridge_routes_full_webdebug_endpoints_through_diagnostics_dispatcher()
     {
         GameDebugController.Shared.Reset();
@@ -104,15 +134,17 @@ public sealed class GodotPlaneDebugBridgeTests
             Assert.True(start.Succeeded);
             Assert.True(start.State.IsRecording);
 
-            PlaneGameBridge.StepSession();
-            PlaneGameBridge.StepSession();
+            for (var index = 0; index < 5; index++)
+            {
+                PlaneGameBridge.StepSession();
+            }
 
             var stop = SendJson<GameDebugDumpRecordingResult>(
                 "POST",
                 "/_nkg/debug/dump/recording",
                 new GameDebugDumpRecordingRequest("stop"));
             Assert.True(stop.Succeeded, stop.Message);
-            savedPath = stop.State.LastDumpPath;
+            savedPath = WaitForDumpPath();
             Assert.False(string.IsNullOrWhiteSpace(savedPath));
             Assert.True(File.Exists(savedPath));
 
@@ -160,6 +192,71 @@ public sealed class GodotPlaneDebugBridgeTests
         }
     }
 
+    [Fact]
+    public void Godot_dump_playback_component_detail_uses_the_requested_frame_block()
+    {
+        GameDebugController.Shared.Reset();
+        GameDebugFramePublisher.Shared.Reset();
+        string? savedPath = null;
+
+        try
+        {
+            PlaneGameBridge.ResetSession();
+            PlaneGameBridge.StepSession();
+
+            var snapshot = SendJson<GameDebugSnapshotMessage>(
+                "GET",
+                "/_nkg/debug/snapshot?includePayload=false&includeStructured=false&waitForFrame=false");
+            var target = FindEnemyPositionComponent(snapshot);
+
+            var start = SendJson<GameDebugDumpRecordingResult>(
+                "POST",
+                "/_nkg/debug/dump/recording",
+                new GameDebugDumpRecordingRequest("start", "godot-position-frame-test"));
+            Assert.True(start.Succeeded);
+
+            for (var index = 0; index < 9; index++)
+            {
+                PlaneGameBridge.StepSession();
+            }
+
+            var stop = SendJson<GameDebugDumpRecordingResult>(
+                "POST",
+                "/_nkg/debug/dump/recording",
+                new GameDebugDumpRecordingRequest("stop"));
+            Assert.True(stop.Succeeded, stop.Message);
+            savedPath = WaitForDumpPath();
+            Assert.False(string.IsNullOrWhiteSpace(savedPath));
+
+            var playback = SendJson<GameDebugDumpPlaybackManifest>(
+                "POST",
+                "/_nkg/debug/dump/playback/upload",
+                File.ReadAllBytes(savedPath));
+            Assert.True(playback.Frames.Count >= 3);
+
+            var first = GetPlaybackComponent(playback.Id, frameIndex: 0, target);
+            var last = GetPlaybackComponent(playback.Id, playback.Frames.Count - 1, target);
+            var firstX = ReadStructuredNumber(first, "X");
+            var firstY = ReadStructuredNumber(first, "Y");
+            var lastX = ReadStructuredNumber(last, "X");
+            var lastY = ReadStructuredNumber(last, "Y");
+
+            Assert.True(
+                Math.Abs(lastX - firstX) > 0.000001d || Math.Abs(lastY - firstY) > 0.000001d,
+                $"Expected enemy Position to change across dump frames, but first=({firstX},{firstY}) last=({lastX},{lastY}).");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(savedPath) && File.Exists(savedPath))
+            {
+                File.Delete(savedPath);
+            }
+
+            GameDebugController.Shared.Reset();
+            GameDebugFramePublisher.Shared.Reset();
+        }
+    }
+
     private static MutableComponentTarget FindMutableComponent(GameDebugSnapshotMessage snapshot)
     {
         foreach (var world in snapshot.Snapshot.Worlds)
@@ -180,6 +277,86 @@ public sealed class GodotPlaneDebugBridgeTests
         }
 
         throw new InvalidOperationException("The Godot plane snapshot did not expose a component payload to mutate.");
+    }
+
+    private static MutableComponentTarget FindEnemyPositionComponent(GameDebugSnapshotMessage snapshot)
+    {
+        foreach (var world in snapshot.Snapshot.Worlds)
+        {
+            foreach (var scene in world.Scenes)
+            {
+                foreach (var entity in scene.Entities)
+                {
+                    var hasEnemyTag = entity.Components.Any(static component =>
+                        StringComparer.Ordinal.Equals(component.Type.Name, "EnemyTag"));
+                    if (!hasEnemyTag)
+                    {
+                        continue;
+                    }
+
+                    var position = entity.Components.SingleOrDefault(static component =>
+                        StringComparer.Ordinal.Equals(component.Type.Name, "Position"));
+                    if (position is not null)
+                    {
+                        return new MutableComponentTarget(world, scene, entity, position);
+                    }
+                }
+            }
+        }
+
+        throw new InvalidOperationException("The Godot plane snapshot did not expose an enemy Position component.");
+    }
+
+    private static ComponentDebugSnapshot GetPlaybackComponent(
+        string playbackId,
+        int frameIndex,
+        MutableComponentTarget target)
+    {
+        return SendJson<ComponentDebugSnapshot>(
+            "GET",
+            "/_nkg/debug/dump/playback/component" +
+            $"?playbackId={playbackId}" +
+            $"&frameIndex={frameIndex}" +
+            $"&worldName={Uri.EscapeDataString(target.World.Name)}" +
+            $"&sceneName={Uri.EscapeDataString(target.Scene.Name)}" +
+            $"&entityId={target.Entity.Id}" +
+            $"&componentTypeFullName={Uri.EscapeDataString(target.Component.Type.FullName)}" +
+            $"&componentAssemblyName={Uri.EscapeDataString(target.Component.Type.AssemblyName)}");
+    }
+
+    private static double ReadStructuredNumber(ComponentDebugSnapshot component, string name)
+    {
+        var child = FindChild(component.Value.Structured!, name);
+        return double.Parse(child.Value!, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static ComponentValueDebugNode FindChild(ComponentValueDebugNode node, string name)
+    {
+        return node.Children.Single(child => StringComparer.Ordinal.Equals(child.Name, name));
+    }
+
+    private static string WaitForDumpPath()
+    {
+        var timeoutAt = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < timeoutAt)
+        {
+            var state = SendJson<GameDebugDumpRecordingState>(
+                "GET",
+                "/_nkg/debug/dump/recording");
+            if (!string.IsNullOrWhiteSpace(state.LastDumpError))
+            {
+                throw new InvalidOperationException(state.LastDumpError);
+            }
+
+            if (!state.IsFinalizing && !string.IsNullOrWhiteSpace(state.LastDumpPath))
+            {
+                return state.LastDumpPath;
+            }
+
+            Thread.Sleep(25);
+        }
+
+        throw new TimeoutException("Timed out waiting for the debug dump recording to finish saving.");
     }
 
     private static T SendJson<T>(string method, string target, object? body = null)

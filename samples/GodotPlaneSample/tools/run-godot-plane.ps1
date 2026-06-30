@@ -4,7 +4,8 @@ param(
     [string]$GodotCppRoot,
     [string]$LeanClrRoot,
     [switch]$HeadlessCheck,
-    [switch]$SkipNativeBuild
+    [switch]$SkipNativeBuild,
+    [switch]$Clean
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,14 +36,52 @@ $toolInfo = (& powershell @ensureArgs | Select-Object -Last 1) | ConvertFrom-Jso
 $GodotExe = $toolInfo.GodotExe
 $GodotCppRoot = $toolInfo.GodotCppRoot
 $LeanClrRoot = $toolInfo.LeanClrRoot
+if ([string]::IsNullOrWhiteSpace($GodotExe)) {
+    throw "Godot executable could not be resolved. Pass -GodotExe or set NKG_GODOT_EXE."
+}
+if ([string]::IsNullOrWhiteSpace($GodotCppRoot)) {
+    throw "godot-cpp root could not be resolved. Pass -GodotCppRoot."
+}
+if ([string]::IsNullOrWhiteSpace($LeanClrRoot)) {
+    throw "LeanCLR root could not be resolved. Pass -LeanClrRoot."
+}
 
-dotnet build $managedProject -c $Configuration
+if ($Clean) {
+    dotnet clean $managedProject -c $Configuration
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+$buildArgs = @("build", $managedProject, "-c", $Configuration)
+if ($Clean) {
+    $buildArgs += "--no-incremental"
+}
+dotnet @buildArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
 if (-not $SkipNativeBuild) {
-    powershell -ExecutionPolicy Bypass -File $nativeBuildScript -Configuration $Configuration -GodotExe $GodotExe -GodotCppRoot $GodotCppRoot -LeanClrRoot $LeanClrRoot
+    $nativeBuildArgs = @(
+        "-ExecutionPolicy", "Bypass",
+        "-File", $nativeBuildScript,
+        "-Configuration", $Configuration
+    )
+    if (-not [string]::IsNullOrWhiteSpace($GodotExe)) {
+        $nativeBuildArgs += @("-GodotExe", $GodotExe)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($GodotCppRoot)) {
+        $nativeBuildArgs += @("-GodotCppRoot", $GodotCppRoot)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LeanClrRoot)) {
+        $nativeBuildArgs += @("-LeanClrRoot", $LeanClrRoot)
+    }
+    if ($Clean) {
+        $nativeBuildArgs += "-Clean"
+    }
+
+    powershell @nativeBuildArgs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

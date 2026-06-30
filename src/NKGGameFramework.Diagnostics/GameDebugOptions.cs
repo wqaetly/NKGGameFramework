@@ -10,4 +10,6 @@ public sealed class GameDebugOptions
         "debug-dumps");
 
     public int? MaxRecordedDumpFrames { get; set; }
+
+    public int DumpRecordingFrameStride { get; set; } = 1;
 }

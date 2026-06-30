@@ -137,17 +137,20 @@ type ComponentDetailEntry =
       status: 'loading';
       entity?: EntityDebugSnapshot;
       component?: ComponentDebugSnapshot;
+      dumpKey?: string;
     }
   | {
       status: 'ready';
       entity: EntityDebugSnapshot;
       component: ComponentDebugSnapshot;
+      dumpKey?: string;
     }
   | {
       status: 'error';
       message: string;
       entity?: EntityDebugSnapshot;
       component?: ComponentDebugSnapshot;
+      dumpKey?: string;
     };
 
 type TimelineFrameSample = {
@@ -220,6 +223,8 @@ const LEGACY_FRAME_POLLING_STORAGE_KEY = 'nkg.webdebug.framePolling';
 const LEGACY_AUTO_REFRESH_STORAGE_KEY = 'nkg.webdebug.autoRefresh';
 const STEP_SNAPSHOT_TIMEOUT_MS = 5000;
 const STEP_SNAPSHOT_POLL_INTERVAL_MS = 50;
+const DUMP_FINALIZE_TIMEOUT_MS = 120000;
+const DUMP_FINALIZE_POLL_INTERVAL_MS = 250;
 const TIMELINE_MIN_ZOOM = 1;
 const TIMELINE_MAX_ZOOM = 16;
 const TIMELINE_ZOOM_STEP = 0.5;
@@ -309,6 +314,7 @@ export function App() {
   const dumpAnalysisFileInputRef = useRef<HTMLInputElement | null>(null);
   const dumpModeRef = useRef(false);
   const toastTimeoutRef = useRef<number | null>(null);
+  const dumpDetailAbortRef = useRef<AbortController | null>(null);
   const refreshRevisionRef = useRef(0);
   const nextInspectorIdRef = useRef(1);
   const dumpFrames = dump?.frames ?? [];
@@ -335,6 +341,7 @@ export function App() {
       if (toastTimeoutRef.current !== null) {
         window.clearTimeout(toastTimeoutRef.current);
       }
+      dumpDetailAbortRef.current?.abort();
     };
   }, []);
 
@@ -431,13 +438,20 @@ export function App() {
     const loadKey = dumpRequest
       ? `${detailKey}:dump:${dumpRequest.id}:${dumpRequest.frameIndex}`
       : detailKey;
+    const detailDumpKey = dumpRequest
+      ? `${dumpRequest.id}:${dumpRequest.frameIndex}`
+      : undefined;
 
     if (componentDetailLoadKeysRef.current.has(loadKey)) {
       return;
     }
 
     const currentEntry = componentDetailsRef.current[detailKey];
-    if (!options.force && currentEntry?.status === 'ready') {
+    if (
+      !options.force &&
+      currentEntry?.status === 'ready' &&
+      currentEntry.dumpKey === detailDumpKey
+    ) {
       return;
     }
 
@@ -449,6 +463,7 @@ export function App() {
           status: 'loading',
           entity: currentEntry?.entity,
           component: currentEntry?.component,
+          dumpKey: detailDumpKey,
         },
       }));
     }
@@ -495,7 +510,7 @@ export function App() {
         setComponentDetails((current) => ({
           ...current,
           [detailKey]: {
-            ...stabilizeComponentDetailEntry(current[detailKey], entity, component),
+            ...stabilizeComponentDetailEntry(current[detailKey], entity, component, detailDumpKey),
           },
         }));
         return;
@@ -530,7 +545,7 @@ export function App() {
       setComponentDetails((current) => ({
         ...current,
         [detailKey]: {
-          ...stabilizeComponentDetailEntry(current[detailKey], entity, component),
+          ...stabilizeComponentDetailEntry(current[detailKey], entity, component, detailDumpKey),
         },
       }));
     } catch (caught) {
@@ -556,6 +571,7 @@ export function App() {
           message,
           entity: current[detailKey]?.entity,
           component: current[detailKey]?.component,
+          dumpKey: detailDumpKey,
         },
       }));
     } finally {
@@ -563,13 +579,20 @@ export function App() {
     }
   }, []);
 
-  const reloadInspectorDetails = useCallback((force = false, silent = false) => {
+  const reloadInspectorDetails = useCallback((force = false, silent = false, signal?: AbortSignal) => {
     for (const panel of componentInspectorsRef.current) {
       if (panel.target) {
-        void loadComponentDetail(panel.target, { force, silent });
+        void loadComponentDetail(panel.target, { force, silent, signal });
       }
     }
   }, [loadComponentDetail]);
+
+  const reloadDumpInspectorDetails = useCallback((force = true, silent = true) => {
+    dumpDetailAbortRef.current?.abort();
+    const controller = new AbortController();
+    dumpDetailAbortRef.current = controller;
+    reloadInspectorDetails(force, silent, controller.signal);
+  }, [reloadInspectorDetails]);
 
   const reloadComponentDetail = useCallback((target: ComponentInspectorTarget) => {
     void loadComponentDetail(target, { force: true });
@@ -579,6 +602,7 @@ export function App() {
     previousEntry: ComponentDetailEntry | undefined,
     entity: EntityDebugSnapshot,
     component: ComponentDebugSnapshot,
+    dumpKey?: string,
   ) => {
     const previousReady = previousEntry?.status === 'ready' ? previousEntry : null;
     return {
@@ -589,6 +613,7 @@ export function App() {
       component: previousReady && areComponentSnapshotsEqual(previousReady.component, component)
         ? previousReady.component
         : component,
+      dumpKey,
     };
   }, []);
 
@@ -690,7 +715,7 @@ export function App() {
         commitSnapshotMessage(message, {
           clearComponentDetails: dumpFrameIndex === 0,
         });
-        reloadInspectorDetails(true, true);
+        reloadDumpInspectorDetails(true, true);
       })
       .catch((caught) => {
         if (caught instanceof DOMException && caught.name === 'AbortError') {
@@ -702,7 +727,7 @@ export function App() {
       });
 
     return () => controller.abort();
-  }, [commitSnapshotMessage, debugApiBaseUrl, dump, dumpFrameIndex, dumpMode, reloadInspectorDetails]);
+  }, [commitSnapshotMessage, debugApiBaseUrl, dump, dumpFrameIndex, dumpMode, reloadDumpInspectorDetails]);
 
   const scenes = useMemo(() => flattenScenes(snapshot), [snapshot]);
   const activeSceneEntry = useMemo(
@@ -963,9 +988,12 @@ export function App() {
       return;
     }
 
+    const nextFrameIndex = Math.min(Math.max(0, frameIndex), dumpFrames.length - 1);
+    dumpFrameIndexRef.current = nextFrameIndex;
     setDumpPlaying(false);
-    setDumpFrameIndex(Math.min(Math.max(0, frameIndex), dumpFrames.length - 1));
-  }, [dumpFrames.length, dumpMode]);
+    setDumpFrameIndex(nextFrameIndex);
+    reloadDumpInspectorDetails(true, true);
+  }, [dumpFrames.length, dumpMode, reloadDumpInspectorDetails]);
 
   const clearDumpPlayback = useCallback(() => {
     dumpModeRef.current = false;
@@ -1127,6 +1155,34 @@ export function App() {
     }
   }, [loadDumpAnalysisFile]);
 
+  const waitForDumpRecordingFinalized = useCallback(async (signal?: AbortSignal) => {
+    const startedAt = Date.now();
+
+    while (true) {
+      signal?.throwIfAborted();
+      const state = await fetchDumpRecordingState(signal);
+      setDumpRecording(state);
+
+      if (state.lastDumpError) {
+        throw new Error(state.lastDumpError);
+      }
+
+      if (!state.isFinalizing) {
+        if (!state.lastDumpPath) {
+          throw new Error('Dump recording finished without a dump file path.');
+        }
+
+        return state;
+      }
+
+      if (Date.now() - startedAt >= DUMP_FINALIZE_TIMEOUT_MS) {
+        throw new Error('Timed out while waiting for the dump recording to finish saving.');
+      }
+
+      await delay(DUMP_FINALIZE_POLL_INTERVAL_MS);
+    }
+  }, []);
+
   const toggleDumpRecording = useCallback(async () => {
     const command = dumpRecording?.isRecording ? 'stop' : 'start';
     setDumpBusy(true);
@@ -1149,18 +1205,17 @@ export function App() {
       }
 
       if (command === 'stop') {
-        if (!result.state.lastDumpPath) {
-          setError('Dump recording finished without a dump file path.');
-          return;
-        }
+        const finalizedState = result.state.lastDumpPath && !result.state.isFinalizing
+          ? result.state
+          : await waitForDumpRecordingFinalized();
 
         const playback = await openDumpPlayback({
-          path: result.state.lastDumpPath,
+          path: finalizedState.lastDumpPath,
         });
         loadDumpPlayback(playback);
         showToast(
           'Dump saved',
-          result.state.lastDumpPath ?? result.message,
+          finalizedState.lastDumpPath ?? result.message,
         );
       } else {
         await refresh(undefined, {
@@ -1172,7 +1227,14 @@ export function App() {
     } finally {
       setDumpBusy(false);
     }
-  }, [clearDumpPlayback, dumpRecording?.isRecording, loadDumpPlayback, refresh, showToast]);
+  }, [
+    clearDumpPlayback,
+    dumpRecording?.isRecording,
+    loadDumpPlayback,
+    refresh,
+    showToast,
+    waitForDumpRecordingFinalized,
+  ]);
 
   const dockModel = useMemo<DockWorkspaceModel>(
     () => ({
@@ -1228,6 +1290,7 @@ export function App() {
     ],
   );
 
+  const isDumpFinalizing = dumpRecording?.isFinalizing === true;
   const playbackPaused = dumpMode ? !dumpPlaying : control?.isPaused ?? false;
   const playbackCommand: GameDebugControlCommand = playbackPaused ? 'play' : 'pause';
   const playbackLabel = playbackPaused ? 'Play' : 'Pause';
@@ -1315,14 +1378,18 @@ export function App() {
             Analyze Dump
           </button>
           <button
-            className={dumpRecording?.isRecording ? 'icon-button active recording' : 'icon-button'}
+            className={dumpRecording?.isRecording || isDumpFinalizing ? 'icon-button active recording' : 'icon-button'}
             type="button"
             onClick={() => void toggleDumpRecording()}
-            disabled={dumpBusy}
-            title={dumpRecording?.isRecording ? 'Stop dump recording' : 'Start dump recording'}
+            disabled={dumpBusy || isDumpFinalizing}
+            title={dumpRecording?.isRecording
+              ? 'Stop dump recording'
+              : isDumpFinalizing
+                ? 'Saving dump recording'
+                : 'Start dump recording'}
           >
             {dumpRecording?.isRecording ? <Square size={16} /> : <Circle size={16} />}
-            {dumpRecording?.isRecording ? 'Stop Rec' : 'Record'}
+            {dumpRecording?.isRecording ? 'Stop Rec' : isDumpFinalizing ? 'Saving' : 'Record'}
           </button>
           {dumpMode ? (
             <button

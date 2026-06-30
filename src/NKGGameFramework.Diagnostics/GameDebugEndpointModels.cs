@@ -26,6 +26,8 @@ public sealed class GameDebugEndpointDispatcherOptions
 
     public int? MaxRecordedDumpFrames { get; set; }
 
+    public int DumpRecordingFrameStride { get; set; } = 1;
+
     public GameDebugSession? Session { get; set; }
 
     public GameDebugController? Control { get; set; }

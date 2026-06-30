@@ -3,7 +3,8 @@ param(
     [string]$GodotCppRoot,
     [string]$LeanClrRoot,
     [string]$GodotExe,
-    [string]$BuildDir
+    [string]$BuildDir,
+    [switch]$Clean
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +46,25 @@ function Resolve-CMakePath {
     return $candidate.FullName
 }
 
+function Assert-SafeCleanPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullRoot = [System.IO.Path]::GetFullPath($AllowedRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    if (-not ($fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $fullPath.StartsWith($fullRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
+        throw "Refusing to clean build directory outside '$fullRoot': $fullPath"
+    }
+
+    return $fullPath
+}
+
 $nativeRoot = $PSScriptRoot
 $projectRoot = (Resolve-Path (Join-Path $nativeRoot "..")).Path
 $repoRoot = (Resolve-Path (Join-Path $nativeRoot "..\..\..")).Path
@@ -68,6 +88,12 @@ $GodotExe = $toolInfo.GodotExe
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "out\godot-plane-gdextension"
+}
+
+if ($Clean -and (Test-Path $BuildDir)) {
+    $safeBuildDir = Assert-SafeCleanPath -Path $BuildDir -AllowedRoot (Join-Path $repoRoot "out")
+    Write-Host "Cleaning native build directory $safeBuildDir"
+    Remove-Item -LiteralPath $safeBuildDir -Recurse -Force
 }
 
 $apiDir = Join-Path (Split-Path $repoRoot -Parent) ".cache\godot-api-4.7"

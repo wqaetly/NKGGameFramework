@@ -35,6 +35,7 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
             debugOptions.DumpDirectory = options.DumpDirectory;
         }
         debugOptions.MaxRecordedDumpFrames = options.MaxRecordedDumpFrames;
+        debugOptions.DumpRecordingFrameStride = options.DumpRecordingFrameStride;
 
         var serializer = options.ComponentValueSerializer ?? new OdinGameDebugComponentValueSerializer();
         _snapshots = options.Snapshots ?? new GameDebugSnapshotProvider(session, serializer);
