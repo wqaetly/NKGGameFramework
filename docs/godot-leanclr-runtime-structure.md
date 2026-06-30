@@ -30,6 +30,8 @@ NKGGameFramework/
         CMakeLists.txt                   # 构建 native bridge
         build-gdextension.ps1
         src/
+          nkg_debug_http_server.*        # desktop loopback HTTP/SSE server
+          nkg_godot_debug_transport.*    # Godot 主线程 debug request pump 和 managed text bridge 转发
           nkg_leanclr_plane_bridge.*     # LeanCLR 调用器
           nkg_leanclr_runtime_bridge.*   # 通用 LeanCLR runtime / assembly / method invocation 中间层
           nkg_leanclr_plane_host.*       # Godot 对象胶水层，创建/更新 Polygon2D/Label
@@ -176,12 +178,14 @@ System.Net debug transport
 
 `NkgLeanClrPlaneBridge` 是样例专用 bridge facade。它负责绑定 `PlaneGameBridge` 的输入、session 和 debug 方法，并把这些方法暴露成 Godot `RefCounted` API。
 
+`NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
+
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
 - 作为 `scenes/main.tscn` 的 root 节点参与 Godot 主循环。
 - 读取 Godot 输入：方向键控制飞机，`ui_accept` 发射子弹。
 - 调用 `NkgLeanClrPlaneBridge` 推进 managed session。
-- 启动 desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
+- 通过 `NkgGodotDebugTransport` 启动 desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
 - 解析 managed snapshot。
 - 创建、更新和销毁 Godot `Polygon2D` 对象来表示玩家、敌人、子弹。
 - 更新 HUD `Label`。

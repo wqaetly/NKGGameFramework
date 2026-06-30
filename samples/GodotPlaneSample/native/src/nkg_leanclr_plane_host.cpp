@@ -26,61 +26,13 @@ std::string to_std_string(const String& value)
     const auto utf8 = value.utf8();
     return std::string(utf8.get_data(), utf8.length());
 }
-
-std::string base64_encode(const std::string& value)
-{
-    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    encoded.reserve(((value.size() + 2) / 3) * 4);
-
-    size_t index = 0;
-    while (index + 3 <= value.size())
-    {
-        const uint32_t block =
-            (static_cast<uint32_t>(static_cast<unsigned char>(value[index])) << 16) |
-            (static_cast<uint32_t>(static_cast<unsigned char>(value[index + 1])) << 8) |
-            static_cast<uint32_t>(static_cast<unsigned char>(value[index + 2]));
-        encoded.push_back(alphabet[(block >> 18) & 0x3f]);
-        encoded.push_back(alphabet[(block >> 12) & 0x3f]);
-        encoded.push_back(alphabet[(block >> 6) & 0x3f]);
-        encoded.push_back(alphabet[block & 0x3f]);
-        index += 3;
-    }
-
-    const size_t remaining = value.size() - index;
-    if (remaining == 1)
-    {
-        const uint32_t block = static_cast<uint32_t>(static_cast<unsigned char>(value[index])) << 16;
-        encoded.push_back(alphabet[(block >> 18) & 0x3f]);
-        encoded.push_back(alphabet[(block >> 12) & 0x3f]);
-        encoded.push_back('=');
-        encoded.push_back('=');
-    }
-    else if (remaining == 2)
-    {
-        const uint32_t block =
-            (static_cast<uint32_t>(static_cast<unsigned char>(value[index])) << 16) |
-            (static_cast<uint32_t>(static_cast<unsigned char>(value[index + 1])) << 8);
-        encoded.push_back(alphabet[(block >> 18) & 0x3f]);
-        encoded.push_back(alphabet[(block >> 12) & 0x3f]);
-        encoded.push_back(alphabet[(block >> 6) & 0x3f]);
-        encoded.push_back('=');
-    }
-
-    return encoded;
-}
-
-std::string make_managed_debug_request(const std::string& method, const std::string& target, const std::string& body)
-{
-    return method + "\n" + target + "\nbase64\n" + base64_encode(body);
-}
 } // namespace
 
 NkgLeanClrPlaneHost::NkgLeanClrPlaneHost() = default;
 
 NkgLeanClrPlaneHost::~NkgLeanClrPlaneHost()
 {
-    debug_server.stop();
+    debug_transport.stop();
 }
 
 void NkgLeanClrPlaneHost::_bind_methods()
@@ -107,7 +59,7 @@ void NkgLeanClrPlaneHost::_ready()
 
 void NkgLeanClrPlaneHost::_process(double p_delta)
 {
-    process_debug_requests();
+    process_debug_transport();
 
     if (!bridge.is_valid() || !bridge->is_ready())
     {
@@ -129,7 +81,7 @@ void NkgLeanClrPlaneHost::_process(double p_delta)
 
     if (stepped)
     {
-        process_debug_requests();
+        process_debug_transport();
         publish_debug_stream_snapshots();
         update_hud();
     }
@@ -154,7 +106,7 @@ String NkgLeanClrPlaneHost::get_bridge_status() const
 
 int32_t NkgLeanClrPlaneHost::get_debug_port() const
 {
-    return static_cast<int32_t>(debug_server.get_port());
+    return static_cast<int32_t>(debug_transport.get_port());
 }
 
 int32_t NkgLeanClrPlaneHost::get_object_count() const
@@ -211,64 +163,29 @@ void NkgLeanClrPlaneHost::initialize_debug_server()
         return;
     }
 
-    if (!debug_server.start(static_cast<uint16_t>(debug_port)))
+    if (!debug_transport.start(static_cast<uint16_t>(debug_port)))
     {
-        bridge_status += " debug server failed: " + String(debug_server.get_last_error().c_str());
+        bridge_status += " debug server failed: " + String(debug_transport.get_last_error().c_str());
         return;
     }
 
-    bridge_status += " debug http://127.0.0.1:" + String::num_int64(debug_server.get_port());
+    bridge_status += " debug http://127.0.0.1:" + String::num_int64(debug_transport.get_port());
 }
 
-void NkgLeanClrPlaneHost::process_debug_requests()
+void NkgLeanClrPlaneHost::process_debug_transport()
 {
-    if (!debug_server.is_running())
-    {
-        return;
-    }
-
-    NkgDebugHttpServer::PendingRequest request;
-    int32_t guard = 0;
-    while (guard++ < 32 && debug_server.pop_pending_request(request))
-    {
-        if (!bridge.is_valid() || !bridge->is_ready())
-        {
-            debug_server.complete_request(
-                request.id,
-                NkgDebugHttpServer::Response{
-                    503,
-                    "Service Unavailable",
-                    "application/json; charset=utf-8",
-                    "{\"message\":\"LeanCLR bridge is not ready.\"}"});
-            continue;
-        }
-
-        const std::string payload = make_managed_debug_request(request.method, request.target, request.body);
-        const String managed_response = bridge->handle_debug_request(String::utf8(payload.c_str(), payload.size()));
-        debug_server.complete_request(
-            request.id,
-            NkgDebugHttpServer::parse_managed_response(to_std_string(managed_response)));
-    }
+    const bool bridge_ready = bridge.is_valid() && bridge->is_ready();
+    debug_transport.process_pending_requests(bridge_ready, [this](const String& request) {
+        return bridge->handle_debug_request(request);
+    });
 }
 
 void NkgLeanClrPlaneHost::publish_debug_stream_snapshots()
 {
-    if (!debug_server.is_running() || !bridge.is_valid() || !bridge->is_ready())
-    {
-        return;
-    }
-
-    const auto targets = debug_server.get_stream_snapshot_targets();
-    for (const auto& target : targets)
-    {
-        const std::string payload = make_managed_debug_request("GET", target, "");
-        const String managed_response = bridge->handle_debug_request(String::utf8(payload.c_str(), payload.size()));
-        const auto response = NkgDebugHttpServer::parse_managed_response(to_std_string(managed_response));
-        if (response.status_code == 200)
-        {
-            debug_server.broadcast_snapshot(target, response.body);
-        }
-    }
+    const bool bridge_ready = bridge.is_valid() && bridge->is_ready();
+    debug_transport.publish_stream_snapshots(bridge_ready, [this](const String& request) {
+        return bridge->handle_debug_request(request);
+    });
 }
 
 void NkgLeanClrPlaneHost::pump_input()
@@ -412,7 +329,7 @@ void NkgLeanClrPlaneHost::update_hud()
 
     hud_label->set_text(
         "Controls: arrows move  Space/Enter fire\nLeanCLR " + bridge_status +
-        "\nWebDebug http://127.0.0.1:" + String::num_int64(debug_server.get_port()) +
+        "\nWebDebug http://127.0.0.1:" + String::num_int64(debug_transport.get_port()) +
         "\nscore " + String::num_int64(score) + "  lives " + String::num_int64(lives) +
         "  enemies/bullets " + String::num_int64(static_cast<int64_t>(visuals.size())));
 }

@@ -9,7 +9,7 @@
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "nkg_debug_http_server.h"
+#include "nkg_godot_debug_transport.h"
 #include "nkg_leanclr_plane_bridge.h"
 
 namespace godot
@@ -47,7 +47,7 @@ private:
 
     void initialize_bridge();
     void initialize_debug_server();
-    void process_debug_requests();
+    void process_debug_transport();
     void publish_debug_stream_snapshots();
     void pump_input();
     void apply_snapshot(const String& p_snapshot);
@@ -60,7 +60,7 @@ private:
     std::string make_key(const String& p_kind, int32_t p_id) const;
 
     Ref<NkgLeanClrPlaneBridge> bridge;
-    NkgDebugHttpServer debug_server;
+    NkgGodotDebugTransport debug_transport;
     std::unordered_map<std::string, VisualObject> visuals;
     Label* hud_label = nullptr;
     String bridge_status = "boot";
