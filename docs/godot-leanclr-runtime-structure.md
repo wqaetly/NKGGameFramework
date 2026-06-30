@@ -9,6 +9,7 @@ NKGGameFramework/
   src/
     NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization、轻量 debug DTO/control/frame
     NKGGameFramework.Adapter.Godot/      # Godot managed contracts，不引用 GodotSharp
+      native/src/                       # Godot native adapter：LeanCLR runtime bridge、debug transport
     NKGGameFramework.Hosting/            # HTTP/SSE debug host，本样例不引用
     NKGGameFramework.Diagnostics/        # snapshot provider、mutation、dump、analysis、transport-independent WebDebug endpoint dispatcher
 
@@ -30,10 +31,7 @@ NKGGameFramework/
         CMakeLists.txt                   # 构建 native bridge
         build-gdextension.ps1
         src/
-          nkg_debug_http_server.*        # desktop loopback HTTP/SSE server
-          nkg_godot_debug_transport.*    # Godot 主线程 debug request pump 和 managed text bridge 转发
-          nkg_leanclr_plane_bridge.*     # LeanCLR 调用器
-          nkg_leanclr_runtime_bridge.*   # 通用 LeanCLR runtime / assembly / method invocation 中间层
+          nkg_leanclr_plane_bridge.*     # 样例专用 LeanCLR bridge facade
           nkg_leanclr_plane_host.*       # Godot 对象胶水层，创建/更新 Polygon2D/Label
           register_types.*               # 注册 NkgLeanClrPlaneBridge / NkgLeanClrPlaneHost
       tools/
@@ -167,7 +165,7 @@ System.Net debug transport
 
 ## Native Bridge Boundary
 
-`NkgLeanClrRuntimeBridge` 是底层 LeanCLR runtime 调用器。它负责：
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgLeanClrRuntimeBridge` 是底层 LeanCLR runtime 调用器。它负责：
 
 - 接收 managed DLL 和 BCL 程序集搜索目录。
 - 初始化 LeanCLR runtime。
@@ -178,7 +176,7 @@ System.Net debug transport
 
 `NkgLeanClrPlaneBridge` 是样例专用 bridge facade。它负责绑定 `PlaneGameBridge` 的输入、session 和 debug 方法，并把这些方法暴露成 Godot `RefCounted` API。
 
-`NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
