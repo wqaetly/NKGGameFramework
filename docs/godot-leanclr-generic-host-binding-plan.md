@@ -228,7 +228,8 @@ SceneTree
 - 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、HUD 和视觉策略。
 - 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小通路。
 - 已完成部分：C# 侧提供最小 `GodotHostCommands` / `GodotNode` 手写 facade。
-- 待完成：扩大 native 创建类型、属性/方法/Variant 支持，并让打飞机样例改用通用 host API，不再保留 plane-specific visual sync。
+- 已完成部分：打飞机样例 visual 输出已改用通用 `CreateNode` / `SetProperty` / `SetTransform2D` 命令，native host 不再负责 plane-specific Polygon2D 创建。
+- 待完成：扩大 native 创建类型、属性/方法/Variant 支持，并继续收敛剩余 plane-specific HUD/input/status 胶水。
 
 验收：
 
@@ -310,11 +311,11 @@ SceneTree
 
 ## Recommended Next Step
 
-下一次继续做这条线时，优先迁移样例 visual 输出：
+下一次继续做这条线时，优先收敛剩余 sample host 胶水：
 
 ```text
-让 PlaneGame 通过 GodotHostCommands 输出 Polygon2D CreateNode /
-SetProperty / SetTransform2D 命令，并把 plane-specific visual sync 继续缩小。
+把 NkgLeanClrPlaneHost 剩余的 HUD/status/input 边界继续拆小，
+并评估哪些可以进入通用 host services。
 ```
 
 这一步完成后，当前样例才会从“通过通用中间层承载的项目专用 host”进一步进入“可复用 Godot host binding”的轨道。

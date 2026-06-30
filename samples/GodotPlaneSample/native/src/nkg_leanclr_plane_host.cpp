@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <sstream>
 #include <vector>
 
 #include <godot_cpp/classes/input.hpp>
@@ -135,7 +136,7 @@ int32_t NkgLeanClrPlaneHost::get_debug_port() const
 
 int32_t NkgLeanClrPlaneHost::get_object_count() const
 {
-    return static_cast<int32_t>(host.get_node_count());
+    return visual_object_count;
 }
 
 int32_t NkgLeanClrPlaneHost::get_bullet_count() const
@@ -327,20 +328,10 @@ void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
             score = command.primary_value;
             lives = command.secondary_value;
         },
-        [this](const NkgGodotHostCommandReader::Node2DCommand& command) {
-            return create_visual(String(command.kind.c_str()), command.id);
+        [](const NkgGodotHostCommandReader::Node2DCommand&) -> Node2D* {
+            return nullptr;
         },
-        [this](const NkgGodotHostCommandReader::Node2DCommand& command, Node2D* visual) {
-            visual->set_position(Vector2(command.x * DISPLAY_SCALE, command.y * DISPLAY_SCALE));
-            if (command.kind == "PLAYER")
-            {
-                player_x = command.x;
-            }
-            else if (command.kind == "BULLET")
-            {
-                bullet_count++;
-            }
-        });
+        [](const NkgGodotHostCommandReader::Node2DCommand&, Node2D*) {});
 
     if (!applied)
     {
@@ -348,20 +339,47 @@ void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
         return;
     }
 
+    refresh_session_status();
     if (bullet_count > max_bullet_count)
     {
         max_bullet_count = bullet_count;
     }
 }
 
-Polygon2D* NkgLeanClrPlaneHost::create_visual(const String& p_kind, int32_t p_id)
+void NkgLeanClrPlaneHost::refresh_session_status()
 {
-    auto* visual = memnew(Polygon2D);
-    visual->set_name(p_kind + String("_") + String::num_int64(p_id));
-    visual->set_polygon(make_polygon(p_kind));
-    visual->set_color(color_for_kind(p_kind));
-    add_child(visual);
-    return visual;
+    if (!bridge.is_valid() || !bridge->is_ready())
+    {
+        return;
+    }
+
+    const String status = bridge->get_status();
+    const auto utf8 = status.utf8();
+    std::istringstream stream(std::string(utf8.get_data(), utf8.length()));
+    std::string token;
+    while (stream >> token)
+    {
+        const size_t separator = token.find('=');
+        if (separator == std::string::npos)
+        {
+            continue;
+        }
+
+        const std::string key = token.substr(0, separator);
+        const std::string value = token.substr(separator + 1);
+        if (key == "player_x")
+        {
+            player_x = std::stod(value);
+        }
+        else if (key == "bullets")
+        {
+            bullet_count = std::stoi(value);
+        }
+        else if (key == "objects")
+        {
+            visual_object_count = std::stoi(value);
+        }
+    }
 }
 
 void NkgLeanClrPlaneHost::update_hud()
@@ -375,57 +393,7 @@ void NkgLeanClrPlaneHost::update_hud()
         "Controls: arrows move  Space/Enter fire\nLeanCLR " + bridge_status +
         "\nWebDebug http://127.0.0.1:" + String::num_int64(host.get_debug_port()) +
         "\nscore " + String::num_int64(score) + "  lives " + String::num_int64(lives) +
-        "  enemies/bullets " + String::num_int64(static_cast<int64_t>(host.get_node_count())));
-}
-
-PackedVector2Array NkgLeanClrPlaneHost::make_polygon(const String& p_kind) const
-{
-    PackedVector2Array points;
-    if (p_kind == "PLAYER")
-    {
-        points.push_back(Vector2(0, -36));
-        points.push_back(Vector2(-10, 8));
-        points.push_back(Vector2(-30, 28));
-        points.push_back(Vector2(-6, 20));
-        points.push_back(Vector2(0, 12));
-        points.push_back(Vector2(6, 20));
-        points.push_back(Vector2(30, 28));
-        points.push_back(Vector2(10, 8));
-        return points;
-    }
-
-    if (p_kind == "ENEMY")
-    {
-        points.push_back(Vector2(-28, -16));
-        points.push_back(Vector2(28, -16));
-        points.push_back(Vector2(34, 8));
-        points.push_back(Vector2(12, 24));
-        points.push_back(Vector2(0, 16));
-        points.push_back(Vector2(-12, 24));
-        points.push_back(Vector2(-34, 8));
-        return points;
-    }
-
-    points.push_back(Vector2(0, -14));
-    points.push_back(Vector2(6, 0));
-    points.push_back(Vector2(0, 14));
-    points.push_back(Vector2(-6, 0));
-    return points;
-}
-
-Color NkgLeanClrPlaneHost::color_for_kind(const String& p_kind) const
-{
-    if (p_kind == "PLAYER")
-    {
-        return Color(0.2, 0.78, 0.95);
-    }
-
-    if (p_kind == "ENEMY")
-    {
-        return Color(0.96, 0.25, 0.24);
-    }
-
-    return Color(1.0, 0.93, 0.36);
+        "  enemies/bullets " + String::num_int64(visual_object_count));
 }
 
 } // namespace godot

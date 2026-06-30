@@ -76,7 +76,7 @@ public static class PlaneGameBridge
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"score={s_session.Score} lives={s_session.Lives} game_over={s_session.IsGameOver}");
+            $"score={s_session.Score} lives={s_session.Lives} game_over={s_session.IsGameOver} player_x={s_session.PlayerX:0.###} bullets={s_session.BulletCount} objects={s_session.VisualObjectCount}");
     }
 
     public static string HandleDebugRequest(string request)

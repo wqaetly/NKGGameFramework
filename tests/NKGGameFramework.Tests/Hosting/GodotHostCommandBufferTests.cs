@@ -139,6 +139,18 @@ public sealed class GodotHostCommandBufferTests
     }
 
     [Fact]
+    public void Godot_host_commands_can_reference_existing_nodes()
+    {
+        var buffer = new GodotHostCommandBuffer();
+        var commands = new GodotHostCommands(buffer);
+
+        var node = commands.GetNode(new GodotObjectId(10));
+        node.SetTransform2D(12.5, 30.25);
+
+        Assert.Equal("SET_TRANSFORM2D 10 12.5 30.25 0 1 1\nEND", buffer.BuildText());
+    }
+
+    [Fact]
     public void Command_buffer_writes_property_variants()
     {
         var buffer = new GodotHostCommandBuffer();

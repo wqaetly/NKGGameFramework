@@ -6,8 +6,11 @@ namespace NKGGameFramework.GodotPlaneSample;
 
 internal sealed class PlaneGame : IDisposable
 {
+    private const double DisplayScale = 2.0d;
+
     private readonly RuntimeContext _runtime = new();
     private readonly World _world = new("godot-plane-world");
+    private readonly HashSet<int> _visibleObjectIds = new();
     private readonly Scene _scene;
     private Entity _player;
 
@@ -29,6 +32,29 @@ internal sealed class PlaneGame : IDisposable
     public int Lives => State.Lives;
 
     public bool IsGameOver => State.Lives <= 0 || State.Frame >= 10800;
+
+    public double PlayerX => ReadPosition(_player).X;
+
+    public int BulletCount
+    {
+        get
+        {
+            var count = 0;
+            _scene.Query<BulletTag>().ForEach((ref BulletTag _, Entity __) => count++);
+            return count;
+        }
+    }
+
+    public int VisualObjectCount
+    {
+        get
+        {
+            var count = 1;
+            _scene.Query<EnemyTag>().ForEach((ref EnemyTag _, Entity __) => count++);
+            _scene.Query<BulletTag>().ForEach((ref BulletTag _, Entity __) => count++);
+            return count;
+        }
+    }
 
     public RuntimeContext Runtime => _runtime;
 
@@ -87,19 +113,36 @@ internal sealed class PlaneGame : IDisposable
     {
         var state = State;
         var commands = new GodotHostCommandBuffer();
+        var host = new GodotHostCommands(commands);
+        var nextVisibleObjectIds = new HashSet<int>();
+
         commands.BeginFrame(state.Frame, state.Score, state.Lives, IsGameOver);
 
-        AppendEntity(commands, "PLAYER", _player, ReadPosition(_player));
+        AppendEntity(host, nextVisibleObjectIds, "PLAYER", _player, ReadPosition(_player));
 
         _scene.Query<EnemyTag, Position>().ForEach((ref EnemyTag _, ref Position position, Entity entity) =>
         {
-            AppendEntity(commands, "ENEMY", entity, position);
+            AppendEntity(host, nextVisibleObjectIds, "ENEMY", entity, position);
         });
 
         _scene.Query<BulletTag, Position>().ForEach((ref BulletTag _, ref Position position, Entity entity) =>
         {
-            AppendEntity(commands, "BULLET", entity, position);
+            AppendEntity(host, nextVisibleObjectIds, "BULLET", entity, position);
         });
+
+        foreach (var objectId in _visibleObjectIds)
+        {
+            if (!nextVisibleObjectIds.Contains(objectId))
+            {
+                host.GetNode(new GodotObjectId(objectId)).Destroy();
+            }
+        }
+
+        _visibleObjectIds.Clear();
+        foreach (var objectId in nextVisibleObjectIds)
+        {
+            _visibleObjectIds.Add(objectId);
+        }
 
         return commands;
     }
@@ -110,14 +153,73 @@ internal sealed class PlaneGame : IDisposable
         _runtime.Dispose();
     }
 
-    private static void AppendEntity(GodotHostCommandBuffer commands, string kind, Entity entity, Position position)
+    private void AppendEntity(GodotHostCommands host, HashSet<int> nextVisibleObjectIds, string kind, Entity entity, Position position)
     {
-        commands.UpsertNode2D(kind, entity.Id.Value, position.X, position.Y);
+        var objectId = checked((int)entity.Id.Value);
+        nextVisibleObjectIds.Add(objectId);
+
+        var node = _visibleObjectIds.Contains(objectId)
+            ? host.GetNode(new GodotObjectId(objectId))
+            : host.CreateNode(objectId, "Polygon2D", $"{kind}_{objectId}");
+        if (!_visibleObjectIds.Contains(objectId))
+        {
+            node.SetParent(GodotObjectId.Root);
+            node.SetProperty("polygon", GodotVariant.FromPackedVector2Array(PolygonForKind(kind)));
+            node.SetProperty("color", GodotVariant.FromColor(ColorForKind(kind)));
+        }
+
+        node.SetTransform2D(position.X * DisplayScale, position.Y * DisplayScale);
+        node.SetVisible(true);
     }
 
     private static Position ReadPosition(Entity entity)
     {
         ref var position = ref entity.Get<Position>();
         return position;
+    }
+
+    private static GodotColor ColorForKind(string kind)
+    {
+        return kind switch
+        {
+            "PLAYER" => new GodotColor(0.2, 0.78, 0.95),
+            "ENEMY" => new GodotColor(0.96, 0.25, 0.24),
+            _ => new GodotColor(1.0, 0.93, 0.36)
+        };
+    }
+
+    private static GodotVector2[] PolygonForKind(string kind)
+    {
+        return kind switch
+        {
+            "PLAYER" =>
+            [
+                new GodotVector2(0, -36),
+                new GodotVector2(-10, 8),
+                new GodotVector2(-30, 28),
+                new GodotVector2(-6, 20),
+                new GodotVector2(0, 12),
+                new GodotVector2(6, 20),
+                new GodotVector2(30, 28),
+                new GodotVector2(10, 8)
+            ],
+            "ENEMY" =>
+            [
+                new GodotVector2(-28, -16),
+                new GodotVector2(28, -16),
+                new GodotVector2(34, 8),
+                new GodotVector2(12, 24),
+                new GodotVector2(0, 16),
+                new GodotVector2(-12, 24),
+                new GodotVector2(-34, 8)
+            ],
+            _ =>
+            [
+                new GodotVector2(0, -14),
+                new GodotVector2(6, 0),
+                new GodotVector2(0, 14),
+                new GodotVector2(-6, 0)
+            ]
+        };
     }
 }

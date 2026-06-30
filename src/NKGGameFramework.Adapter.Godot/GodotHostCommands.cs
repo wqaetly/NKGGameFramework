@@ -16,6 +16,11 @@ public sealed class GodotHostCommands
         return new GodotNode(objectId, this);
     }
 
+    public GodotNode GetNode(GodotObjectId id)
+    {
+        return new GodotNode(id, this);
+    }
+
     public void Destroy(GodotObjectId id)
     {
         _buffer.DestroyObject(id.Value);

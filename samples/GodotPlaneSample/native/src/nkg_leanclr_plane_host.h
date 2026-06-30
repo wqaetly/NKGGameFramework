@@ -44,10 +44,8 @@ private:
     void publish_debug_stream_snapshots();
     void pump_input();
     void apply_commands(const std::vector<uint8_t>& p_commands);
-    Polygon2D* create_visual(const String& p_kind, int32_t p_id);
+    void refresh_session_status();
     void update_hud();
-    PackedVector2Array make_polygon(const String& p_kind) const;
-    Color color_for_kind(const String& p_kind) const;
 
     Ref<NkgLeanClrPlaneBridge> bridge;
     NkgGodotHost host;
@@ -60,6 +58,7 @@ private:
     int32_t score = 0;
     int32_t lives = 0;
     int32_t bullet_count = 0;
+    int32_t visual_object_count = 0;
     int32_t max_bullet_count = 0;
     double player_x = 160.0;
     double step_accumulator = 0.0;
