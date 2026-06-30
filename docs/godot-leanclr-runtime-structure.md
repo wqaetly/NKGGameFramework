@@ -32,7 +32,7 @@ NKGGameFramework/
         build-gdextension.ps1
         src/
           nkg_leanclr_plane_bridge.*     # 样例专用 LeanCLR bridge facade
-          nkg_leanclr_plane_host.*       # Godot 场景 root，保留样例输入、HUD 和视觉策略
+          nkg_leanclr_plane_host.*       # Godot 场景 root，保留样例输入和生命周期胶水
           register_types.*               # 注册 NkgLeanClrPlaneBridge / NkgLeanClrPlaneHost
       tools/
         run-godot-plane.ps1              # 一键 build + stage BCL + run / headless check
@@ -88,7 +88,7 @@ flowchart TD
     NkgRuntime --> Snapshot["GodotHostCommandBuffer byte[] commands"]
     NkgRuntime --> DebugSnapshot["Diagnostics WebDebug endpoint dispatcher"]
     Snapshot --> Host
-    Host --> GodotObjects["Create/update Godot Polygon2D and Label objects"]
+    Host --> GodotObjects["Apply generic Polygon2D and Label commands"]
     Host --> NativeDebug["Native WebDebug HTTP/SSE transport"]
     NativeDebug --> Bridge
 ```
@@ -125,7 +125,8 @@ sequenceDiagram
         Managed-->>Bridge: byte[] binary command buffer
         Bridge-->>Host: host command buffer
         Host->>Obj: create/update/destroy Polygon2D objects
-        Host->>Obj: update HUD Label
+        Game->>Bridge: append HUD Label commands
+        Host->>Obj: apply HUD Label commands
     end
 ```
 
@@ -198,8 +199,8 @@ System.Net debug transport
 - 调用 `NkgLeanClrPlaneBridge` 推进 managed session。
 - 通过 `NkgGodotHost` 启动/pump desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
 - 通过 `NkgGodotHost` 应用 managed command buffer。
-- 创建和配置 Godot `Polygon2D` 对象来表示玩家、敌人、子弹。
-- 更新 HUD `Label`。
+- 应用 managed 输出的 Godot object commands 来创建、配置和销毁玩家、敌人、子弹对象。
+- 向 managed 样例同步 host/debug 上下文，HUD `Label` 创建和文本更新由 managed generic command stream 输出。
 
 当前展示参数：
 
@@ -216,7 +217,7 @@ Managed simulation step: fixed 144Hz
 
 当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 direct byte buffer ABI；native host 调用 `StepSessionCommandBytes()` 获得 managed `byte[]`，再由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。`StepSession()` 仍保留 `NKGCB1` base64 string envelope，作为 GDScript smoke 和调试兼容路径。
 
-`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 命令。Variant payload 当前覆盖 `Color`、`PackedVector2Array` 和 `string`。飞机样例 visual 输出已改为通用 object command path；snapshot-style `NODE2D` 仍保留为 reader 兼容路径和底层 command buffer 测试覆盖。
+`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 命令。Variant payload 当前覆盖 `Color`、`PackedVector2Array` 和 `string`。飞机样例 visual 输出和 HUD `Label` 已改为通用 object command path；snapshot-style `NODE2D` 仍保留为 reader 兼容路径和底层 command buffer 测试覆盖。
 
 ## Build And Verification Flow
 
@@ -265,7 +266,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 继续扩大 Variant/property 覆盖，并收敛剩余 sample host HUD/status 胶水。
+- 继续扩大 Variant/property 覆盖，并收敛剩余 sample host status/smoke 胶水。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

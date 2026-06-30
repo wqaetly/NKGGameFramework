@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/class_db_singleton.hpp>
+#include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/core/memory.hpp>
@@ -195,16 +196,26 @@ bool NkgGodotHost::apply_set_parent(const NkgGodotHostCommandReader::SetParentCo
 
 bool NkgGodotHost::apply_set_transform2d(const NkgGodotHostCommandReader::SetTransform2DCommand& p_command)
 {
-    Node2D* node = Object::cast_to<Node2D>(objects.get_object(make_object_key(p_command.id)));
-    if (node == nullptr)
+    Object* object = objects.get_object(make_object_key(p_command.id));
+    Node2D* node = Object::cast_to<Node2D>(object);
+    if (node != nullptr)
     {
-        return false;
+        node->set_position(Vector2(p_command.x, p_command.y));
+        node->set_rotation(p_command.rotation);
+        node->set_scale(Vector2(p_command.scale_x, p_command.scale_y));
+        return true;
     }
 
-    node->set_position(Vector2(p_command.x, p_command.y));
-    node->set_rotation(p_command.rotation);
-    node->set_scale(Vector2(p_command.scale_x, p_command.scale_y));
-    return true;
+    Control* control = Object::cast_to<Control>(object);
+    if (control != nullptr)
+    {
+        control->set_position(Vector2(p_command.x, p_command.y));
+        control->set_rotation(static_cast<float>(p_command.rotation));
+        control->set_scale(Vector2(p_command.scale_x, p_command.scale_y));
+        return true;
+    }
+
+    return false;
 }
 
 bool NkgGodotHost::apply_set_visible(const NkgGodotHostCommandReader::SetVisibleCommand& p_command)

@@ -36,6 +36,21 @@ public sealed class GodotPlaneDebugBridgeTests
     }
 
     [Fact]
+    public void Godot_plane_bridge_outputs_hud_label_through_generic_commands()
+    {
+        PlaneGameBridge.ResetSession();
+        PlaneGameBridge.UpdateHostContext("native object host ok debug http://127.0.0.1:5067\n5067");
+
+        var bytes = PlaneGameBridge.StepSessionCommandBytes();
+        var text = Encoding.UTF8.GetString(bytes);
+
+        Assert.Contains("Label", text, StringComparison.Ordinal);
+        Assert.Contains("Hud", text, StringComparison.Ordinal);
+        Assert.Contains("Controls: arrows move", text, StringComparison.Ordinal);
+        Assert.Contains("WebDebug http://127.0.0.1:5067", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Godot_bridge_routes_full_webdebug_endpoints_through_diagnostics_dispatcher()
     {
         GameDebugController.Shared.Reset();

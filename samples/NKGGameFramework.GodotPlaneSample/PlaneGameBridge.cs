@@ -12,6 +12,8 @@ public static class PlaneGameBridge
     private static int s_moveX;
     private static int s_moveY;
     private static bool s_fire;
+    private static string s_hostStatus = "boot";
+    private static int s_debugPort;
 
     public static void ResetSession()
     {
@@ -20,6 +22,7 @@ public static class PlaneGameBridge
         s_session = new PlaneGame();
         s_debug = CreateDebugBridge(s_session);
         s_session.Start();
+        ApplyHostContext(s_session);
         ClearInput();
     }
 
@@ -40,10 +43,35 @@ public static class PlaneGameBridge
 
     public static void PressFire() => s_fire = true;
 
+    public static string UpdateHostContext(string context)
+    {
+        var separator = context.IndexOf('\n', StringComparison.Ordinal);
+        if (separator < 0)
+        {
+            s_hostStatus = context;
+            s_debugPort = 0;
+        }
+        else
+        {
+            s_hostStatus = context[..separator];
+            s_debugPort = int.TryParse(context[(separator + 1)..], CultureInfo.InvariantCulture, out var port)
+                ? port
+                : 0;
+        }
+
+        if (s_session is not null)
+        {
+            ApplyHostContext(s_session);
+        }
+
+        return "ok";
+    }
+
     public static string StepSession()
     {
         s_session ??= CreateStartedSession();
         s_debug ??= CreateDebugBridge(s_session);
+        ApplyHostContext(s_session);
         if (s_session.IsGameOver)
         {
             return s_session.CreateSnapshot();
@@ -58,6 +86,7 @@ public static class PlaneGameBridge
     {
         s_session ??= CreateStartedSession();
         s_debug ??= CreateDebugBridge(s_session);
+        ApplyHostContext(s_session);
         if (!s_session.IsGameOver)
         {
             s_session.SetInput(ClampAxis(s_moveX), ClampAxis(s_moveY), s_fire);
@@ -92,6 +121,12 @@ public static class PlaneGameBridge
         s_debug = CreateDebugBridge(game);
         game.Start();
         return game;
+    }
+
+    private static void ApplyHostContext(PlaneGame game)
+    {
+        game.HostStatus = s_hostStatus;
+        game.DebugPort = s_debugPort;
     }
 
     private static GodotDebugEndpointBridge CreateDebugBridge(PlaneGame game)

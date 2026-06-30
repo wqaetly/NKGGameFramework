@@ -3,9 +3,7 @@
 #include <string>
 #include <vector>
 
-#include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/node2d.hpp>
-#include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include "nkg_godot_host.h"
@@ -44,14 +42,13 @@ private:
     void process_debug_transport();
     void publish_debug_stream_snapshots();
     void pump_input();
+    void publish_host_context();
     void apply_commands(const std::vector<uint8_t>& p_commands);
     void refresh_session_status();
-    void update_hud();
 
     Ref<NkgLeanClrPlaneBridge> bridge;
     NkgGodotHost host;
     NkgGodotInputPump input_pump;
-    Label* hud_label = nullptr;
     String bridge_status = "boot";
     String managed_dir = "res://../NKGGameFramework.GodotPlaneSample/bin/Release/net10.0";
     String bcl_dir = "res://leanclr_bcl/net10.0";

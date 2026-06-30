@@ -34,6 +34,7 @@ public:
     void press_up();
     void press_down();
     void press_fire();
+    void set_host_context(const String& p_bridge_status, int32_t p_debug_port);
     String step_session();
     std::vector<uint8_t> step_session_command_bytes();
     String handle_debug_request(const String& p_request);
@@ -56,6 +57,7 @@ private:
     const leanclr::metadata::RtMethodInfo* press_up_method = nullptr;
     const leanclr::metadata::RtMethodInfo* press_down_method = nullptr;
     const leanclr::metadata::RtMethodInfo* press_fire_method = nullptr;
+    const leanclr::metadata::RtMethodInfo* host_context_method = nullptr;
     const leanclr::metadata::RtMethodInfo* step_method = nullptr;
     const leanclr::metadata::RtMethodInfo* step_bytes_method = nullptr;
     const leanclr::metadata::RtMethodInfo* debug_request_method = nullptr;

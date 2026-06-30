@@ -23,6 +23,7 @@ void NkgLeanClrPlaneBridge::_bind_methods()
     ClassDB::bind_method(D_METHOD("press_up"), &NkgLeanClrPlaneBridge::press_up);
     ClassDB::bind_method(D_METHOD("press_down"), &NkgLeanClrPlaneBridge::press_down);
     ClassDB::bind_method(D_METHOD("press_fire"), &NkgLeanClrPlaneBridge::press_fire);
+    ClassDB::bind_method(D_METHOD("set_host_context", "bridge_status", "debug_port"), &NkgLeanClrPlaneBridge::set_host_context);
     ClassDB::bind_method(D_METHOD("step_session"), &NkgLeanClrPlaneBridge::step_session);
     ClassDB::bind_method(D_METHOD("handle_debug_request", "request"), &NkgLeanClrPlaneBridge::handle_debug_request);
     ClassDB::bind_method(D_METHOD("get_status"), &NkgLeanClrPlaneBridge::get_status);
@@ -123,6 +124,16 @@ void NkgLeanClrPlaneBridge::press_fire()
     managed.invoke_void(press_fire_method);
 }
 
+void NkgLeanClrPlaneBridge::set_host_context(const String& p_bridge_status, int32_t p_debug_port)
+{
+    if (!ensure_ready())
+    {
+        return;
+    }
+
+    managed.invoke_string_arg(host_context_method, p_bridge_status + String("\n") + String::num_int64(p_debug_port), "failed");
+}
+
 String NkgLeanClrPlaneBridge::step_session()
 {
     if (!ensure_ready())
@@ -195,6 +206,7 @@ bool NkgLeanClrPlaneBridge::bind_managed_methods(NkgLeanClrRuntimeBridge& runtim
     press_up_method = runtime.find_static_method(type_name, "PressUp", 0);
     press_down_method = runtime.find_static_method(type_name, "PressDown", 0);
     press_fire_method = runtime.find_static_method(type_name, "PressFire", 0);
+    host_context_method = runtime.find_static_method(type_name, "UpdateHostContext", 1);
     step_method = runtime.find_static_method(type_name, "StepSession", 0);
     step_bytes_method = runtime.find_static_method(type_name, "StepSessionCommandBytes", 0);
     debug_request_method = runtime.find_static_method(type_name, "HandleDebugRequest", 1);
@@ -202,7 +214,7 @@ bool NkgLeanClrPlaneBridge::bind_managed_methods(NkgLeanClrRuntimeBridge& runtim
 
     if (reset_method == nullptr || clear_input_method == nullptr || press_left_method == nullptr ||
         press_right_method == nullptr || press_up_method == nullptr || press_down_method == nullptr ||
-        press_fire_method == nullptr || step_method == nullptr || step_bytes_method == nullptr ||
+        press_fire_method == nullptr || host_context_method == nullptr || step_method == nullptr || step_bytes_method == nullptr ||
         debug_request_method == nullptr || status_method == nullptr)
     {
         return runtime.fail("LeanCLR failed to bind PlaneGameBridge session/debug methods.");

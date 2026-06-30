@@ -36,13 +36,13 @@ C# / LeanCLR gameplay code
 - `NkgGodotObjectRegistry` / `NkgGodotResourceRegistry`：提供 Godot object/resource registry 基础；当前 `Node2D` 同步通过 object registry 的 convenience path 承接。
 - `NkgGodotHost`：组合 native debug transport、command reader 和 `Node2D` registry，承接通用 host 命令应用主流程。
 - `NkgGodotInputPump` / `NkgGodotStatusFields`：Godot action input pump 和 managed status key/value parser 已沉淀到 Adapter.Godot。
-- `NkgLeanClrPlaneHost`：Godot 场景 root，保留样例动作绑定、HUD 文本组织和 smoke-only 状态访问器。
+- `NkgLeanClrPlaneHost`：Godot 场景 root，保留样例动作绑定、host/debug 上下文同步和 smoke-only 状态访问器。
 - `PlaneGameBridge`：C# 侧的输入和 ECS session 入口。
 - 项目内 staged BCL：`samples/GodotPlaneSample/leanclr_bcl/net10.0`。
 
 当前缺口：
 
-- Host API 仍有样例专用部分：动作绑定、HUD 文本组织和 plane-specific smoke counters。
+- Host API 仍有样例专用部分：动作绑定、host/debug 上下文同步和 plane-specific smoke counters。
 - C# 到 C++ 已从内部 snapshot string 推进为 direct `byte[]` binary command buffer。
 - 已有 Object/Resource registry 基础、第一批通用 Godot object command opcode、ClassDB-backed native object creation、managed facade 和最小 Variant payload；还没有完整 Variant marshalling 和生成式 API 覆盖。
 - Variant marshalling 目前覆盖 `Color`、`PackedVector2Array` 和 `string` 的最小属性设置路径。
@@ -228,11 +228,11 @@ SceneTree
 
 - 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgLeanClrManagedBridge`、`NkgGodotDebugTransport`、`NkgGodotObjectRegistry`、`NkgGodotResourceRegistry`、`GodotHostCommandBuffer`、`NkgGodotHost` 已进入 Adapter.Godot。
 - 已完成部分：Godot input action pump 和 status key/value parser 已进入 Adapter.Godot。
-- 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、HUD 和视觉策略。
+- 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、host/debug context 和生命周期胶水。
 - 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小通路。
 - 已完成部分：C# 侧提供最小 `GodotHostCommands` / `GodotNode` 手写 facade。
-- 已完成部分：打飞机样例 visual 输出已改用通用 `CreateNode` / `SetProperty` / `SetTransform2D` 命令，native host 不再负责 plane-specific Polygon2D 创建。
-- 待完成：扩大属性/方法/Variant 支持，并继续收敛剩余 plane-specific HUD 文本和 smoke 状态访问器。
+- 已完成部分：打飞机样例 visual 输出和 HUD `Label` 已改用通用 `CreateNode` / `SetProperty` / `SetTransform2D` 命令，native host 不再负责 plane-specific Polygon2D/Label 创建。
+- 待完成：扩大属性/方法/Variant 支持，并继续收敛剩余 plane-specific status/smoke 状态访问器。
 
 验收：
 
@@ -317,7 +317,7 @@ SceneTree
 下一次继续做这条线时，优先收敛剩余 sample host 胶水：
 
 ```text
-把 NkgLeanClrPlaneHost 剩余的 HUD/status 边界继续拆小，
+把 NkgLeanClrPlaneHost 剩余的 status 边界继续拆小，
 并评估哪些可以进入通用 host services。
 ```
 

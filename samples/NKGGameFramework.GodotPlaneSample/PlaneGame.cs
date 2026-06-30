@@ -7,6 +7,7 @@ namespace NKGGameFramework.GodotPlaneSample;
 internal sealed class PlaneGame : IDisposable
 {
     private const double DisplayScale = 2.0d;
+    private const int HudObjectId = 2_000_000_001;
 
     private readonly RuntimeContext _runtime = new();
     private readonly World _world = new("godot-plane-world");
@@ -55,6 +56,10 @@ internal sealed class PlaneGame : IDisposable
             return count;
         }
     }
+
+    public string HostStatus { get; set; } = "boot";
+
+    public int DebugPort { get; set; }
 
     public RuntimeContext Runtime => _runtime;
 
@@ -118,6 +123,7 @@ internal sealed class PlaneGame : IDisposable
 
         commands.BeginFrame(state.Frame, state.Score, state.Lives, IsGameOver);
 
+        AppendHud(host);
         AppendEntity(host, nextVisibleObjectIds, "PLAYER", _player, ReadPosition(_player));
 
         _scene.Query<EnemyTag, Position>().ForEach((ref EnemyTag _, ref Position position, Entity entity) =>
@@ -169,6 +175,19 @@ internal sealed class PlaneGame : IDisposable
         }
 
         node.SetTransform2D(position.X * DisplayScale, position.Y * DisplayScale);
+        node.SetVisible(true);
+    }
+
+    private void AppendHud(GodotHostCommands host)
+    {
+        var node = host.CreateNode(HudObjectId, "Label", "Hud");
+        node.SetParent(GodotObjectId.Root);
+        node.SetTransform2D(14, 10);
+        node.SetProperty("text", GodotVariant.FromString(
+            "Controls: arrows move  Space/Enter fire\n" +
+            $"LeanCLR {HostStatus}\n" +
+            $"WebDebug http://127.0.0.1:{DebugPort}\n" +
+            $"score {Score}  lives {Lives}  enemies/bullets {VisualObjectCount}"));
         node.SetVisible(true);
     }
 

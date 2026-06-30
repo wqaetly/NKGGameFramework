@@ -4,7 +4,9 @@
 #include <cstring>
 #include <vector>
 
+#include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/memory.hpp>
@@ -72,11 +74,6 @@ void NkgLeanClrPlaneHost::_ready()
 {
     host.set_root(this);
 
-    hud_label = memnew(Label);
-    hud_label->set_name("Hud");
-    hud_label->set_position(Vector2(14, 10));
-    add_child(hud_label);
-
     initialize_bridge();
     initialize_debug_server();
     set_process(true);
@@ -98,6 +95,7 @@ void NkgLeanClrPlaneHost::_process(double p_delta)
     while (step_accumulator >= MANAGED_STEP_SECONDS && guard < 4)
     {
         pump_input();
+        publish_host_context();
         apply_commands(bridge->step_session_command_bytes());
         step_accumulator -= MANAGED_STEP_SECONDS;
         stepped = true;
@@ -108,7 +106,6 @@ void NkgLeanClrPlaneHost::_process(double p_delta)
     {
         process_debug_transport();
         publish_debug_stream_snapshots();
-        update_hud();
     }
     queue_redraw();
 }
@@ -268,8 +265,8 @@ void NkgLeanClrPlaneHost::initialize_bridge()
     }
 
     bridge_status = "native object host ok";
+    publish_host_context();
     apply_commands(bridge->step_session_command_bytes());
-    update_hud();
 }
 
 void NkgLeanClrPlaneHost::initialize_debug_server()
@@ -286,6 +283,7 @@ void NkgLeanClrPlaneHost::initialize_debug_server()
     }
 
     bridge_status += " debug http://127.0.0.1:" + String::num_int64(host.get_debug_port());
+    publish_host_context();
 }
 
 void NkgLeanClrPlaneHost::process_debug_transport()
@@ -315,6 +313,16 @@ void NkgLeanClrPlaneHost::pump_input()
         {"ui_down", [this]() { bridge->press_down(); }},
         {"ui_accept", [this]() { bridge->press_fire(); }},
     });
+}
+
+void NkgLeanClrPlaneHost::publish_host_context()
+{
+    if (!bridge.is_valid() || !bridge->is_ready())
+    {
+        return;
+    }
+
+    bridge->set_host_context(bridge_status, static_cast<int32_t>(host.get_debug_port()));
 }
 
 void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
@@ -362,20 +370,6 @@ void NkgLeanClrPlaneHost::refresh_session_status()
     status.try_get_double("player_x", player_x);
     status.try_get_int("bullets", bullet_count);
     status.try_get_int("objects", visual_object_count);
-}
-
-void NkgLeanClrPlaneHost::update_hud()
-{
-    if (hud_label == nullptr)
-    {
-        return;
-    }
-
-    hud_label->set_text(
-        "Controls: arrows move  Space/Enter fire\nLeanCLR " + bridge_status +
-        "\nWebDebug http://127.0.0.1:" + String::num_int64(host.get_debug_port()) +
-        "\nscore " + String::num_int64(score) + "  lives " + String::num_int64(lives) +
-        "  enemies/bullets " + String::num_int64(visual_object_count));
 }
 
 } // namespace godot
