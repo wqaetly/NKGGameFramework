@@ -102,6 +102,13 @@ public:
         VariantValue value;
     };
 
+    struct CallMethodCommand
+    {
+        int32_t id = 0;
+        std::string method_name;
+        std::vector<VariantValue> arguments;
+    };
+
     using FrameHandler = std::function<void(const FrameCommand& p_command)>;
     using Node2DHandler = std::function<void(const Node2DCommand& p_command)>;
     using CreateNodeHandler = std::function<void(const CreateNodeCommand& p_command)>;
@@ -110,6 +117,7 @@ public:
     using SetTransform2DHandler = std::function<void(const SetTransform2DCommand& p_command)>;
     using SetVisibleHandler = std::function<void(const SetVisibleCommand& p_command)>;
     using SetPropertyHandler = std::function<void(const SetPropertyCommand& p_command)>;
+    using CallMethodHandler = std::function<void(const CallMethodCommand& p_command)>;
 
     struct Handlers
     {
@@ -121,6 +129,7 @@ public:
         SetTransform2DHandler set_transform2d;
         SetVisibleHandler set_visible;
         SetPropertyHandler set_property;
+        CallMethodHandler call_method;
     };
 
     bool read(const std::vector<uint8_t>& p_commands, const Handlers& p_handlers) const;

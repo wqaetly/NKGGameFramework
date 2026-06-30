@@ -45,4 +45,9 @@ public sealed class GodotHostCommands
     {
         _buffer.SetProperty(id.Value, propertyName, value);
     }
+
+    internal void CallMethod(GodotObjectId id, string methodName, IReadOnlyList<GodotVariant> arguments)
+    {
+        _buffer.CallMethod(id.Value, methodName, arguments);
+    }
 }

@@ -188,7 +188,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令。`CreateNode` 通过 Godot `ClassDB` 实例化 type name；`SetProperty` 将 command payload 转换为 Godot `Variant` 后统一调用 `Object::set`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty`、`CallMethod` 的最小对象命令。`CreateNode` 通过 Godot `ClassDB` 实例化 type name；`SetProperty` 和 `CallMethod` 将 command payload 转换为 Godot `Variant` 后统一调用 `Object::set` / `Object::callv`。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotInputPump` 和 `NkgGodotStatusFields` 是当前样例 host 复用的 Godot input/status helper。前者负责从 Godot `Input` action 执行回调，后者负责解析 managed `key=value` status 字符串。
 

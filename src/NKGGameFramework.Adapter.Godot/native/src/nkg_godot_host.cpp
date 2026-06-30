@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -96,6 +97,9 @@ bool NkgGodotHost::apply_commands(
     };
     handlers.set_property = [this, &applied](const NkgGodotHostCommandReader::SetPropertyCommand& command) {
         applied = apply_set_property(command) && applied;
+    };
+    handlers.call_method = [this, &applied](const NkgGodotHostCommandReader::CallMethodCommand& command) {
+        applied = apply_call_method(command) && applied;
     };
 
     const bool read = command_reader.read(p_commands, handlers);
@@ -243,6 +247,29 @@ bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetProper
     }
 
     object->set(StringName(p_command.property_name.c_str()), value);
+    return true;
+}
+
+bool NkgGodotHost::apply_call_method(const NkgGodotHostCommandReader::CallMethodCommand& p_command)
+{
+    Object* object = objects.get_object(make_object_key(p_command.id));
+    if (object == nullptr)
+    {
+        return false;
+    }
+
+    Array arguments;
+    for (const auto& argument : p_command.arguments)
+    {
+        Variant value;
+        if (!try_convert_variant(argument, value))
+        {
+            return false;
+        }
+        arguments.push_back(value);
+    }
+
+    object->callv(StringName(p_command.method_name.c_str()), arguments);
     return true;
 }
 

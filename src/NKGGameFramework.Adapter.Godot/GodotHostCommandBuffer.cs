@@ -15,6 +15,7 @@ public sealed class GodotHostCommandBuffer
     private const byte SetTransform2DCommand = 6;
     private const byte SetVisibleCommand = 7;
     private const byte SetPropertyCommand = 8;
+    private const byte CallMethodCommand = 9;
     private const byte EndCommand = 255;
 
     private readonly MemoryStream _binaryStream;
@@ -142,6 +143,30 @@ public sealed class GodotHostCommandBuffer
         _textBuilder.Append(
             CultureInfo.InvariantCulture,
             $"SET_PROPERTY {id} {propertyName} {FormatVariant(value)}\n");
+    }
+
+    public void CallMethod(int id, string methodName, IReadOnlyList<GodotVariant> arguments)
+    {
+        ThrowIfEnded();
+        ValidateToken(methodName, nameof(methodName));
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        _binaryWriter.Write(CallMethodCommand);
+        _binaryWriter.Write(id);
+        WriteBinaryString(methodName);
+        _binaryWriter.Write(arguments.Count);
+        foreach (var argument in arguments)
+        {
+            WriteVariant(argument);
+        }
+
+        _textBuilder.Append(CultureInfo.InvariantCulture, $"CALL_METHOD {id} {methodName} {arguments.Count}");
+        foreach (var argument in arguments)
+        {
+            _textBuilder.Append(' ');
+            _textBuilder.Append(FormatVariant(argument));
+        }
+        _textBuilder.Append('\n');
     }
 
     public string Build()

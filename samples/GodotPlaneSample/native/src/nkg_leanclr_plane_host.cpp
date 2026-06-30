@@ -206,6 +206,13 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
     write_u8(commands, 3);
     write_string(commands, "generic label ok");
 
+    write_u8(commands, 9);
+    write_i32(commands, label_id);
+    write_string(commands, "set_text");
+    write_i32(commands, 1);
+    write_u8(commands, 3);
+    write_string(commands, "generic method ok");
+
     write_u8(commands, 255);
 
     const bool applied = host.apply_commands(
@@ -227,7 +234,7 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
     }
 
     auto* label = Object::cast_to<Label>(find_child("GenericLabelSmoke", false, false));
-    if (label == nullptr || label->get_text() != "generic label ok")
+    if (label == nullptr || label->get_text() != "generic method ok")
     {
         return false;
     }

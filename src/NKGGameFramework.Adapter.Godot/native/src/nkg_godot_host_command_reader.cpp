@@ -15,6 +15,7 @@ constexpr uint8_t SET_PARENT_COMMAND = 5;
 constexpr uint8_t SET_TRANSFORM2D_COMMAND = 6;
 constexpr uint8_t SET_VISIBLE_COMMAND = 7;
 constexpr uint8_t SET_PROPERTY_COMMAND = 8;
+constexpr uint8_t CALL_METHOD_COMMAND = 9;
 constexpr uint8_t END_COMMAND = 255;
 
 std::string to_std_string(const godot::String& value)
@@ -384,6 +385,36 @@ bool NkgGodotHostCommandReader::read(
             continue;
         }
 
+        if (opcode == CALL_METHOD_COMMAND)
+        {
+            CallMethodCommand command;
+            int32_t argument_count = 0;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_string(command.method_name) ||
+                !cursor.read_i32(argument_count) ||
+                argument_count < 0)
+            {
+                return false;
+            }
+
+            command.arguments.reserve(static_cast<size_t>(argument_count));
+            for (int32_t index = 0; index < argument_count; index++)
+            {
+                VariantValue argument;
+                if (!cursor.read_variant(argument))
+                {
+                    return false;
+                }
+                command.arguments.push_back(argument);
+            }
+
+            if (p_handlers.call_method)
+            {
+                p_handlers.call_method(command);
+            }
+            continue;
+        }
+
         return false;
     }
 
@@ -573,6 +604,92 @@ bool NkgGodotHostCommandReader::read(
             if (p_handlers.set_property)
             {
                 p_handlers.set_property(command);
+            }
+            continue;
+        }
+
+        if (tag == "CALL_METHOD")
+        {
+            CallMethodCommand command;
+            int32_t argument_count = 0;
+            stream >> command.id >> command.method_name >> argument_count;
+            if (argument_count < 0)
+            {
+                return false;
+            }
+
+            command.arguments.reserve(static_cast<size_t>(argument_count));
+            for (int32_t index = 0; index < argument_count; index++)
+            {
+                SetPropertyCommand argument_command;
+                std::string variant_kind;
+                stream >> variant_kind;
+                if (variant_kind == "COLOR")
+                {
+                    argument_command.value.kind = VariantKind::Color;
+                    stream >> argument_command.value.r >> argument_command.value.g >> argument_command.value.b >> argument_command.value.a;
+                }
+                else if (variant_kind == "PACKED_VECTOR2_ARRAY")
+                {
+                    int32_t count = 0;
+                    argument_command.value.kind = VariantKind::PackedVector2Array;
+                    stream >> count;
+                    if (count < 0)
+                    {
+                        return false;
+                    }
+                    argument_command.value.vector2_array.reserve(static_cast<size_t>(count));
+                    for (int32_t point_index = 0; point_index < count; point_index++)
+                    {
+                        Vector2Value point;
+                        stream >> point.x >> point.y;
+                        argument_command.value.vector2_array.push_back(point);
+                    }
+                }
+                else if (variant_kind == "STRING")
+                {
+                    std::string encoded;
+                    std::vector<uint8_t> decoded;
+                    argument_command.value.kind = VariantKind::String;
+                    stream >> encoded;
+                    if (!base64_decode(encoded, decoded))
+                    {
+                        return false;
+                    }
+                    argument_command.value.text.assign(reinterpret_cast<const char*>(decoded.data()), decoded.size());
+                }
+                else if (variant_kind == "BOOL")
+                {
+                    int32_t boolean = 0;
+                    argument_command.value.kind = VariantKind::Bool;
+                    stream >> boolean;
+                    argument_command.value.boolean = boolean != 0;
+                }
+                else if (variant_kind == "INTEGER")
+                {
+                    argument_command.value.kind = VariantKind::Integer;
+                    stream >> argument_command.value.integer;
+                }
+                else if (variant_kind == "FLOAT")
+                {
+                    argument_command.value.kind = VariantKind::Float;
+                    stream >> argument_command.value.number;
+                }
+                else if (variant_kind == "VECTOR2")
+                {
+                    argument_command.value.kind = VariantKind::Vector2;
+                    stream >> argument_command.value.vector2.x >> argument_command.value.vector2.y;
+                }
+                else
+                {
+                    return false;
+                }
+                command.arguments.push_back(argument_command.value);
+            }
+
+            if (p_handlers.call_method)
+            {
+                p_handlers.call_method(command);
             }
             continue;
         }

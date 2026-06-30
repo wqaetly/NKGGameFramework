@@ -131,10 +131,11 @@ public sealed class GodotHostCommandBufferTests
         node.SetTransform2D(12.5, 30.25, rotation: 0.5, scaleX: 2, scaleY: 3);
         node.SetVisible(true);
         node.SetProperty("color", GodotVariant.FromColor(new GodotColor(0.2, 0.7, 0.9)));
+        node.Call("set_z_index", GodotVariant.FromInteger(2));
         node.Destroy();
 
         Assert.Equal(
-            "CREATE_NODE 10 Node2D Player\nSET_PARENT 10 0\nSET_TRANSFORM2D 10 12.5 30.25 0.5 2 3\nSET_VISIBLE 10 1\nSET_PROPERTY 10 color COLOR 0.2 0.7 0.9 1\nDESTROY_OBJECT 10\nEND",
+            "CREATE_NODE 10 Node2D Player\nSET_PARENT 10 0\nSET_TRANSFORM2D 10 12.5 30.25 0.5 2 3\nSET_VISIBLE 10 1\nSET_PROPERTY 10 color COLOR 0.2 0.7 0.9 1\nCALL_METHOD 10 set_z_index 1 INTEGER 2\nDESTROY_OBJECT 10\nEND",
             buffer.BuildText());
     }
 
@@ -247,6 +248,39 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal(4, reader.ReadDouble());
         Assert.Equal(-8, reader.ReadDouble());
 
+        Assert.Equal(255, reader.ReadByte());
+    }
+
+    [Fact]
+    public void Command_buffer_writes_call_method_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.CallMethod(
+            11,
+            "set_text",
+            [GodotVariant.FromString("Hello method"), GodotVariant.FromBool(false)]);
+
+        Assert.Equal(
+            "CALL_METHOD 11 set_text 2 STRING SGVsbG8gbWV0aG9k BOOL 0\nEND",
+            buffer.BuildText());
+    }
+
+    [Fact]
+    public void Command_buffer_encodes_call_method_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.CallMethod(11, "set_text", [GodotVariant.FromString("Hello method")]);
+
+        using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
+
+        Assert.Equal(9, reader.ReadByte());
+        Assert.Equal(11, reader.ReadInt32());
+        Assert.Equal("set_text", ReadString(reader));
+        Assert.Equal(1, reader.ReadInt32());
+        Assert.Equal(3, reader.ReadByte());
+        Assert.Equal("Hello method", ReadString(reader));
         Assert.Equal(255, reader.ReadByte());
     }
 

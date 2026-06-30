@@ -32,6 +32,11 @@ public readonly struct GodotNode
         _commands.SetProperty(Id, propertyName, value);
     }
 
+    public void Call(string methodName, params GodotVariant[] arguments)
+    {
+        _commands.CallMethod(Id, methodName, arguments);
+    }
+
     public void Destroy()
     {
         _commands.Destroy(Id);
