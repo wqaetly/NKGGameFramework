@@ -44,4 +44,4 @@ Native build inputs are kept outside this repository by default:
 
 `tools/ensure-godot-4.7.ps1` downloads the official Godot 4.7 stable Windows build and clones/updates official `godot-cpp` when those local cache entries are missing.
 
-The next integration step is to replace the current `GodotHostCommandBuffer` text transport with a typed ABI or generated host-service binding, then extend the same bridge to mobile/Web export templates.
+The next integration step is to replace the current `NKGCB1` base64 string envelope with a direct typed byte-buffer ABI or generated host-service binding, then extend the same bridge to mobile/Web export templates.

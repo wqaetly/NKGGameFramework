@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include "nkg_godot_debug_transport.h"
-#include "nkg_godot_host_command_text_reader.h"
+#include "nkg_godot_host_command_reader.h"
 #include "nkg_godot_node_registry.h"
 #include "nkg_leanclr_plane_bridge.h"
 
@@ -53,7 +53,7 @@ private:
 
     Ref<NkgLeanClrPlaneBridge> bridge;
     NkgGodotDebugTransport debug_transport;
-    NkgGodotHostCommandTextReader command_reader;
+    NkgGodotHostCommandReader command_reader;
     NkgGodotNodeRegistry visuals;
     Label* hud_label = nullptr;
     String bridge_status = "boot";

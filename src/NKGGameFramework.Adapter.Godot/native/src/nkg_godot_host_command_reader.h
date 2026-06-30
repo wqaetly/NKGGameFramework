@@ -9,7 +9,7 @@
 namespace godot
 {
 
-class NkgGodotHostCommandTextReader
+class NkgGodotHostCommandReader
 {
 public:
     struct FrameCommand

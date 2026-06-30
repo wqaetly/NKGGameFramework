@@ -227,11 +227,11 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
 
     command_reader.read(
         p_snapshot,
-        [this](const NkgGodotHostCommandTextReader::FrameCommand& command) {
+        [this](const NkgGodotHostCommandReader::FrameCommand& command) {
             score = command.primary_value;
             lives = command.secondary_value;
         },
-        [this](const NkgGodotHostCommandTextReader::Node2DCommand& command) {
+        [this](const NkgGodotHostCommandReader::Node2DCommand& command) {
             sync_visual(String(command.kind.c_str()), command.id, command.x, command.y);
             if (command.kind == "PLAYER")
             {

@@ -27,7 +27,7 @@ add_subdirectory("${LEANCLR_ROOT}/src/runtime" "${CMAKE_BINARY_DIR}/leanclr-runt
 add_library(nkg_leanclr_bridge SHARED
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_debug_http_server.cpp"
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_debug_transport.cpp"
-    "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_host_command_text_reader.cpp"
+    "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_host_command_reader.cpp"
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_node_registry.cpp"
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_leanclr_runtime_bridge.cpp"
     src/nkg_leanclr_plane_bridge.cpp

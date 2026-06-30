@@ -85,7 +85,7 @@ flowchart TD
     Input --> Bridge
     BindMethods --> ManagedStep["Call ClearInput / Press* / StepSession"]
     ManagedStep --> NkgRuntime["NKG RuntimeContext + World + Scene + ECS systems"]
-    NkgRuntime --> Snapshot["GodotHostCommandBuffer FRAME + NODE2D commands"]
+    NkgRuntime --> Snapshot["GodotHostCommandBuffer NKGCB1 binary commands"]
     NkgRuntime --> DebugSnapshot["Diagnostics WebDebug endpoint dispatcher"]
     Snapshot --> Host
     Host --> GodotObjects["Create/update Godot Polygon2D and Label objects"]
@@ -122,8 +122,8 @@ sequenceDiagram
         Bridge->>Managed: StepSession()
         Managed->>NKG: apply input + RuntimeContext.Update + World.Update
         NKG-->>Managed: ECS player/enemy/bullet state
-        Managed-->>Bridge: "FRAME ... NODE2D ..."
-        Bridge-->>Host: host command text buffer
+        Managed-->>Bridge: "NKGCB1 base64 binary command buffer"
+        Bridge-->>Host: host command buffer envelope
         Host->>Obj: create/update/destroy Polygon2D objects
         Host->>Obj: update HUD Label
     end
@@ -155,7 +155,7 @@ System.Net debug transport
 | `ClearInput()` | 清空本帧输入 |
 | `PressLeft()` / `PressRight()` / `PressUp()` / `PressDown()` | 写入本帧移动输入 |
 | `PressFire()` | 写入本帧开火输入 |
-| `StepSession()` | 推进一帧 NKG runtime/ECS，并返回 Godot host command text buffer |
+| `StepSession()` | 推进一帧 NKG runtime/ECS，并返回 Godot host command buffer envelope |
 | `GetSessionStatus()` | 返回分数、生命和结束状态 |
 | `HandleDebugRequest()` | 处理 native transport 转发的 WebDebug health/snapshot/stream/control/mutation/dump 请求 |
 
@@ -178,7 +178,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandTextReader` 是临时 host command text reader。它负责解析 `GodotHostCommandBuffer` 输出的 `FRAME` / `NODE2D` 命令，并兼容旧 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 `NKGCB1` binary envelope，并兼容旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotNodeRegistry` 是最小 Godot object host registry。它负责按稳定 key 管理 `Node2D`、标记每帧可见对象，并在安全点 `queue_free` 本帧未出现的节点。飞机样例仍然决定具体创建 `Polygon2D` 的形状、颜色和位置。
 
@@ -205,7 +205,7 @@ Pace: slow showcase tuning
 Managed simulation step: fixed 144Hz
 ```
 
-当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 `FRAME` / `NODE2D` host command text buffer；它仍是文本 ABI，目的是先把样例手写 snapshot 字符串沉淀为 adapter API。下一步应把 text buffer 的传输替换成 typed native payload、二进制 command buffer 或生成式 host-service binding。
+当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 `NKGCB1` base64 binary command buffer envelope；native 侧由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。它仍借用 `string` 作为 LeanCLR 返回外壳，下一步应把这层外壳替换成 direct byte buffer ABI 或生成式 host-service binding。
 
 ## Build And Verification Flow
 
@@ -254,7 +254,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 把 `GodotHostCommandBuffer` 的 text transport 替换成 typed native payload 或 binary command buffer。
+- 把 `GodotHostCommandBuffer` 的 `NKGCB1` base64 string envelope 替换成 direct byte buffer ABI。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。
