@@ -106,11 +106,11 @@ public static class GameDebugDumpAnalyzer
                                 component,
                                 serializer,
                                 structuredOptions);
-                            var componentBytes = GetJsonBytes(materializedComponent);
+                            var componentBytes = EstimateComponentBytes(materializedComponent);
                             var payloadBytes = GetStringBytes(materializedComponent.Value.Payload);
                             var structuredBytes = materializedComponent.Value.Structured is null
                                 ? 0
-                                : GetJsonBytes(materializedComponent.Value.Structured);
+                                : EstimateStructuredBytes(materializedComponent.Value.Structured);
                             var typeKey = CreateTypeKey(materializedComponent.Type);
                             var componentKey = $"{entityKey}/component/{typeKey}";
 
@@ -221,6 +221,23 @@ public static class GameDebugDumpAnalyzer
         Accumulator total)
     {
         var typeKey = CreateTypeKey(store.Type);
+        if (StringComparer.Ordinal.Equals(store.Format, GameDebugComponentStoreBlockSerializer.StructuredFormat) &&
+            GameDebugComponentStoreBlockSerializer.TryDeserializeStructuredValues(store, out var structuredValues, out _))
+        {
+            AnalyzeStructuredStoreBlock(
+                store,
+                structuredValues,
+                sceneKey,
+                typeKey,
+                types,
+                fields,
+                components,
+                entities,
+                scenes,
+                total);
+            return;
+        }
+
         Array values;
         try
         {
@@ -259,7 +276,62 @@ public static class GameDebugDumpAnalyzer
                         IncludeStructured = true,
                         StructuredCaptureOptions = structuredOptions,
                     }).Structured;
-            var structuredBytes = structured is null ? 0 : GetJsonBytes(structured);
+            var structuredBytes = structured is null ? 0 : EstimateStructuredBytes(structured);
+            var totalBytes = payloadBytes + structuredBytes;
+
+            Add(types, typeKey, store.Type.Name, totalBytes, payloadBytes, structuredBytes);
+            Add(components, componentKey, store.Type.Name, totalBytes, payloadBytes, structuredBytes);
+            Add(entities, entityKey, $"Entity {entityId}", totalBytes, payloadBytes, structuredBytes);
+            Add(scenes, sceneKey, sceneKey, totalBytes, payloadBytes, structuredBytes);
+            total.Add(totalBytes, payloadBytes, structuredBytes);
+
+            if (structured is null)
+            {
+                continue;
+            }
+
+            if (structured.Children.Count == 0)
+            {
+                AddFields(fields, typeKey, store.Type.Name, structured, string.Empty);
+            }
+            else
+            {
+                foreach (var child in structured.Children)
+                {
+                    AddFields(fields, typeKey, store.Type.Name, child, string.Empty);
+                }
+            }
+        }
+    }
+
+    private static void AnalyzeStructuredStoreBlock(
+        GameDebugDumpComponentStoreBlock store,
+        IReadOnlyList<ComponentValueDebugSnapshot> values,
+        string sceneKey,
+        string typeKey,
+        Dictionary<string, Accumulator> types,
+        Dictionary<string, Accumulator> fields,
+        Dictionary<string, Accumulator> components,
+        Dictionary<string, Accumulator> entities,
+        Dictionary<string, Accumulator> scenes,
+        Accumulator total)
+    {
+        if (values.Count == 0)
+        {
+            Add(types, typeKey, store.Type.Name, store.Payload.LongLength, 0, 0);
+            Add(scenes, sceneKey, sceneKey, store.Payload.LongLength, 0, 0);
+            total.Add(store.Payload.LongLength, 0, 0);
+            return;
+        }
+
+        for (var row = 0; row < values.Count; row++)
+        {
+            var entityId = store.EntityIds[row];
+            var entityKey = $"{sceneKey}/entity/{entityId}";
+            var componentKey = $"{entityKey}/component/{typeKey}";
+            var structured = values[row].Structured;
+            var structuredBytes = structured is null ? 0 : EstimateStructuredBytes(structured);
+            var payloadBytes = DistributeBytes(store.Payload.LongLength, row, values.Count);
             var totalBytes = payloadBytes + structuredBytes;
 
             Add(types, typeKey, store.Type.Name, totalBytes, payloadBytes, structuredBytes);
@@ -302,7 +374,7 @@ public static class GameDebugDumpAnalyzer
 
         if (!string.IsNullOrEmpty(currentPath))
         {
-            var bytes = GetJsonBytes(node);
+            var bytes = EstimateStructuredBytes(node);
             Add(fields, $"{typeKey}.{currentPath}", $"{typeName}.{currentPath}", bytes, 0, bytes);
         }
 
@@ -338,9 +410,80 @@ public static class GameDebugDumpAnalyzer
             .ToArray();
     }
 
-    private static int GetJsonBytes<T>(T value)
+    private static int EstimateComponentBytes(ComponentDebugSnapshot component)
     {
-        return JsonSerializer.SerializeToUtf8Bytes(value, GameDebugJson.Options).Length;
+        var total = 64;
+        total += EstimateTypeBytes(component.Type);
+        total += EstimateComponentValueBytes(component.Value);
+        total += EstimateGraphBytes(component.Graph);
+        return total;
+    }
+
+    private static int EstimateComponentValueBytes(ComponentValueDebugSnapshot value)
+    {
+        var total = 32;
+        total += GetStringBytes(value.Format);
+        total += GetStringBytes(value.Payload);
+        total += GetStringBytes(value.Error);
+        if (value.Structured is not null)
+        {
+            total += EstimateStructuredBytes(value.Structured);
+        }
+
+        return total;
+    }
+
+    private static int EstimateGraphBytes(ComponentGraphDebugSnapshot graph)
+    {
+        var total = 32;
+        total += GetStringBytes(graph.Id);
+        total += GetStringBytes(graph.ParentId);
+        total += GetStringBytes(graph.Group);
+        if (graph.ParentType is not null)
+        {
+            total += EstimateTypeBytes(graph.ParentType);
+        }
+
+        return total;
+    }
+
+    private static int EstimateTypeBytes(DebugTypeInfo type)
+    {
+        return 24 +
+            GetStringBytes(type.Name) +
+            GetStringBytes(type.FullName) +
+            GetStringBytes(type.AssemblyName);
+    }
+
+    private static int EstimateStructuredBytes(ComponentValueDebugNode node)
+    {
+        var total = 32;
+        total += GetStringBytes(node.Kind);
+        total += GetStringBytes(node.Name);
+        total += EstimateTypeBytes(node.Type);
+        total += GetStringBytes(node.Value);
+        total += GetStringBytes(node.Error);
+        if (node.ElementType is not null)
+        {
+            total += EstimateTypeBytes(node.ElementType);
+        }
+
+        foreach (var option in node.Options)
+        {
+            total += GetStringBytes(option);
+        }
+
+        foreach (var child in node.Children)
+        {
+            total += EstimateStructuredBytes(child);
+        }
+
+        if (node.ElementTemplate is not null)
+        {
+            total += EstimateStructuredBytes(node.ElementTemplate);
+        }
+
+        return total;
     }
 
     private static int GetStringBytes(string? value)

@@ -18,14 +18,11 @@ public sealed class GameDebugHost : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
     private readonly SemaphoreSlim _connectionSlots;
     private readonly object _connectionGate = new();
-    private readonly object _debugStateGate;
     private readonly UniTask _acceptLoop;
     private readonly string _endpointPrefix;
-    private readonly GameDebugController _control;
     private readonly GameDebugFramePublisher _frames;
-    private readonly IGameDebugSnapshotProvider _snapshots;
-    private readonly IGameDebugMutationHandler _mutations;
     private readonly GameDebugDumpRecorder _dumps;
+    private readonly GameDebugEndpointDispatcher _dispatcher;
     private int _activeConnectionCount;
     private UniTaskCompletionSource? _connectionsDrained;
     private bool _disposed;
@@ -34,24 +31,18 @@ public sealed class GameDebugHost : IAsyncDisposable
         TcpListener listener,
         Uri baseAddress,
         string endpointPrefix,
-        GameDebugController control,
         GameDebugFramePublisher frames,
-        IGameDebugSnapshotProvider snapshots,
-        IGameDebugMutationHandler mutations,
         GameDebugDumpRecorder dumps,
-        object debugStateGate,
+        GameDebugEndpointDispatcher dispatcher,
         int maxConnections)
     {
         _listener = listener;
         _connectionSlots = new SemaphoreSlim(maxConnections, maxConnections);
-        _debugStateGate = debugStateGate;
         BaseAddress = baseAddress;
         _endpointPrefix = endpointPrefix;
-        _control = control;
         _frames = frames;
-        _snapshots = snapshots;
-        _mutations = mutations;
         _dumps = dumps;
+        _dispatcher = dispatcher;
         _acceptLoop = AcceptLoopAsync();
     }
 
@@ -98,17 +89,28 @@ public sealed class GameDebugHost : IAsyncDisposable
             debugStateGate);
         var mutations = new GameDebugMutationHandler(session, debugOptions, serializer);
         var dumps = new GameDebugDumpRecorder(snapshots, control, frames, debugOptions, session, debugStateGate);
+        var dispatcher = new GameDebugEndpointDispatcher(new GameDebugEndpointDispatcherOptions
+        {
+            EndpointPrefix = endpointPrefix,
+            DefaultWaitForSnapshotFrame = true,
+            EnableMutations = hostOptions.EnableMutations,
+            Session = session,
+            Control = control,
+            Frames = frames,
+            ComponentValueSerializer = serializer,
+            Snapshots = snapshots,
+            Mutations = mutations,
+            Dumps = dumps,
+            DebugStateGate = debugStateGate,
+        });
 
         var host = new GameDebugHost(
             listener,
             CreateBaseAddress(hostOptions.Url, listener),
             endpointPrefix,
-            control,
             frames,
-            snapshots,
-            mutations,
             dumps,
-            debugStateGate,
+            dispatcher,
             hostOptions.MaxConnections);
         return Task.FromResult(host);
     }
@@ -141,6 +143,7 @@ public sealed class GameDebugHost : IAsyncDisposable
             }
 
             await WaitForConnectionsAsync();
+            _dispatcher.Dispose();
             _dumps.Dispose();
         }
 
@@ -350,236 +353,18 @@ public sealed class GameDebugHost : IAsyncDisposable
         DebugHttpRequest request,
         CancellationToken cancellationToken)
     {
-        if (StringComparer.OrdinalIgnoreCase.Equals(request.Method, "OPTIONS"))
-        {
-            await WriteNoContentAsync(stream, cancellationToken);
-            return;
-        }
-
-        if (!TryGetEndpoint(request.Path, out var endpoint))
-        {
-            await WriteJsonAsync(
-                stream,
-                404,
-                "Not Found",
-                new DebugErrorResponse("Debug endpoint was not found."),
-                cancellationToken);
-            return;
-        }
-
-        if (IsGet(request, endpoint, "/health"))
-        {
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                new DebugHealthResponse("ok", DateTimeOffset.UtcNow),
-                cancellationToken);
-            return;
-        }
-
-        if (IsGet(request, endpoint, "/snapshot"))
-        {
-            var captureOptions = CreateSnapshotCaptureOptions(request.Query);
-            var message = GetBool(request.Query, "waitForFrame") is false
-                ? CaptureCurrentSnapshotMessage(captureOptions)
-                : await CaptureSnapshotOnNextFrameAsync(captureOptions, cancellationToken);
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                message,
-                cancellationToken);
-            return;
-        }
-
-        if (IsGet(request, endpoint, "/stream"))
+        if (StringComparer.OrdinalIgnoreCase.Equals(request.Method, "GET") &&
+            TryGetEndpoint(request.Path, out var endpoint) &&
+            StringComparer.Ordinal.Equals(endpoint, "/stream"))
         {
             await StreamSnapshotsAsync(stream, request.Query, cancellationToken);
             return;
         }
 
-        if (IsGet(request, endpoint, "/control"))
-        {
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(_control.GetState),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/control"))
-        {
-            var body = ReadJsonBody<GameDebugControlRequest>(request);
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _control.Execute(body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/mutations"))
-        {
-            var body = ReadJsonBody<GameDebugMutationRequest>(request);
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => ExecutePausedMutation(body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsGet(request, endpoint, "/dump/recording"))
-        {
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(_dumps.GetState),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/dump/playback"))
-        {
-            var body = ReadJsonBody<GameDebugDumpPlaybackOpenRequest>(request);
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.OpenPlayback(body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/dump/playback/upload"))
-        {
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.OpenPlayback(request.Body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/dump/analysis"))
-        {
-            var body = ReadJsonBody<GameDebugDumpPlaybackOpenRequest>(request);
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.AnalyzeDump(body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/dump/analysis/upload"))
-        {
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.AnalyzeDump(request.Body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsGet(request, endpoint, "/dump/playback/frame"))
-        {
-            var frameIndex = GetInt(request.Query, "frameIndex") ?? GetInt(request.Query, "index") ?? 0;
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.GetPlaybackFrame(GetString(request.Query, "playbackId"), frameIndex)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsGet(request, endpoint, "/dump/playback/component"))
-        {
-            var body = new GameDebugDumpPlaybackComponentRequest(
-                GetString(request.Query, "playbackId"),
-                GetInt(request.Query, "frameIndex") ?? GetInt(request.Query, "index") ?? 0,
-                GetString(request.Query, "worldName") ?? GetString(request.Query, "world") ?? string.Empty,
-                GetString(request.Query, "sceneName") ?? GetString(request.Query, "scene") ?? string.Empty,
-                GetInt(request.Query, "entityId") ?? 0,
-                GetString(request.Query, "componentTypeFullName") ?? GetString(request.Query, "component") ?? string.Empty,
-                GetString(request.Query, "componentAssemblyName") ?? GetString(request.Query, "componentAssembly"));
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.GetPlaybackComponent(body)),
-                cancellationToken);
-            return;
-        }
-
-        if (IsPost(request, endpoint, "/dump/recording"))
-        {
-            var body = ReadJsonBody<GameDebugDumpRecordingRequest>(request);
-            await WriteJsonAsync(
-                stream,
-                200,
-                "OK",
-                ExecuteDebugOperation(() => _dumps.Execute(body)),
-                cancellationToken);
-            return;
-        }
-
-        await WriteJsonAsync(
-            stream,
-            405,
-            "Method Not Allowed",
-            new DebugErrorResponse("Debug endpoint does not support this method."),
-            cancellationToken);
-    }
-
-    private async UniTask<GameDebugSnapshotMessage> CaptureSnapshotOnNextFrameAsync(
-        GameDebugSnapshotCaptureOptions captureOptions,
-        CancellationToken cancellationToken)
-    {
-        var completion = new UniTaskCompletionSource<GameDebugSnapshotMessage>();
-
-        void OnFramePublished(GameDebugFrameInfo info)
-        {
-            _frames.FramePublished -= OnFramePublished;
-            try
-            {
-                completion.TrySetResult(CaptureSnapshotMessage(info, captureOptions));
-            }
-            catch (Exception exception)
-            {
-                completion.TrySetException(exception);
-            }
-        }
-
-        _frames.FramePublished += OnFramePublished;
-        using var cancellationRegistration = cancellationToken.Register(() =>
-            completion.TrySetException(new OperationCanceledException(cancellationToken)));
-        try
-        {
-            return await completion.Task;
-        }
-        finally
-        {
-            _frames.FramePublished -= OnFramePublished;
-        }
-    }
-
-    private GameDebugMutationResult ExecutePausedMutation(GameDebugMutationRequest request)
-    {
-        var state = _control.GetState();
-        return state is { IsPaused: true, PendingStepCount: 0 }
-            ? _mutations.Execute(request)
-            : new GameDebugMutationResult(false, "Pause debug playback before editing components.");
+        var response = await _dispatcher.HandleAsync(
+            new GameDebugEndpointRequest(request.Method, request.Target, request.Body),
+            cancellationToken).ConfigureAwait(false);
+        await WriteResponseAsync(stream, response, cancellationToken);
     }
 
     private async UniTask StreamSnapshotsAsync(
@@ -587,11 +372,8 @@ public sealed class GameDebugHost : IAsyncDisposable
         IReadOnlyDictionary<string, string> query,
         CancellationToken cancellationToken)
     {
-        var captureOptions = CreateSnapshotCaptureOptions(query) with
-        {
-            IncludeComponentPayloads = false,
-            IncludeStructuredComponentValues = false,
-        };
+        var captureOptions = GameDebugEndpointDispatcher.CreateStreamSnapshotCaptureOptions(
+            GameDebugEndpointDispatcher.CreateSnapshotCaptureOptions(query));
         var channel = System.Threading.Channels.Channel.CreateBounded<GameDebugSnapshotMessage>(new BoundedChannelOptions(16)
         {
             SingleReader = true,
@@ -601,7 +383,7 @@ public sealed class GameDebugHost : IAsyncDisposable
 
         void OnFramePublished(GameDebugFrameInfo info)
         {
-            var message = CaptureSnapshotMessage(info, captureOptions);
+            var message = _dispatcher.CaptureSnapshotMessage(info, captureOptions);
             channel.Writer.TryWrite(message);
         }
 
@@ -625,36 +407,6 @@ public sealed class GameDebugHost : IAsyncDisposable
         {
             _frames.FramePublished -= OnFramePublished;
             channel.Writer.TryComplete();
-        }
-    }
-
-    private GameDebugSnapshotMessage CaptureSnapshotMessage(
-        GameDebugFrameInfo frame,
-        GameDebugSnapshotCaptureOptions captureOptions)
-    {
-        return ExecuteDebugOperation(() => new GameDebugSnapshotMessage(
-            frame,
-            _snapshots.Capture(captureOptions),
-            _control.GetState()));
-    }
-
-    private GameDebugSnapshotMessage CaptureCurrentSnapshotMessage(
-        GameDebugSnapshotCaptureOptions captureOptions)
-    {
-        return CaptureSnapshotMessage(
-            _frames.GetLastPublished() ?? new GameDebugFrameInfo(
-                0,
-                "Snapshot",
-                0,
-                DateTimeOffset.UtcNow),
-            captureOptions);
-    }
-
-    private T ExecuteDebugOperation<T>(Func<T> operation)
-    {
-        lock (_debugStateGate)
-        {
-            return operation();
         }
     }
 
@@ -722,6 +474,7 @@ public sealed class GameDebugHost : IAsyncDisposable
 
         return new DebugHttpRequest(
             requestLine[0].ToUpperInvariant(),
+            requestLine[1],
             target.Path,
             target.Query,
             body);
@@ -941,26 +694,6 @@ public sealed class GameDebugHost : IAsyncDisposable
         return Uri.UnescapeDataString(value.Replace("+", " ", StringComparison.Ordinal));
     }
 
-    private static T ReadJsonBody<T>(DebugHttpRequest request)
-    {
-        if (request.Body.Length == 0)
-        {
-            throw new JsonException("The debug request body was empty.");
-        }
-
-        return JsonSerializer.Deserialize<T>(request.Body, GameDebugJson.Options)
-            ?? throw new JsonException($"The debug request body could not be deserialized as {typeof(T).Name}.");
-    }
-
-    private static async UniTask WriteNoContentAsync(
-        NetworkStream stream,
-        CancellationToken cancellationToken)
-    {
-        var headers = CreateHeaders(204, "No Content", "text/plain; charset=utf-8", 0, closeConnection: true);
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(headers), cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-    }
-
     private static async UniTask WriteJsonAsync(
         NetworkStream stream,
         int statusCode,
@@ -977,6 +710,25 @@ public sealed class GameDebugHost : IAsyncDisposable
             closeConnection: true);
         await stream.WriteAsync(Encoding.ASCII.GetBytes(headers), cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async UniTask WriteResponseAsync(
+        NetworkStream stream,
+        GameDebugEndpointResponse response,
+        CancellationToken cancellationToken)
+    {
+        var headers = CreateHeaders(
+            response.StatusCode,
+            response.ReasonPhrase,
+            response.ContentType,
+            response.Body.Length,
+            closeConnection: true);
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(headers), cancellationToken).ConfigureAwait(false);
+        if (response.Body.Length > 0)
+        {
+            await stream.WriteAsync(response.Body, cancellationToken).ConfigureAwait(false);
+        }
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1036,83 +788,6 @@ public sealed class GameDebugHost : IAsyncDisposable
             .Append(closeConnection ? "Connection: close\r\n" : string.Empty)
             .Append("\r\n")
             .ToString();
-    }
-
-    private static GameDebugSnapshotCaptureOptions CreateSnapshotCaptureOptions(
-        IReadOnlyDictionary<string, string> query)
-    {
-        return new GameDebugSnapshotCaptureOptions
-        {
-            WorldName = GetString(query, "world") ?? GetString(query, "worldName"),
-            SceneName = GetString(query, "scene") ?? GetString(query, "sceneName"),
-            EntityId = GetInt(query, "entityId"),
-            ComponentTypeFullName = GetString(query, "componentTypeFullName")
-                ?? GetString(query, "component"),
-            ComponentAssemblyName = GetString(query, "componentAssemblyName")
-                ?? GetString(query, "componentAssembly"),
-            EntityOffset = Math.Max(0, GetInt(query, "entityOffset") ?? GetInt(query, "offset") ?? 0),
-            EntityLimit = NormalizeLimit(GetInt(query, "entityLimit") ?? GetInt(query, "limit")),
-            IncludeComponentPayloads = GetBool(query, "includePayload")
-                ?? GetBool(query, "includeComponentPayloads")
-                ?? true,
-            IncludeStructuredComponentValues = GetBool(query, "includeStructured")
-                ?? GetBool(query, "includeStructuredComponentValues")
-                ?? true,
-        };
-    }
-
-    private static string? GetString(IReadOnlyDictionary<string, string> query, string key)
-    {
-        if (!query.TryGetValue(key, out var value))
-        {
-            return null;
-        }
-
-        return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
-
-    private static int? GetInt(IReadOnlyDictionary<string, string> query, string key)
-    {
-        return query.TryGetValue(key, out var value) && int.TryParse(value, out var result)
-            ? result
-            : null;
-    }
-
-    private static int? NormalizeLimit(int? value)
-    {
-        return value is > 0 ? value : null;
-    }
-
-    private static bool? GetBool(IReadOnlyDictionary<string, string> query, string key)
-    {
-        if (!query.TryGetValue(key, out var value))
-        {
-            return null;
-        }
-
-        if (bool.TryParse(value, out var result))
-        {
-            return result;
-        }
-
-        return value.Trim() switch
-        {
-            "1" => true,
-            "0" => false,
-            _ => null,
-        };
-    }
-
-    private static bool IsGet(DebugHttpRequest request, string endpoint, string expectedEndpoint)
-    {
-        return StringComparer.OrdinalIgnoreCase.Equals(request.Method, "GET")
-            && StringComparer.Ordinal.Equals(endpoint, expectedEndpoint);
-    }
-
-    private static bool IsPost(DebugHttpRequest request, string endpoint, string expectedEndpoint)
-    {
-        return StringComparer.OrdinalIgnoreCase.Equals(request.Method, "POST")
-            && StringComparer.Ordinal.Equals(endpoint, expectedEndpoint);
     }
 
     private static IPEndPoint CreateListenAddress(string url)
@@ -1179,6 +854,7 @@ public sealed class GameDebugHost : IAsyncDisposable
 
     private sealed record DebugHttpRequest(
         string Method,
+        string Target,
         string Path,
         IReadOnlyDictionary<string, string> Query,
         byte[] Body);
@@ -1208,10 +884,6 @@ public sealed class GameDebugHost : IAsyncDisposable
             }
         }
     }
-
-    private sealed record DebugHealthResponse(
-        string Status,
-        DateTimeOffset CapturedAt);
 
     private sealed record DebugErrorResponse(string Message);
 }

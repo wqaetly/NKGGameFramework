@@ -1,6 +1,8 @@
 param(
     [string]$Configuration = "Release",
-    [string]$GodotExe = "C:\study\godot\GodotEngine\Godot_v4.7-stable_win64_console.exe",
+    [string]$GodotExe,
+    [string]$GodotCppRoot,
+    [string]$LeanClrRoot,
     [switch]$HeadlessCheck,
     [switch]$SkipNativeBuild
 )
@@ -13,6 +15,26 @@ $godotProject = Join-Path $repoRoot "samples\GodotPlaneSample"
 $godotCacheDir = Join-Path $godotProject ".godot"
 $nativeBuildScript = Join-Path $godotProject "native\build-gdextension.ps1"
 $stageBclScript = Join-Path $godotProject "tools\stage-leanclr-bcl.ps1"
+$ensureScript = Join-Path $godotProject "tools\ensure-godot-4.7.ps1"
+
+$ensureArgs = @("-ExecutionPolicy", "Bypass", "-File", $ensureScript)
+if (-not [string]::IsNullOrWhiteSpace($GodotExe)) {
+    $ensureArgs += @("-GodotExe", $GodotExe)
+}
+if (-not [string]::IsNullOrWhiteSpace($GodotCppRoot)) {
+    $ensureArgs += @("-GodotCppRoot", $GodotCppRoot)
+}
+if (-not [string]::IsNullOrWhiteSpace($LeanClrRoot)) {
+    $ensureArgs += @("-LeanClrRoot", $LeanClrRoot)
+}
+if ($SkipNativeBuild) {
+    $ensureArgs += "-SkipGodotCpp"
+}
+
+$toolInfo = (& powershell @ensureArgs | Select-Object -Last 1) | ConvertFrom-Json
+$GodotExe = $toolInfo.GodotExe
+$GodotCppRoot = $toolInfo.GodotCppRoot
+$LeanClrRoot = $toolInfo.LeanClrRoot
 
 dotnet build $managedProject -c $Configuration
 if ($LASTEXITCODE -ne 0) {
@@ -20,13 +42,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not $SkipNativeBuild) {
-    powershell -ExecutionPolicy Bypass -File $nativeBuildScript -Configuration $Configuration -GodotExe $GodotExe
+    powershell -ExecutionPolicy Bypass -File $nativeBuildScript -Configuration $Configuration -GodotExe $GodotExe -GodotCppRoot $GodotCppRoot -LeanClrRoot $LeanClrRoot
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
 }
 
-powershell -ExecutionPolicy Bypass -File $stageBclScript
+$managedOutputDir = Join-Path (Split-Path $managedProject -Parent) "bin\$Configuration\net10.0"
+powershell -ExecutionPolicy Bypass -File $stageBclScript -ManagedAssemblyDir $managedOutputDir
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

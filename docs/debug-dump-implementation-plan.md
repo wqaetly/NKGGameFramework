@@ -19,7 +19,7 @@
 | Live component detail | 过滤到单个 entity/component 后用 Odin 生成 payload / structured | component detail、mutation 测试覆盖 |
 | Dump recording | 每帧捕获轻量 `GameDebugSnapshotMessage` + `BlockFrames` | host dump 测试验证 `.nkgdump` 有 block payload |
 | Store block payload | 每个 scene/component type 写 `entityIds + TComponent[]` Odin binary | ECS block roundtrip 测试覆盖 |
-| Dump file | `NKGDUMP3\n` container magic + gzip JSON document version | dump file reconstruction 测试覆盖 |
+| Dump file | `NKGDUMP4\n` container magic + framework binary document version | dump file reconstruction 测试覆盖 |
 | Dump playback | frame 返回轻量 snapshot，组件详情从 block row materialize structured | playback component 测试验证第 2 帧字段值 |
 | Dump analysis | 优先分析 block payload，并按需 materialize structured 做字段排行 | recorded block dump analysis 测试覆盖 |
 | Web UI | 集成录制、加载、回放、分析 dockview | TypeScript/Vite build 覆盖 |
@@ -34,7 +34,7 @@ flowchart TD
     Block --> Odin["Odin binary array payload"]
     Light --> Dump["GameDebugDumpDocument"]
     Odin --> Dump
-    Dump --> File["NKGDUMP3 gzip .nkgdump"]
+    Dump --> File["NKGDUMP4 binary .nkgdump"]
 ```
 
 `GameDebugDumpDocument.Frames` 保留 UI 回放需要的轻量 frame 信息。`GameDebugDumpDocument.BlockFrames` 保存真实组件值，每个 block 对应一个 scene 下的一种组件类型。默认录制不截断；配置 `GameDebugOptions.MaxRecordedDumpFrames` 后只保留最近 N 帧，并在 manifest 中报告 `DroppedFrameCount`。

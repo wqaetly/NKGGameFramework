@@ -31,29 +31,49 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
     {
         options ??= GameDebugSnapshotCaptureOptions.Default;
 
+        var runtimeContexts = _session.GetRuntimeContexts();
+        var runtimes = new List<RuntimeContextDebugSnapshot>(runtimeContexts.Count);
+        for (var index = 0; index < runtimeContexts.Count; index++)
+        {
+            runtimes.Add(CaptureRuntime(runtimeContexts[index], index));
+        }
+
+        var worlds = new List<WorldDebugSnapshot>();
+        foreach (var world in _session.GetWorlds())
+        {
+            if (!MatchesWorld(world, options))
+            {
+                continue;
+            }
+
+            var worldSnapshot = CaptureWorld(world, options);
+            if (string.IsNullOrWhiteSpace(options.SceneName) || worldSnapshot.SceneCount > 0)
+            {
+                worlds.Add(worldSnapshot);
+            }
+        }
+
         return new GameDebugSnapshot(
             DateTimeOffset.UtcNow,
-            _session.GetRuntimeContexts().Select(CaptureRuntime).ToArray(),
-            _session.GetWorlds()
-                .Where(world => MatchesWorld(world, options))
-                .Select(world => CaptureWorld(world, options))
-                .Where(world => string.IsNullOrWhiteSpace(options.SceneName) || world.SceneCount > 0)
-                .ToArray());
+            runtimes,
+            worlds);
     }
 
     private RuntimeContextDebugSnapshot CaptureRuntime(RuntimeContext runtime, int index)
     {
-        var modules = runtime.Modules
-            .Select(static module => new ModuleDebugSnapshot(
+        var modules = new List<ModuleDebugSnapshot>(runtime.Modules.Count);
+        var procedureModules = new List<ProcedureModuleDebugSnapshot>();
+        foreach (var module in runtime.Modules)
+        {
+            modules.Add(new ModuleDebugSnapshot(
                 DebugSnapshotTypeNames.Create(module.GetType()),
                 module.Priority,
-                module is IUpdateModule))
-            .ToArray();
-
-        var procedureModules = runtime.Modules
-            .OfType<ProcedureModule>()
-            .Select(CaptureProcedureModule)
-            .ToArray();
+                module is IUpdateModule));
+            if (module is ProcedureModule procedureModule)
+            {
+                procedureModules.Add(CaptureProcedureModule(procedureModule));
+            }
+        }
 
         return new RuntimeContextDebugSnapshot(
             index,
@@ -66,60 +86,88 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
     {
         module.TryGetCurrentProcedure(out var currentProcedure);
 
+        var procedures = new List<ProcedureDebugSnapshot>();
+        foreach (var procedure in module.Procedures)
+        {
+            procedures.Add(new ProcedureDebugSnapshot(
+                DebugSnapshotTypeNames.Create(procedure.GetType()),
+                ReferenceEquals(procedure, currentProcedure)));
+        }
+
         return new ProcedureModuleDebugSnapshot(
             DebugSnapshotTypeNames.Create(module.GetType()),
             module.IsProcedureInitialized,
             currentProcedure?.GetType().Name,
             module.IsProcedureInitialized ? module.CurrentProcedureTime : 0,
-            module.Procedures
-                .Select(procedure => new ProcedureDebugSnapshot(
-                    DebugSnapshotTypeNames.Create(procedure.GetType()),
-                    ReferenceEquals(procedure, currentProcedure)))
-                .ToArray());
+            procedures);
     }
 
     private WorldDebugSnapshot CaptureWorld(World world, GameDebugSnapshotCaptureOptions options)
     {
-        var scenes = world.Scenes
-            .Where(scene => MatchesScene(scene, options))
-            .Select(scene => CaptureScene(scene, options))
-            .ToArray();
+        var scenes = new List<SceneDebugSnapshot>();
+        foreach (var scene in world.Scenes)
+        {
+            if (MatchesScene(scene, options))
+            {
+                scenes.Add(CaptureScene(scene, options));
+            }
+        }
 
         return new WorldDebugSnapshot(
             world.Name,
-            scenes.Length,
+            scenes.Count,
             scenes);
     }
 
     private SceneDebugSnapshot CaptureScene(Scene scene, GameDebugSnapshotCaptureOptions options)
     {
-        var entities = scene.Entities
-            .Where(entity => MatchesEntity(entity, options));
-        if (options.EntityId is null)
-        {
-            if (options.EntityOffset > 0)
-            {
-                entities = entities.Skip(options.EntityOffset);
-            }
-
-            if (options.EntityLimit is { } limit)
-            {
-                entities = entities.Take(limit);
-            }
-        }
-
         var valueOptions = new GameDebugComponentValueSerializationOptions
         {
             IncludePayload = options.IncludeComponentPayloads,
             IncludeStructured = options.IncludeStructuredComponentValues,
         };
 
+        var systems = new List<SystemDebugSnapshot>();
+        foreach (var system in scene.Systems.Systems)
+        {
+            systems.Add(CaptureSystem(system));
+        }
+
+        var componentStores = new List<ComponentStoreDebugSnapshot>();
+        foreach (var store in scene.ComponentStores)
+        {
+            componentStores.Add(CaptureComponentStore(store));
+        }
+
+        var entities = new List<EntityDebugSnapshot>();
+        var skipped = 0;
+        foreach (var entity in scene.Entities)
+        {
+            if (!MatchesEntity(entity, options))
+            {
+                continue;
+            }
+
+            if (options.EntityId is null && skipped < options.EntityOffset)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (options.EntityId is null && options.EntityLimit is { } limit && entities.Count >= limit)
+            {
+                break;
+            }
+
+            entities.Add(CaptureEntity(scene, entity, valueOptions, options));
+        }
+
         return new SceneDebugSnapshot(
             scene.Name,
             scene.EntityCount,
-            scene.Systems.Systems.Select(CaptureSystem).ToArray(),
-            scene.ComponentStores.Select(CaptureComponentStore).ToArray(),
-            entities.Select(entity => CaptureEntity(scene, entity, valueOptions, options)).ToArray());
+            systems,
+            componentStores,
+            entities);
     }
 
     private static SystemDebugSnapshot CaptureSystem(ISystem system)
@@ -150,26 +198,33 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
         }
 
         var components = scene.GetComponents(entity);
-        var componentTypes = components
-            .Select(static component => component.ComponentType)
-            .ToHashSet();
-        var visibleComponents = components
-            .Where(component => MatchesComponent(component.ComponentType, options))
-            .ToArray();
-        var visibleTypes = visibleComponents
-            .Select(static component => component.ComponentType)
-            .ToArray();
+        var componentTypes = new HashSet<Type>();
+        var visibleComponents = new List<EcsComponentDebugView>();
+        var visibleTypes = new List<Type>();
+        foreach (var component in components)
+        {
+            componentTypes.Add(component.ComponentType);
+            if (MatchesComponent(component.ComponentType, options))
+            {
+                visibleComponents.Add(component);
+                visibleTypes.Add(component.ComponentType);
+            }
+        }
+
         var summaries = CaptureEntitySummaries(scene, entity, visibleTypes);
+        var componentSnapshots = new List<ComponentDebugSnapshot>(visibleComponents.Count);
+        foreach (var component in visibleComponents)
+        {
+            componentSnapshots.Add(new ComponentDebugSnapshot(
+                DebugSnapshotTypeNames.Create(component.ComponentType),
+                CaptureComponentValue(component, valueOptions),
+                CaptureComponentGraph(component.ComponentType, componentTypes)));
+        }
 
         return new EntityDebugSnapshot(
             entity.Id.Value,
             entity.Version,
-            visibleComponents
-                .Select(component => new ComponentDebugSnapshot(
-                    DebugSnapshotTypeNames.Create(component.ComponentType),
-                    CaptureComponentValue(component, valueOptions),
-                    CaptureComponentGraph(component.ComponentType, componentTypes)))
-                .ToArray(),
+            componentSnapshots,
             summaries.Skills,
             summaries.Buffs);
     }
@@ -180,21 +235,31 @@ public sealed class GameDebugSnapshotProvider : IGameDebugSnapshotProvider
         GameDebugSnapshotCaptureOptions? options)
     {
         var componentTypes = scene.GetComponentTypes(entity);
-        var componentTypeSet = componentTypes.ToHashSet();
-        var visibleTypes = componentTypes
-            .Where(componentType => MatchesComponent(componentType, options))
-            .ToArray();
+        var componentTypeSet = new HashSet<Type>();
+        var visibleTypes = new List<Type>();
+        foreach (var componentType in componentTypes)
+        {
+            componentTypeSet.Add(componentType);
+            if (MatchesComponent(componentType, options))
+            {
+                visibleTypes.Add(componentType);
+            }
+        }
+
         var summaries = CaptureEntitySummaries(scene, entity, visibleTypes);
+        var componentSnapshots = new List<ComponentDebugSnapshot>(visibleTypes.Count);
+        foreach (var componentType in visibleTypes)
+        {
+            componentSnapshots.Add(new ComponentDebugSnapshot(
+                DebugSnapshotTypeNames.Create(componentType),
+                EmptyComponentValue,
+                CaptureComponentGraph(componentType, componentTypeSet)));
+        }
 
         return new EntityDebugSnapshot(
             entity.Id.Value,
             entity.Version,
-            visibleTypes
-                .Select(componentType => new ComponentDebugSnapshot(
-                    DebugSnapshotTypeNames.Create(componentType),
-                    EmptyComponentValue,
-                    CaptureComponentGraph(componentType, componentTypeSet)))
-                .ToArray(),
+            componentSnapshots,
             summaries.Skills,
             summaries.Buffs);
     }

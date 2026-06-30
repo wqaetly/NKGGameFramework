@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using OdinSerializer;
@@ -7,7 +6,8 @@ namespace NKGGameFramework.Diagnostics;
 
 internal static class GameDebugOdinSerialization
 {
-    private static readonly ConcurrentDictionary<Type, GameDebugSerializedMember[]> MemberCache = [];
+    private static readonly object MemberCacheGate = new();
+    private static readonly Dictionary<Type, GameDebugSerializedMember[]> MemberCache = [];
 
     public static ISerializationPolicy Policy { get; } = new CustomSerializationPolicy(
         "NKGGameFramework.DebugComponent",
@@ -31,7 +31,16 @@ internal static class GameDebugOdinSerialization
     public static IReadOnlyList<GameDebugSerializedMember> GetSerializedMembers(Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
-        return MemberCache.GetOrAdd(type, CreateSerializedMembers);
+        lock (MemberCacheGate)
+        {
+            if (!MemberCache.TryGetValue(type, out var members))
+            {
+                members = CreateSerializedMembers(type);
+                MemberCache.Add(type, members);
+            }
+
+            return members;
+        }
     }
 
     public static bool TryGetSerializedMember(
@@ -124,7 +133,7 @@ internal static class GameDebugOdinSerialization
         var members = new List<GameDebugSerializedMember>();
         var memberNames = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var field in type.GetFields(flags).OrderBy(static field => field.MetadataToken))
+        foreach (var field in type.GetFields(flags))
         {
             if (!ShouldSerializeMember(field))
             {
@@ -153,7 +162,7 @@ internal static class GameDebugOdinSerialization
                 CanWrite: !field.IsInitOnly));
         }
 
-        foreach (var property in type.GetProperties(flags).OrderBy(static property => property.MetadataToken))
+        foreach (var property in type.GetProperties(flags))
         {
             if (!ShouldSerializeMember(property) ||
                 property.GetMethod is null ||

@@ -1,5 +1,3 @@
-using NKGGameFramework.Diagnostics;
-
 namespace NKGGameFramework.Diagnostics;
 
 public sealed record GameDebugSnapshot(

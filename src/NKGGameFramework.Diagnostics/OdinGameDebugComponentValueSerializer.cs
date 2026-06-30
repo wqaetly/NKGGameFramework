@@ -11,45 +11,61 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
     {
         options ??= GameDebugComponentValueSerializationOptions.Default;
 
-        try
-        {
-            if (value is null)
-            {
-                return new ComponentValueDebugSnapshot(
-                    "odin-json",
-                    Payload: null,
-                    Error: null,
-                    options.IncludeStructured
-                        ? new ComponentValueDebugNode
-                        {
-                            Kind = "null",
-                            Type = DebugSnapshotTypeNames.Create(typeof(object)),
-                            Editable = true,
-                            Value = null,
-                        }
-                        : null);
-            }
-
-            return new ComponentValueDebugSnapshot(
-                "odin-json",
-                options.IncludePayload
-                    ? Encoding.UTF8.GetString(SerializationUtility.SerializeValueWeak(
-                        value,
-                        DataFormat.JSON,
-                        GameDebugOdinSerialization.CreateSerializationContext()))
-                    : null,
-                Error: null,
-                options.IncludeStructured
-                    ? GameDebugStructuredComponentValue.Capture(value, options.StructuredCaptureOptions)
-                    : null);
-        }
-        catch (Exception exception)
+        if (value is null)
         {
             return new ComponentValueDebugSnapshot(
                 "odin-json",
                 Payload: null,
-                exception.Message);
+                Error: null,
+                options.IncludeStructured
+                    ? new ComponentValueDebugNode
+                    {
+                        Kind = "null",
+                        Type = DebugSnapshotTypeNames.Create(typeof(object)),
+                        Editable = true,
+                        Value = null,
+                    }
+                    : null);
         }
+
+        string? payload = null;
+        ComponentValueDebugNode? structured = null;
+        List<string>? errors = null;
+
+        if (options.IncludePayload)
+        {
+            try
+            {
+                payload = Encoding.UTF8.GetString(SerializationUtility.SerializeValueWeak(
+                    value,
+                    DataFormat.JSON,
+                    GameDebugOdinSerialization.CreateSerializationContext()));
+            }
+            catch (Exception exception)
+            {
+                errors ??= [];
+                errors.Add(FormatException(exception));
+            }
+        }
+
+        if (options.IncludeStructured)
+        {
+            try
+            {
+                structured = GameDebugStructuredComponentValue.Capture(value, options.StructuredCaptureOptions);
+            }
+            catch (Exception exception)
+            {
+                errors ??= [];
+                errors.Add(FormatException(exception));
+            }
+        }
+
+        return new ComponentValueDebugSnapshot(
+            "odin-json",
+            payload,
+            errors is { Count: > 0 } ? string.Join(" | ", errors) : null,
+            structured);
     }
 
     public object Deserialize(ComponentValueDebugSnapshot value, Type expectedType)
@@ -97,4 +113,35 @@ public sealed class OdinGameDebugComponentValueSerializer : IGameDebugComponentV
         return GameDebugStructuredComponentValue.Apply(value.Structured, emptyResult, expectedType);
     }
 
+    private static string FormatException(Exception exception)
+    {
+        var builder = new StringBuilder();
+        AppendExceptionSummary(builder, exception);
+        if (exception.InnerException is { } inner)
+        {
+            builder.Append(" | inner: ");
+            AppendExceptionSummary(builder, inner);
+        }
+
+        if (!string.IsNullOrWhiteSpace(exception.StackTrace))
+        {
+            builder.Append(" | stack: ")
+                .Append(exception.StackTrace);
+        }
+
+        return builder.ToString();
+    }
+
+    private static StringBuilder AppendExceptionSummary(StringBuilder builder, Exception exception)
+    {
+        var typeName = exception.GetType().FullName ?? exception.GetType().Name;
+        builder.Append(typeName);
+        if (StringComparer.Ordinal.Equals(typeName, "System.IO.FileLoadException"))
+        {
+            return builder;
+        }
+
+        builder.Append(": ").Append(exception.Message);
+        return builder;
+    }
 }

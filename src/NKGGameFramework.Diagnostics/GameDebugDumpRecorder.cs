@@ -492,6 +492,26 @@ public sealed class GameDebugDumpRecorder : IDisposable
         GameDebugDumpComponentStoreBlock block,
         GameDebugDumpPlaybackComponentRequest request)
     {
+        if (StringComparer.Ordinal.Equals(block.Format, GameDebugComponentStoreBlockSerializer.StructuredFormat))
+        {
+            return GameDebugComponentStoreBlockSerializer.TryGetStructuredValue(
+                block,
+                request.EntityId,
+                out var structuredValue,
+                out var structuredError)
+                ? component with
+                {
+                    Value = structuredValue,
+                }
+                : component with
+                {
+                    Value = new ComponentValueDebugSnapshot(
+                        block.Format,
+                        Payload: null,
+                        structuredError),
+                };
+        }
+
         var row = Array.IndexOf(block.EntityIds, request.EntityId);
         if (row < 0)
         {

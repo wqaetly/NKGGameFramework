@@ -62,7 +62,7 @@ flowchart TD
     Stores --> Odin["serialize TComponent[] as Odin binary"]
     Snapshot --> Document["GameDebugDumpDocument"]
     Odin --> Document
-    Document --> File["NKGDUMP3 gzip .nkgdump"]
+    Document --> File["NKGDUMP4 binary .nkgdump"]
 ```
 
 这个设计避免了逐组件 payload 带来的重复类型信息、重复字段结构、字符串 payload 和大量临时对象。录制器也不需要知道 `SkillDefinition`、`BehaviorTreeDefinition` 或用户业务组件。默认录制保留全部帧；需要窗口化时可配置 `GameDebugOptions.MaxRecordedDumpFrames`，录制器会丢弃最旧帧并累计 `DroppedFrameCount`。

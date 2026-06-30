@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\samples\NKGGameFramework.GodotPlaneSample\NKGGameFramework.GodotPlaneSample.csproj" />
     <ProjectReference Include="..\..\src\NKGGameFramework.Diagnostics\NKGGameFramework.Diagnostics.csproj" />
     <ProjectReference Include="..\..\src\NKGGameFramework\NKGGameFramework.csproj" />
     <ProjectReference Include="..\..\src\NKGGameFramework.Hosting\NKGGameFramework.Hosting.csproj" />

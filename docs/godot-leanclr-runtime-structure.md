@@ -1,16 +1,16 @@
 # Godot + LeanCLR Runtime Structure
 
-本文记录当前 `NKGGameFramework` 接入 Godot 4.7 的运行结构。当前样例不启用 debug host，不依赖 Godot 官方 C# / GodotSharp，而是通过 GDExtension 在 Godot 进程内嵌入 LeanCLR，再由 LeanCLR 驱动 NKG managed 逻辑。
+本文记录当前 `NKGGameFramework` 接入 Godot 4.7 的运行结构。当前样例不依赖 Godot 官方 C# / GodotSharp，而是通过 GDExtension 在 Godot 进程内嵌入 LeanCLR，再由 LeanCLR 驱动 NKG managed 逻辑。桌面 WebDebug transport 由 Godot native 层承载，managed 侧只处理 NKG debug 命令和 payload，不打开 socket。
 
 ## Current Project Layout
 
 ```text
 NKGGameFramework/
   src/
-    NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization
+    NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization、轻量 debug DTO/control/frame
     NKGGameFramework.Adapter.Godot/      # Godot managed contracts，不引用 GodotSharp
     NKGGameFramework.Hosting/            # HTTP/SSE debug host，本样例不引用
-    NKGGameFramework.Diagnostics/        # debug DTO/领域模型，本样例不启动 transport
+    NKGGameFramework.Diagnostics/        # snapshot provider、mutation、dump、analysis、transport-independent WebDebug endpoint dispatcher
 
   samples/
     NKGGameFramework.GodotPlaneSample/   # C# managed 打飞机逻辑
@@ -35,18 +35,19 @@ NKGGameFramework/
           register_types.*               # 注册 NkgLeanClrPlaneBridge / NkgLeanClrPlaneHost
       tools/
         run-godot-plane.ps1              # 一键 build + stage BCL + run / headless check
-        stage-leanclr-bcl.ps1            # 从本机 .NET 10 复制 System*.dll 到项目内 BCL 目录
-        main_scene_smoke.gd              # 验证 Host 创建对象、玩家移动和开火
+        ensure-godot-4.7.ps1             # 下载官方 Godot 4.7 stable 并拉取官方 godot-cpp
+        stage-leanclr-bcl.ps1            # 从 managed 输出引用闭包 stage 所需 .NET 10 runtime assemblies
+        main_scene_smoke.gd              # 验证 Host 创建对象、玩家移动、开火和完整 native WebDebug HTTP
         native_bridge_smoke.gd           # 验证底层 LeanCLR bridge
 ```
 
-外部依赖默认放在仓库外：
+外部依赖默认放在仓库外，并由 `tools/ensure-godot-4.7.ps1` 自动补齐：
 
 ```text
-C:\study\godot\GodotEngine\Godot_v4.7-stable_win64*.exe
-C:\study\wqaetly\new\leanclr
-C:\study\wqaetly\new\.cache\godot-cpp
-C:\study\wqaetly\new\.cache\godot-api-4.7\extension_api.json
+..\leanclr
+..\.cache\godot\4.7-stable\Godot_v4.7-stable_win64_console.exe
+..\.cache\godot-cpp
+..\.cache\godot-api-4.7\extension_api.json
 ```
 
 ## Runtime Flow
@@ -54,7 +55,7 @@ C:\study\wqaetly\new\.cache\godot-api-4.7\extension_api.json
 ```mermaid
 flowchart TD
     User["User launches run-godot-plane.ps1"] --> BuildManaged["dotnet build NKGGameFramework.GodotPlaneSample"]
-    User --> StageBcl["stage System*.dll into leanclr_bcl/net10.0"]
+    User --> StageBcl["stage runtime assembly closure into leanclr_bcl/net10.0"]
     User --> BuildNative["CMake builds Godot GDExtension"]
     BuildNative --> GodotCpp["godot-cpp bindings for Godot 4.7 API"]
     BuildNative --> LeanClrLib["LeanCLR runtime static library"]
@@ -63,6 +64,7 @@ flowchart TD
     BuildManaged --> ManagedDll["NKGGameFramework.GodotPlaneSample.dll"]
     ManagedDll --> CoreDll["NKGGameFramework.dll"]
     ManagedDll --> GodotContracts["NKGGameFramework.Adapter.Godot.dll"]
+    ManagedDll --> DiagnosticsDll["NKGGameFramework.Diagnostics.dll"]
 
     User --> GodotExe["Godot 4.7 official executable"]
     GodotExe --> Project["samples/GodotPlaneSample/project.godot"]
@@ -82,9 +84,12 @@ flowchart TD
     Input --> Bridge
     BindMethods --> ManagedStep["Call ClearInput / Press* / StepSession"]
     ManagedStep --> NkgRuntime["NKG RuntimeContext + World + Scene + ECS systems"]
-    NkgRuntime --> Snapshot["STATE + PLAYER/ENEMY/BULLET snapshot"]
+    NkgRuntime --> Snapshot["STATE + PLAYER/ENEMY/BULLET render snapshot"]
+    NkgRuntime --> DebugSnapshot["Diagnostics WebDebug endpoint dispatcher"]
     Snapshot --> Host
     Host --> GodotObjects["Create/update Godot Polygon2D and Label objects"]
+    Host --> NativeDebug["Native WebDebug HTTP/SSE transport"]
+    NativeDebug --> Bridge
 ```
 
 ## Per-Frame Call Chain
@@ -125,11 +130,12 @@ sequenceDiagram
 
 ## Managed Logic Boundary
 
-`samples/NKGGameFramework.GodotPlaneSample` 是 LeanCLR 侧入口。它只引用：
+`samples/NKGGameFramework.GodotPlaneSample` 是 LeanCLR 侧入口。它引用：
 
 ```text
 NKGGameFramework
 NKGGameFramework.Adapter.Godot
+NKGGameFramework.Diagnostics
 ```
 
 它不引用：
@@ -150,8 +156,11 @@ System.Net debug transport
 | `PressFire()` | 写入本帧开火输入 |
 | `StepSession()` | 推进一帧 NKG runtime/ECS，并返回对象 snapshot |
 | `GetSessionStatus()` | 返回分数、生命和结束状态 |
+| `HandleDebugRequest()` | 处理 native transport 转发的 WebDebug health/snapshot/stream/control/mutation/dump 请求 |
 
-`leanclr_bcl/net10.0` 是 Godot 运行时传给 LeanCLR 的 BCL 程序集目录。当前桌面 smoke 由 `tools/stage-leanclr-bcl.ps1` 从本机 `Microsoft.NETCore.App\10.x` 复制 `System*.dll` 生成；Godot 运行时不再探测本机 shared framework，也不启动 CoreCLR/.NET host。后续面向发布和移动端时，应将这个目录替换为随包携带的 LeanCLR minimal net10 BCL/profile 产物，并按真实 workload 裁剪。
+`leanclr_bcl/net10.0` 是 Godot 运行时传给 LeanCLR 的 BCL 程序集目录。当前桌面 smoke 由 `tools/stage-leanclr-bcl.ps1` 从 Godot managed 输出目录读取 AssemblyRef 闭包，再从本机 `Microsoft.NETCore.App\10.x` 复制实际需要的 runtime assemblies；Godot 运行时不再探测本机 shared framework，也不启动 CoreCLR/.NET host。后续面向发布和移动端时，应将这个目录替换为随包携带的 LeanCLR minimal net10 BCL/profile 产物，并按真实 workload 裁剪。
+
+当前 Godot/LeanCLR WebDebug 复用 `NKGGameFramework.Diagnostics` 的 `GameDebugEndpointDispatcher`，由同一套 Diagnostics 类型和服务处理 health、snapshot、stream 轮询快照、control、mutation、dump recording、dump analysis 和 dump playback。Godot native 层只负责 desktop loopback HTTP/SSE transport、二进制 body 透传和主线程安全点调度，不引用 `NKGGameFramework.Hosting`，也不要求 LeanCLR 实现 `System.Net` server。
 
 ## Native Bridge Boundary
 
@@ -169,6 +178,7 @@ System.Net debug transport
 - 作为 `scenes/main.tscn` 的 root 节点参与 Godot 主循环。
 - 读取 Godot 输入：方向键控制飞机，`ui_accept` 发射子弹。
 - 调用 `NkgLeanClrPlaneBridge` 推进 managed session。
+- 启动 desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
 - 解析 managed snapshot。
 - 创建、更新和销毁 Godot `Polygon2D` 对象来表示玩家、敌人、子弹。
 - 更新 HUD `Label`。
@@ -215,7 +225,7 @@ powershell -ExecutionPolicy Bypass -File .\samples\GodotPlaneSample\tools\run-go
 期望输出：
 
 ```text
-NKG_MAIN_SCENE_SMOKE ok native object host ok objects=... bullets=... player_x=...
+NKG_MAIN_SCENE_SMOKE ok native object host ok debug http://127.0.0.1:5067
 ```
 
 ## Current Runtime Shape

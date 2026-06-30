@@ -1,8 +1,8 @@
 param(
     [string]$Configuration = "Release",
-    [string]$GodotCppRoot = "C:\study\wqaetly\new\.cache\godot-cpp",
-    [string]$LeanClrRoot = "C:\study\wqaetly\new\leanclr",
-    [string]$GodotExe = "C:\study\godot\GodotEngine\Godot_v4.7-stable_win64_console.exe",
+    [string]$GodotCppRoot,
+    [string]$LeanClrRoot,
+    [string]$GodotExe,
     [string]$BuildDir
 )
 
@@ -48,6 +48,23 @@ function Resolve-CMakePath {
 $nativeRoot = $PSScriptRoot
 $projectRoot = (Resolve-Path (Join-Path $nativeRoot "..")).Path
 $repoRoot = (Resolve-Path (Join-Path $nativeRoot "..\..\..")).Path
+$ensureScript = Join-Path $projectRoot "tools\ensure-godot-4.7.ps1"
+
+$ensureArgs = @("-ExecutionPolicy", "Bypass", "-File", $ensureScript)
+if (-not [string]::IsNullOrWhiteSpace($GodotCppRoot)) {
+    $ensureArgs += @("-GodotCppRoot", $GodotCppRoot)
+}
+if (-not [string]::IsNullOrWhiteSpace($LeanClrRoot)) {
+    $ensureArgs += @("-LeanClrRoot", $LeanClrRoot)
+}
+if (-not [string]::IsNullOrWhiteSpace($GodotExe)) {
+    $ensureArgs += @("-GodotExe", $GodotExe)
+}
+
+$toolInfo = (& powershell @ensureArgs | Select-Object -Last 1) | ConvertFrom-Json
+$GodotCppRoot = $toolInfo.GodotCppRoot
+$LeanClrRoot = $toolInfo.LeanClrRoot
+$GodotExe = $toolInfo.GodotExe
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "out\godot-plane-gdextension"

@@ -94,29 +94,28 @@ internal static class GameDebugStructuredComponentValue
             return CaptureList(name, value, type, elementType, enumerable, editable, depth, seen, options);
         }
 
-        var children = GameDebugOdinSerialization.GetSerializedMembers(type)
-            .Select(member =>
+        var children = new List<ComponentValueDebugNode>();
+        foreach (var member in GameDebugOdinSerialization.GetSerializedMembers(type))
+        {
+            try
             {
-                try
+                children.Add(CaptureNode(
+                    member.Name,
+                    member.GetValue(value),
+                    member.ValueType,
+                    member.CanWrite,
+                    depth + 1,
+                    seen,
+                    options));
+            }
+            catch (Exception exception) when (exception is TargetInvocationException or ArgumentException)
+            {
+                children.Add(CreateNode("unsupported", member.Name, member.ValueType, editable: false) with
                 {
-                    return CaptureNode(
-                        member.Name,
-                        member.GetValue(value),
-                        member.ValueType,
-                        member.CanWrite,
-                        depth + 1,
-                        seen,
-                        options);
-                }
-                catch (Exception exception) when (exception is TargetInvocationException or ArgumentException)
-                {
-                    return CreateNode("unsupported", member.Name, member.ValueType, editable: false) with
-                    {
-                        Error = exception.InnerException?.Message ?? exception.Message,
-                    };
-                }
-            })
-            .ToArray();
+                    Error = exception.InnerException?.Message ?? exception.Message,
+                });
+            }
+        }
 
         return CreateNode("object", name, type, editable) with
         {
@@ -169,12 +168,7 @@ internal static class GameDebugStructuredComponentValue
         return CreateNode("list", name, type, editable) with
         {
             Children = truncated
-                ? children
-                    .Append(CreateNode("unsupported", $"[{index}+]", elementType, editable: false) with
-                    {
-                        Error = $"Collection preview was truncated at {options.MaxCollectionItems} item(s).",
-                    })
-                    .ToArray()
+                ? AddTruncationNode(children, index, elementType, options)
                 : children,
             ElementType = DebugSnapshotTypeNames.Create(elementType),
             ElementTemplate = options.CaptureElementTemplate
@@ -184,6 +178,19 @@ internal static class GameDebugStructuredComponentValue
                 ? $"Collection preview was truncated at {options.MaxCollectionItems} item(s)."
                 : null),
         };
+    }
+
+    private static IReadOnlyList<ComponentValueDebugNode> AddTruncationNode(
+        List<ComponentValueDebugNode> children,
+        int index,
+        Type elementType,
+        GameDebugStructuredComponentValueCaptureOptions options)
+    {
+        children.Add(CreateNode("unsupported", $"[{index}+]", elementType, editable: false) with
+        {
+            Error = $"Collection preview was truncated at {options.MaxCollectionItems} item(s).",
+        });
+        return children;
     }
 
     private static ComponentValueDebugNode? CaptureTemplate(

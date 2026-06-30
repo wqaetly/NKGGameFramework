@@ -1,5 +1,6 @@
 #include "nkg_leanclr_plane_host.h"
 
+#include <cstdint>
 #include <sstream>
 #include <vector>
 
@@ -24,6 +25,54 @@ std::string to_std_string(const String& value)
 {
     const auto utf8 = value.utf8();
     return std::string(utf8.get_data(), utf8.length());
+}
+
+std::string base64_encode(const std::string& value)
+{
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    encoded.reserve(((value.size() + 2) / 3) * 4);
+
+    size_t index = 0;
+    while (index + 3 <= value.size())
+    {
+        const uint32_t block =
+            (static_cast<uint32_t>(static_cast<unsigned char>(value[index])) << 16) |
+            (static_cast<uint32_t>(static_cast<unsigned char>(value[index + 1])) << 8) |
+            static_cast<uint32_t>(static_cast<unsigned char>(value[index + 2]));
+        encoded.push_back(alphabet[(block >> 18) & 0x3f]);
+        encoded.push_back(alphabet[(block >> 12) & 0x3f]);
+        encoded.push_back(alphabet[(block >> 6) & 0x3f]);
+        encoded.push_back(alphabet[block & 0x3f]);
+        index += 3;
+    }
+
+    const size_t remaining = value.size() - index;
+    if (remaining == 1)
+    {
+        const uint32_t block = static_cast<uint32_t>(static_cast<unsigned char>(value[index])) << 16;
+        encoded.push_back(alphabet[(block >> 18) & 0x3f]);
+        encoded.push_back(alphabet[(block >> 12) & 0x3f]);
+        encoded.push_back('=');
+        encoded.push_back('=');
+    }
+    else if (remaining == 2)
+    {
+        const uint32_t block =
+            (static_cast<uint32_t>(static_cast<unsigned char>(value[index])) << 16) |
+            (static_cast<uint32_t>(static_cast<unsigned char>(value[index + 1])) << 8);
+        encoded.push_back(alphabet[(block >> 18) & 0x3f]);
+        encoded.push_back(alphabet[(block >> 12) & 0x3f]);
+        encoded.push_back(alphabet[(block >> 6) & 0x3f]);
+        encoded.push_back('=');
+    }
+
+    return encoded;
+}
+
+std::string make_managed_debug_request(const std::string& method, const std::string& target, const std::string& body)
+{
+    return method + "\n" + target + "\nbase64\n" + base64_encode(body);
 }
 } // namespace
 
@@ -194,7 +243,7 @@ void NkgLeanClrPlaneHost::process_debug_requests()
             continue;
         }
 
-        const std::string payload = request.method + "\n" + request.target + "\n" + request.body;
+        const std::string payload = make_managed_debug_request(request.method, request.target, request.body);
         const String managed_response = bridge->handle_debug_request(String::utf8(payload.c_str(), payload.size()));
         debug_server.complete_request(
             request.id,
@@ -212,7 +261,7 @@ void NkgLeanClrPlaneHost::publish_debug_stream_snapshots()
     const auto targets = debug_server.get_stream_snapshot_targets();
     for (const auto& target : targets)
     {
-        const std::string payload = "GET\n" + target + "\n";
+        const std::string payload = make_managed_debug_request("GET", target, "");
         const String managed_response = bridge->handle_debug_request(String::utf8(payload.c_str(), payload.size()));
         const auto response = NkgDebugHttpServer::parse_managed_response(to_std_string(managed_response));
         if (response.status_code == 200)

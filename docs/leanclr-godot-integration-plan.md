@@ -44,18 +44,18 @@ Managed/LeanCLR 侧继续拥有：
 
 ## Package Boundaries
 
-`NKGGameFramework.Diagnostics` 已从 `NKGGameFramework.Hosting` 中拆出，用于承载调试领域模型；`NKGGameFramework.Hosting` 保留为 HTTP/SSE transport 包。LeanCLR/Godot 接入时应引用 Diagnostics，不应依赖 Hosting。
+轻量 debug control/frame/snapshot DTO 放在 `NKGGameFramework` 核心包中，供 LeanCLR/Godot 直接复用框架定义；`NKGGameFramework.Diagnostics` 保留完整 snapshot provider、mutation、dump、analysis 和 transport-independent WebDebug endpoint dispatcher；`NKGGameFramework.Hosting` 保留为 HTTP/SSE transport 包。LeanCLR/Godot 可以引用 Diagnostics 获得完整 WebDebug 领域能力，但不应把 Hosting 的 managed socket/HTTP/SSE transport 带入启动路径。
 
 | Package | Responsibility | LeanCLR target |
 | --- | --- | --- |
-| `NKGGameFramework` | 引擎无关 runtime、ECS、Gameplay、Nodes、Serialization、Runtime contracts | 必选 |
+| `NKGGameFramework` | 引擎无关 runtime、ECS、Gameplay、Nodes、Serialization、Runtime contracts、debug control/frame/snapshot DTO | 必选 |
 | `NKGGameFramework.Adapter.Godot` | managed contracts，定义 Godot 宿主服务抽象，不引用 GodotSharp | 必选 |
-| `NKGGameFramework.Diagnostics` | debug DTO、session、snapshot、mutation、dump、control、后续 debug command API | 必选 |
+| `NKGGameFramework.Diagnostics` | 完整 snapshot provider、mutation、dump、analysis、WebDebug endpoint dispatcher、后续 debug command API | 桌面样例启用完整 WebDebug 领域能力；移动/Web 按 BCL profile 裁剪 transport |
 | `NKGGameFramework.Hosting` | loopback HTTP/SSE 默认桌面 transport | 可选，LeanCLR Web/mobile 不启用 |
 | `leanclr-godot` | GDExtension/native runtime loader、host bridge、Godot transport | 必选 |
 | `NKGGameFramework.Hosting.Web` | React/Vite WebDebug 面板 | 工具链可选，运行时不进 LeanCLR |
 
-基础包拆分完成后，后续重点是把 `GameDebugHost` 内的 endpoint dispatch 抽成 transport-independent command API，让 Godot native/Web transport 不需要复用 HTTP path/query 解析。
+基础包拆分完成后，`GameDebugHost` 内的 endpoint dispatch 已先抽成 transport-independent dispatcher，让 Godot native transport 不必引用 Hosting 或 managed sockets。后续可继续把 HTTP path/query adapter 再下沉为 command API，服务 WebSocket、JS bridge 和移动端 outbound transport。
 
 ## Debug Boundary
 
@@ -260,25 +260,25 @@ Acceptance:
 - NKG sampler 能通过 host services 访问基本资源和场景能力。
 - Web/mobile 编译时不引入 Godot 官方 C# 扩展。
 
-### Phase 3: Debug Command API Split
+### Phase 3: Debug Endpoint Split
 
 - `NKGGameFramework.Diagnostics` 已承载 snapshot、mutation、dump、control 等领域类型。
-- 从 `GameDebugHost` 中继续抽出 transport-independent debug command API。
+- 从 `GameDebugHost` 中抽出 transport-independent WebDebug endpoint dispatcher。
 - `snapshot`、`control`、`mutation`、`dump` 操作可以在没有 HTTP server 的情况下被调用。
-- `GameDebugJson` 或替代 JSON writer 明确归属 debug domain。
+- `GameDebugJson` 和 LeanCLR-safe DTO writer 明确归属 debug domain。
 - 保留现有 HTTP/SSE 行为作为一个 adapter。
 
 Acceptance:
 
 - 现有 WebDebug HTTP tests 继续通过。
-- 新增 command-level tests，不启动 `TcpListener` 也能 capture snapshot、apply mutation、record/open dump。
-- command API 不暴露 HTTP path/query。
+- 新增 dispatcher-level tests，不启动 `TcpListener` 也能 capture snapshot、apply mutation、record/analyze/open dump。
+- Godot/LeanCLR bridge 复用 Diagnostics dispatcher，不重写 WebDebug DTO 或业务协议。
 
 ### Phase 4: Godot Desktop Debug Transport
 
 - 在 `leanclr-godot` 中实现 desktop transport。
 - 初期可用 loopback HTTP/SSE 兼容现有 WebDebug UI。
-- 请求进入 native 后转 command，再调 LeanCLR managed endpoint。
+- 请求进入 native 后透传 method/target/body，再调 LeanCLR managed endpoint dispatcher。
 - 所有 debug command 经主线程 scheduler 执行。
 
 Acceptance:
@@ -286,6 +286,7 @@ Acceptance:
 - Godot desktop 运行时能被现有 WebDebug UI 查看。
 - pause/step 仍以 `RuntimeContext.Update` 为唯一外部步进边界。
 - mutation 在 paused 状态下可写回 ECS。
+- dump recording、analysis、playback 和 binary upload 在 native HTTP 到 LeanCLR 的端到端 smoke 中通过。
 
 ### Phase 5: Godot Web Debug Transport
 
@@ -337,14 +338,14 @@ Acceptance:
 ## Open Decisions
 
 - Godot desktop transport 首版使用 native HTTP/SSE 还是 outbound WebSocket。
-- Debug command API 第一版是否覆盖全部 dump/playback/analysis endpoint，还是先覆盖 live snapshot/control/mutation。
-- LeanCLR 侧 JSON 输出继续使用 `System.Text.Json`、Odin JSON，还是自研固定 DTO writer。
+- 后续 command API 是否保留 HTTP target 兼容层，还是完全改为 command id + body。
+- LeanCLR 侧 JSON 输出当前使用固定 DTO writer；后续是否替换成更完整的轻量 JSON writer 仍待评估。
 - WebDebug 前端是否引入 `DebugTransport` 抽象，统一 HTTP、WebSocket、JS bridge。
 - `.nkgdump` 在 Web/mobile 上的存储、导出和上传路径。
 
 ## First Milestone
 
-第一阶段目标不是完整 WebDebug，而是验证运行时边界正确：
+第一阶段目标用于验证运行时边界正确：
 
 1. Godot desktop 能通过 GDExtension 启动 LeanCLR。
 2. NKG sampler 能在 Godot `_process` 驱动下运行。

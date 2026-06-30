@@ -1,25 +1,22 @@
-using System.IO.Compression;
 using System.Text;
-using System.Text.Json;
 
 namespace NKGGameFramework.Diagnostics;
 
 public static class GameDebugDumpFile
 {
     public const string FileExtension = ".nkgdump";
-    public const string ContainerMagicText = "NKGDUMP3\n";
+    public const string ContainerMagicText = "NKGDUMP4\n";
+    private const string LegacyJsonContainerMagicText = "NKGDUMP3\n";
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes(ContainerMagicText);
+    private static readonly byte[] LegacyJsonMagic = Encoding.ASCII.GetBytes(LegacyJsonContainerMagicText);
 
     public static byte[] Serialize(GameDebugDumpDocument dump)
     {
         ArgumentNullException.ThrowIfNull(dump);
-        var json = JsonSerializer.SerializeToUtf8Bytes(dump, GameDebugJson.Options);
+        var payload = GameDebugDumpBinaryCodec.Serialize(dump);
         using var output = new MemoryStream();
         output.Write(Magic);
-        using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
-        {
-            gzip.Write(json);
-        }
+        output.Write(payload);
 
         return output.ToArray();
     }
@@ -34,10 +31,14 @@ public static class GameDebugDumpFile
 
         if (HasMagic(payload))
         {
-            using var compressed = new MemoryStream(payload, Magic.Length, payload.Length - Magic.Length);
-            using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
-            return JsonSerializer.Deserialize<GameDebugDumpDocument>(gzip, GameDebugJson.Options)
-                ?? throw new InvalidDataException("The debug dump file could not be deserialized.");
+            var documentPayload = new byte[payload.Length - Magic.Length];
+            Array.Copy(payload, Magic.Length, documentPayload, 0, documentPayload.Length);
+            return GameDebugDumpBinaryCodec.Deserialize(documentPayload);
+        }
+
+        if (HasLegacyJsonMagic(payload))
+        {
+            throw new InvalidDataException("Legacy NKGDUMP3 gzip JSON dumps are not supported by this runtime.");
         }
 
         throw new InvalidDataException("The debug dump file was not a supported NKG dump.");
@@ -45,14 +46,24 @@ public static class GameDebugDumpFile
 
     private static bool HasMagic(byte[] payload)
     {
-        if (payload.Length < Magic.Length)
+        return HasMagic(payload, Magic);
+    }
+
+    private static bool HasLegacyJsonMagic(byte[] payload)
+    {
+        return HasMagic(payload, LegacyJsonMagic);
+    }
+
+    private static bool HasMagic(byte[] payload, byte[] magic)
+    {
+        if (payload.Length < magic.Length)
         {
             return false;
         }
 
-        for (var index = 0; index < Magic.Length; index++)
+        for (var index = 0; index < magic.Length; index++)
         {
-            if (payload[index] != Magic[index])
+            if (payload[index] != magic[index])
             {
                 return false;
             }
