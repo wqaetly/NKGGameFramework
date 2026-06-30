@@ -18,6 +18,7 @@ public sealed class GodotHostCommandBuffer
     private const byte CallMethodCommand = 9;
     private const byte LoadResourceCommand = 10;
     private const byte ReleaseResourceCommand = 11;
+    private const byte InstantiateSceneCommand = 12;
     private const byte EndCommand = 255;
 
     private readonly MemoryStream _binaryStream;
@@ -191,6 +192,19 @@ public sealed class GodotHostCommandBuffer
         _binaryWriter.Write(id.Value);
 
         _textBuilder.Append(CultureInfo.InvariantCulture, $"RELEASE_RESOURCE {id.Value}\n");
+    }
+
+    public void InstantiateScene(int id, GodotResourceId resourceId, string name)
+    {
+        ThrowIfEnded();
+        ValidateToken(name, nameof(name), allowEmpty: true);
+
+        _binaryWriter.Write(InstantiateSceneCommand);
+        _binaryWriter.Write(id);
+        _binaryWriter.Write(resourceId.Value);
+        WriteBinaryString(name);
+
+        _textBuilder.Append(CultureInfo.InvariantCulture, $"INSTANTIATE_SCENE {id} {resourceId.Value} {name}\n");
     }
 
     public string Build()

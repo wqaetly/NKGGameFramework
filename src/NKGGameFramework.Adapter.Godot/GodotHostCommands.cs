@@ -33,6 +33,13 @@ public sealed class GodotHostCommands
         _buffer.ReleaseResource(id);
     }
 
+    public GodotNode InstantiateScene(int id, GodotResourceId resourceId, string name = "")
+    {
+        var objectId = new GodotObjectId(id);
+        _buffer.InstantiateScene(objectId.Value, resourceId, name);
+        return new GodotNode(objectId, this);
+    }
+
     public void Destroy(GodotObjectId id)
     {
         _buffer.DestroyObject(id.Value);

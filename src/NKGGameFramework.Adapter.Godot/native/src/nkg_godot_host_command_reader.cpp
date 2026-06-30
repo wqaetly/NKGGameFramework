@@ -18,6 +18,7 @@ constexpr uint8_t SET_PROPERTY_COMMAND = 8;
 constexpr uint8_t CALL_METHOD_COMMAND = 9;
 constexpr uint8_t LOAD_RESOURCE_COMMAND = 10;
 constexpr uint8_t RELEASE_RESOURCE_COMMAND = 11;
+constexpr uint8_t INSTANTIATE_SCENE_COMMAND = 12;
 constexpr uint8_t END_COMMAND = 255;
 
 std::string to_std_string(const godot::String& value)
@@ -454,6 +455,23 @@ bool NkgGodotHostCommandReader::read(
             continue;
         }
 
+        if (opcode == INSTANTIATE_SCENE_COMMAND)
+        {
+            InstantiateSceneCommand command;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_i32(command.resource_id) ||
+                !cursor.read_string(command.name))
+            {
+                return false;
+            }
+
+            if (p_handlers.instantiate_scene)
+            {
+                p_handlers.instantiate_scene(command);
+            }
+            continue;
+        }
+
         return false;
     }
 
@@ -761,6 +779,17 @@ bool NkgGodotHostCommandReader::read(
             if (p_handlers.release_resource)
             {
                 p_handlers.release_resource(command);
+            }
+            continue;
+        }
+
+        if (tag == "INSTANTIATE_SCENE")
+        {
+            InstantiateSceneCommand command;
+            stream >> command.id >> command.resource_id >> command.name;
+            if (p_handlers.instantiate_scene)
+            {
+                p_handlers.instantiate_scene(command);
             }
             continue;
         }

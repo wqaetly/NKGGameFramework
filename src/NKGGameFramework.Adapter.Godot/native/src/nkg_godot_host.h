@@ -60,6 +60,7 @@ private:
     bool apply_call_method(const NkgGodotHostCommandReader::CallMethodCommand& p_command);
     bool apply_load_resource(const NkgGodotHostCommandReader::LoadResourceCommand& p_command);
     bool apply_release_resource(const NkgGodotHostCommandReader::ReleaseResourceCommand& p_command);
+    bool apply_instantiate_scene(const NkgGodotHostCommandReader::InstantiateSceneCommand& p_command);
     bool try_convert_variant(const NkgGodotHostCommandReader::VariantValue& p_value, Variant& p_variant) const;
     Object* create_object_by_type(const std::string& p_type_name) const;
     void release_object(Object* p_object) const;

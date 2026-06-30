@@ -122,6 +122,13 @@ public:
         int32_t id = 0;
     };
 
+    struct InstantiateSceneCommand
+    {
+        int32_t id = 0;
+        int32_t resource_id = 0;
+        std::string name;
+    };
+
     using FrameHandler = std::function<void(const FrameCommand& p_command)>;
     using Node2DHandler = std::function<void(const Node2DCommand& p_command)>;
     using CreateNodeHandler = std::function<void(const CreateNodeCommand& p_command)>;
@@ -133,6 +140,7 @@ public:
     using CallMethodHandler = std::function<void(const CallMethodCommand& p_command)>;
     using LoadResourceHandler = std::function<void(const LoadResourceCommand& p_command)>;
     using ReleaseResourceHandler = std::function<void(const ReleaseResourceCommand& p_command)>;
+    using InstantiateSceneHandler = std::function<void(const InstantiateSceneCommand& p_command)>;
 
     struct Handlers
     {
@@ -147,6 +155,7 @@ public:
         CallMethodHandler call_method;
         LoadResourceHandler load_resource;
         ReleaseResourceHandler release_resource;
+        InstantiateSceneHandler instantiate_scene;
     };
 
     bool read(const std::vector<uint8_t>& p_commands, const Handlers& p_handlers) const;

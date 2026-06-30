@@ -298,10 +298,11 @@ public sealed class GodotHostCommandBufferTests
         var buffer = new GodotHostCommandBuffer();
 
         buffer.LoadResource(new GodotResourceId(77), "res://textures/player.png");
+        buffer.InstantiateScene(12, new GodotResourceId(77), "PlayerScene");
         buffer.ReleaseResource(new GodotResourceId(77));
 
         Assert.Equal(
-            "LOAD_RESOURCE 77 res://textures/player.png\nRELEASE_RESOURCE 77\nEND",
+            "LOAD_RESOURCE 77 res://textures/player.png\nINSTANTIATE_SCENE 12 77 PlayerScene\nRELEASE_RESOURCE 77\nEND",
             buffer.BuildText());
     }
 
@@ -311,6 +312,7 @@ public sealed class GodotHostCommandBufferTests
         var buffer = new GodotHostCommandBuffer();
 
         buffer.LoadResource(new GodotResourceId(77), "res://textures/player.png");
+        buffer.InstantiateScene(12, new GodotResourceId(77), "PlayerScene");
         buffer.ReleaseResource(new GodotResourceId(77));
 
         using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
@@ -318,6 +320,10 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal(10, reader.ReadByte());
         Assert.Equal(77, reader.ReadInt32());
         Assert.Equal("res://textures/player.png", ReadString(reader));
+        Assert.Equal(12, reader.ReadByte());
+        Assert.Equal(12, reader.ReadInt32());
+        Assert.Equal(77, reader.ReadInt32());
+        Assert.Equal("PlayerScene", ReadString(reader));
         Assert.Equal(11, reader.ReadByte());
         Assert.Equal(77, reader.ReadInt32());
         Assert.Equal(255, reader.ReadByte());

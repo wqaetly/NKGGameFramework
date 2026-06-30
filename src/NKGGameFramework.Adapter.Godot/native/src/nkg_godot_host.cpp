@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/packed_scene.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -107,6 +108,9 @@ bool NkgGodotHost::apply_commands(
     };
     handlers.release_resource = [this, &applied](const NkgGodotHostCommandReader::ReleaseResourceCommand& command) {
         applied = apply_release_resource(command) && applied;
+    };
+    handlers.instantiate_scene = [this, &applied](const NkgGodotHostCommandReader::InstantiateSceneCommand& command) {
+        applied = apply_instantiate_scene(command) && applied;
     };
 
     const bool read = command_reader.read(p_commands, handlers);
@@ -301,6 +305,46 @@ bool NkgGodotHost::apply_load_resource(const NkgGodotHostCommandReader::LoadReso
 bool NkgGodotHost::apply_release_resource(const NkgGodotHostCommandReader::ReleaseResourceCommand& p_command)
 {
     return resources.release_resource(p_command.id);
+}
+
+bool NkgGodotHost::apply_instantiate_scene(const NkgGodotHostCommandReader::InstantiateSceneCommand& p_command)
+{
+    Ref<PackedScene> scene = resources.get_resource(p_command.resource_id);
+    if (!scene.is_valid() || !scene->can_instantiate())
+    {
+        return false;
+    }
+
+    Object* object = objects.sync_object(
+        make_object_key(p_command.id),
+        [&scene]() {
+            return scene->instantiate();
+        },
+        [this](Object* object) {
+            release_object(object);
+        });
+    if (object == nullptr)
+    {
+        return false;
+    }
+
+    Node* node = Object::cast_to<Node>(object);
+    if (node == nullptr)
+    {
+        return false;
+    }
+
+    if (!p_command.name.empty())
+    {
+        node->set_name(String(p_command.name.c_str()));
+    }
+
+    if (root != nullptr && node->get_parent() == nullptr)
+    {
+        root->add_child(node);
+    }
+
+    return true;
 }
 
 bool NkgGodotHost::try_convert_variant(const NkgGodotHostCommandReader::VariantValue& p_value, Variant& p_variant) const

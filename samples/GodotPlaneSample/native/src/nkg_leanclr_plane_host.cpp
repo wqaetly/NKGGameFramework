@@ -156,11 +156,24 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
     constexpr int32_t object_id = 990001;
     constexpr int32_t label_id = 990002;
     constexpr int32_t resource_id = 990003;
+    constexpr int32_t scene_object_id = 990004;
     std::vector<uint8_t> commands;
 
     write_u8(commands, 10);
     write_i32(commands, resource_id);
-    write_string(commands, "res://scenes/main.tscn");
+    write_string(commands, "res://scenes/generic_label.tscn");
+
+    write_u8(commands, 12);
+    write_i32(commands, scene_object_id);
+    write_i32(commands, resource_id);
+    write_string(commands, "GenericSceneSmoke");
+
+    write_u8(commands, 9);
+    write_i32(commands, scene_object_id);
+    write_string(commands, "set_text");
+    write_i32(commands, 1);
+    write_u8(commands, 3);
+    write_string(commands, "generic scene ok");
 
     write_u8(commands, 3);
     write_i32(commands, object_id);
@@ -243,6 +256,12 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
 
     auto* label = Object::cast_to<Label>(find_child("GenericLabelSmoke", false, false));
     if (label == nullptr || label->get_text() != "generic method ok")
+    {
+        return false;
+    }
+
+    auto* scene_label = Object::cast_to<Label>(find_child("GenericSceneSmoke", false, false));
+    if (scene_label == nullptr || scene_label->get_text() != "generic scene ok")
     {
         return false;
     }
