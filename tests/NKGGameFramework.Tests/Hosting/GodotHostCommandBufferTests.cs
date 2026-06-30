@@ -164,9 +164,10 @@ public sealed class GodotHostCommandBufferTests
                 new GodotVector2(0, -36),
                 new GodotVector2(-10, 8)
             ]));
+        buffer.SetProperty(11, "text", GodotVariant.FromString("Hello HUD"));
 
         Assert.Equal(
-            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nEND",
+            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nSET_PROPERTY 11 text STRING SGVsbG8gSFVE\nEND",
             buffer.BuildText());
     }
 
@@ -184,6 +185,7 @@ public sealed class GodotHostCommandBufferTests
                 new GodotVector2(0, -36),
                 new GodotVector2(-10, 8)
             ]));
+        buffer.SetProperty(11, "text", GodotVariant.FromString("Hello HUD"));
 
         using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
 
@@ -205,6 +207,12 @@ public sealed class GodotHostCommandBufferTests
         Assert.Equal(-36, reader.ReadDouble());
         Assert.Equal(-10, reader.ReadDouble());
         Assert.Equal(8, reader.ReadDouble());
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(11, reader.ReadInt32());
+        Assert.Equal("text", ReadString(reader));
+        Assert.Equal(3, reader.ReadByte());
+        Assert.Equal("Hello HUD", ReadString(reader));
 
         Assert.Equal(255, reader.ReadByte());
     }

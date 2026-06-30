@@ -215,6 +215,9 @@ public sealed class GodotHostCommandBuffer
                     _binaryWriter.Write(point.Y);
                 }
                 break;
+            case GodotVariantKind.String:
+                WriteBinaryString(value.Text ?? throw new ArgumentException("String variant requires text.", nameof(value)));
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.");
         }
@@ -228,8 +231,15 @@ public sealed class GodotHostCommandBuffer
                 CultureInfo.InvariantCulture,
                 $"COLOR {value.Color.R:0.###} {value.Color.G:0.###} {value.Color.B:0.###} {value.Color.A:0.###}"),
             GodotVariantKind.PackedVector2Array => FormatPackedVector2Array(value),
+            GodotVariantKind.String => FormatString(value),
             _ => throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.")
         };
+    }
+
+    private static string FormatString(GodotVariant value)
+    {
+        var text = value.Text ?? throw new ArgumentException("String variant requires text.", nameof(value));
+        return "STRING " + Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
     }
 
     private static string FormatPackedVector2Array(GodotVariant value)

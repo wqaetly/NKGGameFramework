@@ -1,6 +1,7 @@
 #include "nkg_godot_host.h"
 
 #include <godot_cpp/classes/canvas_item.hpp>
+#include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -219,12 +220,9 @@ bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetProper
 {
     Object* object = objects.get_object(make_object_key(p_command.id));
     Polygon2D* polygon = Object::cast_to<Polygon2D>(object);
-    if (polygon == nullptr)
-    {
-        return false;
-    }
-
-    if (p_command.property_name == "color" && p_command.value.kind == NkgGodotHostCommandReader::VariantKind::Color)
+    if (polygon != nullptr &&
+        p_command.property_name == "color" &&
+        p_command.value.kind == NkgGodotHostCommandReader::VariantKind::Color)
     {
         polygon->set_color(Color(
             p_command.value.r,
@@ -234,7 +232,9 @@ bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetProper
         return true;
     }
 
-    if (p_command.property_name == "polygon" && p_command.value.kind == NkgGodotHostCommandReader::VariantKind::PackedVector2Array)
+    if (polygon != nullptr &&
+        p_command.property_name == "polygon" &&
+        p_command.value.kind == NkgGodotHostCommandReader::VariantKind::PackedVector2Array)
     {
         PackedVector2Array points;
         for (const auto& point : p_command.value.vector2_array)
@@ -242,6 +242,15 @@ bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetProper
             points.push_back(Vector2(point.x, point.y));
         }
         polygon->set_polygon(points);
+        return true;
+    }
+
+    Label* label = Object::cast_to<Label>(object);
+    if (label != nullptr &&
+        p_command.property_name == "text" &&
+        p_command.value.kind == NkgGodotHostCommandReader::VariantKind::String)
+    {
+        label->set_text(String(p_command.value.text.c_str()));
         return true;
     }
 
@@ -258,6 +267,11 @@ Object* NkgGodotHost::create_object_by_type(const std::string& p_type_name) cons
     if (p_type_name == "Polygon2D")
     {
         return memnew(Polygon2D);
+    }
+
+    if (p_type_name == "Label")
+    {
+        return memnew(Label);
     }
 
     return nullptr;

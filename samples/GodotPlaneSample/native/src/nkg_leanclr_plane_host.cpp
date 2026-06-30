@@ -157,6 +157,7 @@ double NkgLeanClrPlaneHost::get_player_x() const
 bool NkgLeanClrPlaneHost::run_generic_property_smoke()
 {
     constexpr int32_t object_id = 990001;
+    constexpr int32_t label_id = 990002;
     std::vector<uint8_t> commands;
 
     write_u8(commands, 3);
@@ -196,6 +197,18 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
     write_u8(commands, 7);
     write_i32(commands, object_id);
     write_u8(commands, 1);
+
+    write_u8(commands, 3);
+    write_i32(commands, label_id);
+    write_string(commands, "Label");
+    write_string(commands, "GenericLabelSmoke");
+
+    write_u8(commands, 8);
+    write_i32(commands, label_id);
+    write_string(commands, "text");
+    write_u8(commands, 3);
+    write_string(commands, "generic label ok");
+
     write_u8(commands, 255);
 
     const bool applied = host.apply_commands(
@@ -212,6 +225,12 @@ bool NkgLeanClrPlaneHost::run_generic_property_smoke()
 
     auto* node = Object::cast_to<Polygon2D>(find_child("GenericPropertySmoke", false, false));
     if (node == nullptr)
+    {
+        return false;
+    }
+
+    auto* label = Object::cast_to<Label>(find_child("GenericLabelSmoke", false, false));
+    if (label == nullptr || label->get_text() != "generic label ok")
     {
         return false;
     }

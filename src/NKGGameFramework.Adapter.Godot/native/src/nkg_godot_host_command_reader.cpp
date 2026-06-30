@@ -162,6 +162,12 @@ public:
             return true;
         }
 
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::String))
+        {
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::String;
+            return read_string(value.text);
+        }
+
         return false;
     }
 
@@ -487,6 +493,18 @@ bool NkgGodotHostCommandReader::read(
                     stream >> point.x >> point.y;
                     command.value.vector2_array.push_back(point);
                 }
+            }
+            else if (variant_kind == "STRING")
+            {
+                std::string encoded;
+                std::vector<uint8_t> decoded;
+                command.value.kind = VariantKind::String;
+                stream >> encoded;
+                if (!base64_decode(encoded, decoded))
+                {
+                    return false;
+                }
+                command.value.text.assign(reinterpret_cast<const char*>(decoded.data()), decoded.size());
             }
             else
             {

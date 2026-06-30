@@ -185,7 +185,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令。`SetProperty` 当前只覆盖样例迁移所需的 `Polygon2D.color` 和 `Polygon2D.polygon`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令。`SetProperty` 当前覆盖 `Polygon2D.color`、`Polygon2D.polygon` 和 `Label.text`。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
@@ -212,7 +212,7 @@ Managed simulation step: fixed 144Hz
 
 当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 direct byte buffer ABI；native host 调用 `StepSessionCommandBytes()` 获得 managed `byte[]`，再由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。`StepSession()` 仍保留 `NKGCB1` base64 string envelope，作为 GDScript smoke 和调试兼容路径。
 
-`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 命令。Variant payload 当前覆盖 `Color` 和 `PackedVector2Array`。飞机样例 visual 输出已改为通用 object command path；snapshot-style `NODE2D` 仍保留为 reader 兼容路径和底层 command buffer 测试覆盖。
+`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 命令。Variant payload 当前覆盖 `Color`、`PackedVector2Array` 和 `string`。飞机样例 visual 输出已改为通用 object command path；snapshot-style `NODE2D` 仍保留为 reader 兼容路径和底层 command buffer 测试覆盖。
 
 ## Build And Verification Flow
 

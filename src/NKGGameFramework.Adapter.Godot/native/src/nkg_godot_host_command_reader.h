@@ -66,7 +66,8 @@ public:
     enum class VariantKind : uint8_t
     {
         Color = 1,
-        PackedVector2Array = 2
+        PackedVector2Array = 2,
+        String = 3
     };
 
     struct Vector2Value
@@ -82,6 +83,7 @@ public:
         double g = 0;
         double b = 0;
         double a = 1;
+        std::string text;
         std::vector<Vector2Value> vector2_array;
     };
 

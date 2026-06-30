@@ -43,7 +43,7 @@ C# / LeanCLR gameplay code
 - Host API 仍有样例专用部分：输入映射、飞机图形创建、HUD 和 plane-specific frame counters。
 - C# 到 C++ 已从内部 snapshot string 推进为 direct `byte[]` binary command buffer。
 - 已有 Object/Resource registry 基础、第一批通用 Godot object command opcode、最小 native command applier、managed facade 和最小 Variant payload；还没有完整 Variant marshalling 和生成式 API 覆盖。
-- Variant marshalling 目前只覆盖 `Color` 和 `PackedVector2Array` 的最小属性设置路径。
+- Variant marshalling 目前覆盖 `Color`、`PackedVector2Array` 和 `string` 的最小属性设置路径。
 - 没有生成器。
 - 没有信号、方法调用、属性读写、资源加载、场景实例化等通用能力。
 
