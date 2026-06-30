@@ -179,7 +179,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 direct byte buffer，并兼容 `NKGCB1` binary envelope、旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 direct byte buffer，并兼容 `NKGCB1` binary envelope、旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。当前 reader 已识别第一批通用 object command：`CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotObjectRegistry` 是 Godot object host registry 基础。它负责按稳定 key 管理 `Object*`，并提供当前 `Node2D` 同步 convenience path：标记每帧可见对象，在安全点 `queue_free` 本帧未出现的节点。飞机样例仍然决定具体创建 `Polygon2D` 的形状、颜色和位置。
 
@@ -259,7 +259,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 扩展 `GodotHostCommandBuffer` / `NkgGodotHostCommandReader` / `NkgGodotHost` 的通用 Godot command set。
+- 把已进入 `GodotHostCommandBuffer` / `NkgGodotHostCommandReader` 的通用 object command 接到 `NkgGodotHost` applier。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

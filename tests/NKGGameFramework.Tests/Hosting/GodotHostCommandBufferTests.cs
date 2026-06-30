@@ -64,4 +64,65 @@ public sealed class GodotHostCommandBufferTests
 
         Assert.Throws<ArgumentException>(() => buffer.UpsertNode2D("BAD KIND", 1, 0, 0));
     }
+
+    [Fact]
+    public void Command_buffer_writes_generic_object_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.CreateNode(10, "Node2D", "Player");
+        buffer.SetParent(10, 0);
+        buffer.SetTransform2D(10, 12.5, 30.25, 0.5, 2, 3);
+        buffer.SetVisible(10, visible: true);
+        buffer.DestroyObject(10);
+
+        Assert.Equal(
+            "CREATE_NODE 10 Node2D Player\nSET_PARENT 10 0\nSET_TRANSFORM2D 10 12.5 30.25 0.5 2 3\nSET_VISIBLE 10 1\nDESTROY_OBJECT 10\nEND",
+            buffer.BuildText());
+    }
+
+    [Fact]
+    public void Command_buffer_encodes_generic_object_commands()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.CreateNode(10, "Node2D", "Player");
+        buffer.SetParent(10, 0);
+        buffer.SetTransform2D(10, 12.5, 30.25, 0.5, 2, 3);
+        buffer.SetVisible(10, visible: false);
+        buffer.DestroyObject(10);
+
+        using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
+
+        Assert.Equal(3, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal("Node2D", ReadString(reader));
+        Assert.Equal("Player", ReadString(reader));
+
+        Assert.Equal(5, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal(0, reader.ReadInt32());
+
+        Assert.Equal(6, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal(12.5, reader.ReadDouble());
+        Assert.Equal(30.25, reader.ReadDouble());
+        Assert.Equal(0.5, reader.ReadDouble());
+        Assert.Equal(2, reader.ReadDouble());
+        Assert.Equal(3, reader.ReadDouble());
+
+        Assert.Equal(7, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal(0, reader.ReadByte());
+
+        Assert.Equal(4, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal(255, reader.ReadByte());
+    }
+
+    private static string ReadString(BinaryReader reader)
+    {
+        var length = reader.ReadInt32();
+        return System.Text.Encoding.UTF8.GetString(reader.ReadBytes(length));
+    }
 }

@@ -9,6 +9,11 @@ namespace
 constexpr const char* BINARY_ENVELOPE_PREFIX = "NKGCB1\nbase64\n";
 constexpr uint8_t FRAME_COMMAND = 1;
 constexpr uint8_t NODE2D_COMMAND = 2;
+constexpr uint8_t CREATE_NODE_COMMAND = 3;
+constexpr uint8_t DESTROY_OBJECT_COMMAND = 4;
+constexpr uint8_t SET_PARENT_COMMAND = 5;
+constexpr uint8_t SET_TRANSFORM2D_COMMAND = 6;
+constexpr uint8_t SET_VISIBLE_COMMAND = 7;
 constexpr uint8_t END_COMMAND = 255;
 
 std::string to_std_string(const godot::String& value)
@@ -139,8 +144,7 @@ namespace godot
 
 bool NkgGodotHostCommandReader::read(
     const std::vector<uint8_t>& p_commands,
-    const FrameHandler& p_frame_handler,
-    const Node2DHandler& p_node_handler) const
+    const Handlers& p_handlers) const
 {
     BinaryCursor cursor(p_commands);
     uint8_t opcode = 0;
@@ -164,7 +168,10 @@ bool NkgGodotHostCommandReader::read(
             }
 
             command.terminal = terminal != 0;
-            p_frame_handler(command);
+            if (p_handlers.frame)
+            {
+                p_handlers.frame(command);
+            }
             continue;
         }
 
@@ -179,7 +186,96 @@ bool NkgGodotHostCommandReader::read(
                 return false;
             }
 
-            p_node_handler(command);
+            if (p_handlers.node2d)
+            {
+                p_handlers.node2d(command);
+            }
+            continue;
+        }
+
+        if (opcode == CREATE_NODE_COMMAND)
+        {
+            CreateNodeCommand command;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_string(command.type_name) ||
+                !cursor.read_string(command.name))
+            {
+                return false;
+            }
+
+            if (p_handlers.create_node)
+            {
+                p_handlers.create_node(command);
+            }
+            continue;
+        }
+
+        if (opcode == DESTROY_OBJECT_COMMAND)
+        {
+            DestroyObjectCommand command;
+            if (!cursor.read_i32(command.id))
+            {
+                return false;
+            }
+
+            if (p_handlers.destroy_object)
+            {
+                p_handlers.destroy_object(command);
+            }
+            continue;
+        }
+
+        if (opcode == SET_PARENT_COMMAND)
+        {
+            SetParentCommand command;
+            if (!cursor.read_i32(command.child_id) ||
+                !cursor.read_i32(command.parent_id))
+            {
+                return false;
+            }
+
+            if (p_handlers.set_parent)
+            {
+                p_handlers.set_parent(command);
+            }
+            continue;
+        }
+
+        if (opcode == SET_TRANSFORM2D_COMMAND)
+        {
+            SetTransform2DCommand command;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_f64(command.x) ||
+                !cursor.read_f64(command.y) ||
+                !cursor.read_f64(command.rotation) ||
+                !cursor.read_f64(command.scale_x) ||
+                !cursor.read_f64(command.scale_y))
+            {
+                return false;
+            }
+
+            if (p_handlers.set_transform2d)
+            {
+                p_handlers.set_transform2d(command);
+            }
+            continue;
+        }
+
+        if (opcode == SET_VISIBLE_COMMAND)
+        {
+            SetVisibleCommand command;
+            uint8_t visible = 0;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_u8(visible))
+            {
+                return false;
+            }
+
+            command.visible = visible != 0;
+            if (p_handlers.set_visible)
+            {
+                p_handlers.set_visible(command);
+            }
             continue;
         }
 
@@ -191,8 +287,7 @@ bool NkgGodotHostCommandReader::read(
 
 bool NkgGodotHostCommandReader::read(
     const String& p_commands,
-    const FrameHandler& p_frame_handler,
-    const Node2DHandler& p_node_handler) const
+    const Handlers& p_handlers) const
 {
     const std::string commands = to_std_string(p_commands);
     if (commands.rfind(BINARY_ENVELOPE_PREFIX, 0) == 0)
@@ -203,7 +298,7 @@ bool NkgGodotHostCommandReader::read(
             return false;
         }
 
-        return read(payload, p_frame_handler, p_node_handler);
+        return read(payload, p_handlers);
     }
 
     std::istringstream stream(commands);
@@ -216,7 +311,10 @@ bool NkgGodotHostCommandReader::read(
             int32_t terminal = 0;
             stream >> command.frame >> command.primary_value >> command.secondary_value >> terminal;
             command.terminal = terminal != 0;
-            p_frame_handler(command);
+            if (p_handlers.frame)
+            {
+                p_handlers.frame(command);
+            }
             continue;
         }
 
@@ -224,7 +322,10 @@ bool NkgGodotHostCommandReader::read(
         {
             Node2DCommand command;
             stream >> command.kind >> command.id >> command.x >> command.y;
-            p_node_handler(command);
+            if (p_handlers.node2d)
+            {
+                p_handlers.node2d(command);
+            }
             continue;
         }
 
@@ -233,7 +334,67 @@ bool NkgGodotHostCommandReader::read(
             Node2DCommand command;
             command.kind = tag;
             stream >> command.id >> command.x >> command.y;
-            p_node_handler(command);
+            if (p_handlers.node2d)
+            {
+                p_handlers.node2d(command);
+            }
+            continue;
+        }
+
+        if (tag == "CREATE_NODE")
+        {
+            CreateNodeCommand command;
+            stream >> command.id >> command.type_name >> command.name;
+            if (p_handlers.create_node)
+            {
+                p_handlers.create_node(command);
+            }
+            continue;
+        }
+
+        if (tag == "DESTROY_OBJECT")
+        {
+            DestroyObjectCommand command;
+            stream >> command.id;
+            if (p_handlers.destroy_object)
+            {
+                p_handlers.destroy_object(command);
+            }
+            continue;
+        }
+
+        if (tag == "SET_PARENT")
+        {
+            SetParentCommand command;
+            stream >> command.child_id >> command.parent_id;
+            if (p_handlers.set_parent)
+            {
+                p_handlers.set_parent(command);
+            }
+            continue;
+        }
+
+        if (tag == "SET_TRANSFORM2D")
+        {
+            SetTransform2DCommand command;
+            stream >> command.id >> command.x >> command.y >> command.rotation >> command.scale_x >> command.scale_y;
+            if (p_handlers.set_transform2d)
+            {
+                p_handlers.set_transform2d(command);
+            }
+            continue;
+        }
+
+        if (tag == "SET_VISIBLE")
+        {
+            SetVisibleCommand command;
+            int32_t visible = 0;
+            stream >> command.id >> visible;
+            command.visible = visible != 0;
+            if (p_handlers.set_visible)
+            {
+                p_handlers.set_visible(command);
+            }
             continue;
         }
 
@@ -244,6 +405,28 @@ bool NkgGodotHostCommandReader::read(
     }
 
     return true;
+}
+
+bool NkgGodotHostCommandReader::read(
+    const std::vector<uint8_t>& p_commands,
+    const FrameHandler& p_frame_handler,
+    const Node2DHandler& p_node_handler) const
+{
+    Handlers handlers;
+    handlers.frame = p_frame_handler;
+    handlers.node2d = p_node_handler;
+    return read(p_commands, handlers);
+}
+
+bool NkgGodotHostCommandReader::read(
+    const String& p_commands,
+    const FrameHandler& p_frame_handler,
+    const Node2DHandler& p_node_handler) const
+{
+    Handlers handlers;
+    handlers.frame = p_frame_handler;
+    handlers.node2d = p_node_handler;
+    return read(p_commands, handlers);
 }
 
 } // namespace godot

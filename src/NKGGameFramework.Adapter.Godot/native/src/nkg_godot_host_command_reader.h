@@ -29,9 +29,61 @@ public:
         double y = 0;
     };
 
+    struct CreateNodeCommand
+    {
+        int32_t id = 0;
+        std::string type_name;
+        std::string name;
+    };
+
+    struct DestroyObjectCommand
+    {
+        int32_t id = 0;
+    };
+
+    struct SetParentCommand
+    {
+        int32_t child_id = 0;
+        int32_t parent_id = 0;
+    };
+
+    struct SetTransform2DCommand
+    {
+        int32_t id = 0;
+        double x = 0;
+        double y = 0;
+        double rotation = 0;
+        double scale_x = 1;
+        double scale_y = 1;
+    };
+
+    struct SetVisibleCommand
+    {
+        int32_t id = 0;
+        bool visible = true;
+    };
+
     using FrameHandler = std::function<void(const FrameCommand& p_command)>;
     using Node2DHandler = std::function<void(const Node2DCommand& p_command)>;
+    using CreateNodeHandler = std::function<void(const CreateNodeCommand& p_command)>;
+    using DestroyObjectHandler = std::function<void(const DestroyObjectCommand& p_command)>;
+    using SetParentHandler = std::function<void(const SetParentCommand& p_command)>;
+    using SetTransform2DHandler = std::function<void(const SetTransform2DCommand& p_command)>;
+    using SetVisibleHandler = std::function<void(const SetVisibleCommand& p_command)>;
 
+    struct Handlers
+    {
+        FrameHandler frame;
+        Node2DHandler node2d;
+        CreateNodeHandler create_node;
+        DestroyObjectHandler destroy_object;
+        SetParentHandler set_parent;
+        SetTransform2DHandler set_transform2d;
+        SetVisibleHandler set_visible;
+    };
+
+    bool read(const std::vector<uint8_t>& p_commands, const Handlers& p_handlers) const;
+    bool read(const String& p_commands, const Handlers& p_handlers) const;
     bool read(const std::vector<uint8_t>& p_commands, const FrameHandler& p_frame_handler, const Node2DHandler& p_node_handler) const;
     bool read(const String& p_commands, const FrameHandler& p_frame_handler, const Node2DHandler& p_node_handler) const;
 };

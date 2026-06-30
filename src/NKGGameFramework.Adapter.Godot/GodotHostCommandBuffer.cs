@@ -9,6 +9,11 @@ public sealed class GodotHostCommandBuffer
 
     private const byte FrameCommand = 1;
     private const byte Node2DCommand = 2;
+    private const byte CreateNodeCommand = 3;
+    private const byte DestroyObjectCommand = 4;
+    private const byte SetParentCommand = 5;
+    private const byte SetTransform2DCommand = 6;
+    private const byte SetVisibleCommand = 7;
     private const byte EndCommand = 255;
 
     private readonly MemoryStream _binaryStream;
@@ -45,10 +50,8 @@ public sealed class GodotHostCommandBuffer
             throw new ArgumentException("Godot host node kind must be non-empty and must not contain whitespace.", nameof(kind));
         }
 
-        var kindBytes = Encoding.UTF8.GetBytes(kind);
         _binaryWriter.Write(Node2DCommand);
-        _binaryWriter.Write(kindBytes.Length);
-        _binaryWriter.Write(kindBytes);
+        WriteBinaryString(kind);
         _binaryWriter.Write(checked((int)id));
         _binaryWriter.Write(x);
         _binaryWriter.Write(y);
@@ -56,6 +59,73 @@ public sealed class GodotHostCommandBuffer
         _textBuilder.Append(
             CultureInfo.InvariantCulture,
             $"NODE2D {kind} {id} {x:0.###} {y:0.###}\n");
+    }
+
+    public void CreateNode(int id, string typeName, string name)
+    {
+        ThrowIfEnded();
+        ValidateToken(typeName, nameof(typeName));
+        ValidateToken(name, nameof(name), allowEmpty: true);
+
+        _binaryWriter.Write(CreateNodeCommand);
+        _binaryWriter.Write(id);
+        WriteBinaryString(typeName);
+        WriteBinaryString(name);
+
+        _textBuilder.Append(
+            CultureInfo.InvariantCulture,
+            $"CREATE_NODE {id} {typeName} {name}\n");
+    }
+
+    public void DestroyObject(int id)
+    {
+        ThrowIfEnded();
+        _binaryWriter.Write(DestroyObjectCommand);
+        _binaryWriter.Write(id);
+
+        _textBuilder.Append(
+            CultureInfo.InvariantCulture,
+            $"DESTROY_OBJECT {id}\n");
+    }
+
+    public void SetParent(int childId, int parentId)
+    {
+        ThrowIfEnded();
+        _binaryWriter.Write(SetParentCommand);
+        _binaryWriter.Write(childId);
+        _binaryWriter.Write(parentId);
+
+        _textBuilder.Append(
+            CultureInfo.InvariantCulture,
+            $"SET_PARENT {childId} {parentId}\n");
+    }
+
+    public void SetTransform2D(int id, double x, double y, double rotation, double scaleX, double scaleY)
+    {
+        ThrowIfEnded();
+        _binaryWriter.Write(SetTransform2DCommand);
+        _binaryWriter.Write(id);
+        _binaryWriter.Write(x);
+        _binaryWriter.Write(y);
+        _binaryWriter.Write(rotation);
+        _binaryWriter.Write(scaleX);
+        _binaryWriter.Write(scaleY);
+
+        _textBuilder.Append(
+            CultureInfo.InvariantCulture,
+            $"SET_TRANSFORM2D {id} {x:0.###} {y:0.###} {rotation:0.###} {scaleX:0.###} {scaleY:0.###}\n");
+    }
+
+    public void SetVisible(int id, bool visible)
+    {
+        ThrowIfEnded();
+        _binaryWriter.Write(SetVisibleCommand);
+        _binaryWriter.Write(id);
+        _binaryWriter.Write((byte)(visible ? 1 : 0));
+
+        _textBuilder.Append(
+            CultureInfo.InvariantCulture,
+            $"SET_VISIBLE {id} {(visible ? 1 : 0)}\n");
     }
 
     public string Build()
@@ -91,6 +161,21 @@ public sealed class GodotHostCommandBuffer
         if (_ended)
         {
             throw new InvalidOperationException("The Godot host command buffer has already been built.");
+        }
+    }
+
+    private void WriteBinaryString(string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        _binaryWriter.Write(bytes.Length);
+        _binaryWriter.Write(bytes);
+    }
+
+    private static void ValidateToken(string value, string paramName, bool allowEmpty = false)
+    {
+        if ((!allowEmpty && string.IsNullOrWhiteSpace(value)) || value.Any(char.IsWhiteSpace))
+        {
+            throw new ArgumentException("Godot host command tokens must be non-empty and must not contain whitespace.", paramName);
         }
     }
 }

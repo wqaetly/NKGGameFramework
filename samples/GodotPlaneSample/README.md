@@ -44,4 +44,4 @@ Native build inputs are kept outside this repository by default:
 
 `tools/ensure-godot-4.7.ps1` downloads the official Godot 4.7 stable Windows build and clones/updates official `godot-cpp` when those local cache entries are missing.
 
-The next integration step is to extend the current `NkgGodotHost` command path with generic Godot object commands or generated host-service binding, then extend the same bridge to mobile/Web export templates.
+The next integration step is to connect the generic Godot object commands already present in the command buffer/reader to the native `NkgGodotHost` applier, then extend the same bridge to mobile/Web export templates.
