@@ -14,6 +14,7 @@ public sealed class GodotHostCommandBuffer
     private const byte SetParentCommand = 5;
     private const byte SetTransform2DCommand = 6;
     private const byte SetVisibleCommand = 7;
+    private const byte SetPropertyCommand = 8;
     private const byte EndCommand = 255;
 
     private readonly MemoryStream _binaryStream;
@@ -128,6 +129,21 @@ public sealed class GodotHostCommandBuffer
             $"SET_VISIBLE {id} {(visible ? 1 : 0)}\n");
     }
 
+    public void SetProperty(int id, string propertyName, GodotVariant value)
+    {
+        ThrowIfEnded();
+        ValidateToken(propertyName, nameof(propertyName));
+
+        _binaryWriter.Write(SetPropertyCommand);
+        _binaryWriter.Write(id);
+        WriteBinaryString(propertyName);
+        WriteVariant(value);
+
+        _textBuilder.Append(
+            CultureInfo.InvariantCulture,
+            $"SET_PROPERTY {id} {propertyName} {FormatVariant(value)}\n");
+    }
+
     public string Build()
     {
         EnsureEnded();
@@ -177,5 +193,55 @@ public sealed class GodotHostCommandBuffer
         {
             throw new ArgumentException("Godot host command tokens must be non-empty and must not contain whitespace.", paramName);
         }
+    }
+
+    private void WriteVariant(GodotVariant value)
+    {
+        _binaryWriter.Write((byte)value.Kind);
+        switch (value.Kind)
+        {
+            case GodotVariantKind.Color:
+                _binaryWriter.Write(value.Color.R);
+                _binaryWriter.Write(value.Color.G);
+                _binaryWriter.Write(value.Color.B);
+                _binaryWriter.Write(value.Color.A);
+                break;
+            case GodotVariantKind.PackedVector2Array:
+                var points = value.Vector2Array ?? throw new ArgumentException("PackedVector2Array variant requires points.", nameof(value));
+                _binaryWriter.Write(points.Count);
+                foreach (var point in points)
+                {
+                    _binaryWriter.Write(point.X);
+                    _binaryWriter.Write(point.Y);
+                }
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.");
+        }
+    }
+
+    private static string FormatVariant(GodotVariant value)
+    {
+        return value.Kind switch
+        {
+            GodotVariantKind.Color => string.Create(
+                CultureInfo.InvariantCulture,
+                $"COLOR {value.Color.R:0.###} {value.Color.G:0.###} {value.Color.B:0.###} {value.Color.A:0.###}"),
+            GodotVariantKind.PackedVector2Array => FormatPackedVector2Array(value),
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value.Kind, "Unsupported Godot variant kind.")
+        };
+    }
+
+    private static string FormatPackedVector2Array(GodotVariant value)
+    {
+        var points = value.Vector2Array ?? throw new ArgumentException("PackedVector2Array variant requires points.", nameof(value));
+        var builder = new StringBuilder();
+        builder.Append(CultureInfo.InvariantCulture, $"PACKED_VECTOR2_ARRAY {points.Count}");
+        foreach (var point in points)
+        {
+            builder.Append(CultureInfo.InvariantCulture, $" {point.X:0.###} {point.Y:0.###}");
+        }
+
+        return builder.ToString();
     }
 }

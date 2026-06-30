@@ -1,12 +1,16 @@
 #include "nkg_leanclr_plane_host.h"
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -19,6 +23,30 @@ constexpr double DISPLAY_SCALE = 2.0;
 constexpr double ARENA_WIDTH = 640.0;
 constexpr double ARENA_HEIGHT = 360.0;
 constexpr double MANAGED_STEP_SECONDS = 1.0 / 144.0;
+
+void write_u8(std::vector<uint8_t>& buffer, uint8_t value)
+{
+    buffer.push_back(value);
+}
+
+void write_i32(std::vector<uint8_t>& buffer, int32_t value)
+{
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
+    buffer.insert(buffer.end(), bytes, bytes + sizeof(value));
+}
+
+void write_f64(std::vector<uint8_t>& buffer, double value)
+{
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
+    buffer.insert(buffer.end(), bytes, bytes + sizeof(value));
+}
+
+void write_string(std::vector<uint8_t>& buffer, const char* value)
+{
+    const int32_t length = static_cast<int32_t>(std::strlen(value));
+    write_i32(buffer, length);
+    buffer.insert(buffer.end(), value, value + length);
+}
 } // namespace
 
 NkgLeanClrPlaneHost::NkgLeanClrPlaneHost() = default;
@@ -36,6 +64,7 @@ void NkgLeanClrPlaneHost::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_bullet_count"), &NkgLeanClrPlaneHost::get_bullet_count);
     ClassDB::bind_method(D_METHOD("get_max_bullet_count"), &NkgLeanClrPlaneHost::get_max_bullet_count);
     ClassDB::bind_method(D_METHOD("get_player_x"), &NkgLeanClrPlaneHost::get_player_x);
+    ClassDB::bind_method(D_METHOD("run_generic_property_smoke"), &NkgLeanClrPlaneHost::run_generic_property_smoke);
 }
 
 void NkgLeanClrPlaneHost::_ready()
@@ -122,6 +151,78 @@ int32_t NkgLeanClrPlaneHost::get_max_bullet_count() const
 double NkgLeanClrPlaneHost::get_player_x() const
 {
     return player_x;
+}
+
+bool NkgLeanClrPlaneHost::run_generic_property_smoke()
+{
+    constexpr int32_t object_id = 990001;
+    std::vector<uint8_t> commands;
+
+    write_u8(commands, 3);
+    write_i32(commands, object_id);
+    write_string(commands, "Polygon2D");
+    write_string(commands, "GenericPropertySmoke");
+
+    write_u8(commands, 8);
+    write_i32(commands, object_id);
+    write_string(commands, "polygon");
+    write_u8(commands, 2);
+    write_i32(commands, 3);
+    write_f64(commands, 0.0);
+    write_f64(commands, -8.0);
+    write_f64(commands, 8.0);
+    write_f64(commands, 8.0);
+    write_f64(commands, -8.0);
+    write_f64(commands, 8.0);
+
+    write_u8(commands, 8);
+    write_i32(commands, object_id);
+    write_string(commands, "color");
+    write_u8(commands, 1);
+    write_f64(commands, 0.25);
+    write_f64(commands, 0.5);
+    write_f64(commands, 0.75);
+    write_f64(commands, 1.0);
+
+    write_u8(commands, 6);
+    write_i32(commands, object_id);
+    write_f64(commands, 32.0);
+    write_f64(commands, 48.0);
+    write_f64(commands, 0.0);
+    write_f64(commands, 1.0);
+    write_f64(commands, 1.0);
+
+    write_u8(commands, 7);
+    write_i32(commands, object_id);
+    write_u8(commands, 1);
+    write_u8(commands, 255);
+
+    const bool applied = host.apply_commands(
+        commands,
+        [](const NkgGodotHostCommandReader::FrameCommand&) {},
+        [](const NkgGodotHostCommandReader::Node2DCommand&) -> Node2D* {
+            return nullptr;
+        },
+        [](const NkgGodotHostCommandReader::Node2DCommand&, Node2D*) {});
+    if (!applied)
+    {
+        return false;
+    }
+
+    auto* node = Object::cast_to<Polygon2D>(find_child("GenericPropertySmoke", false, false));
+    if (node == nullptr)
+    {
+        return false;
+    }
+
+    const PackedVector2Array polygon = node->get_polygon();
+    const Color color = node->get_color();
+    return polygon.size() == 3 &&
+        node->get_position().is_equal_approx(Vector2(32.0, 48.0)) &&
+        Math::is_equal_approx(color.r, 0.25f) &&
+        Math::is_equal_approx(color.g, 0.5f) &&
+        Math::is_equal_approx(color.b, 0.75f) &&
+        Math::is_equal_approx(color.a, 1.0f);
 }
 
 void NkgLeanClrPlaneHost::initialize_bridge()

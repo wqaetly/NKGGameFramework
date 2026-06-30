@@ -63,6 +63,35 @@ public:
         bool visible = true;
     };
 
+    enum class VariantKind : uint8_t
+    {
+        Color = 1,
+        PackedVector2Array = 2
+    };
+
+    struct Vector2Value
+    {
+        double x = 0;
+        double y = 0;
+    };
+
+    struct VariantValue
+    {
+        VariantKind kind = VariantKind::Color;
+        double r = 0;
+        double g = 0;
+        double b = 0;
+        double a = 1;
+        std::vector<Vector2Value> vector2_array;
+    };
+
+    struct SetPropertyCommand
+    {
+        int32_t id = 0;
+        std::string property_name;
+        VariantValue value;
+    };
+
     using FrameHandler = std::function<void(const FrameCommand& p_command)>;
     using Node2DHandler = std::function<void(const Node2DCommand& p_command)>;
     using CreateNodeHandler = std::function<void(const CreateNodeCommand& p_command)>;
@@ -70,6 +99,7 @@ public:
     using SetParentHandler = std::function<void(const SetParentCommand& p_command)>;
     using SetTransform2DHandler = std::function<void(const SetTransform2DCommand& p_command)>;
     using SetVisibleHandler = std::function<void(const SetVisibleCommand& p_command)>;
+    using SetPropertyHandler = std::function<void(const SetPropertyCommand& p_command)>;
 
     struct Handlers
     {
@@ -80,6 +110,7 @@ public:
         SetParentHandler set_parent;
         SetTransform2DHandler set_transform2d;
         SetVisibleHandler set_visible;
+        SetPropertyHandler set_property;
     };
 
     bool read(const std::vector<uint8_t>& p_commands, const Handlers& p_handlers) const;

@@ -27,6 +27,11 @@ public readonly struct GodotNode
         _commands.SetVisible(Id, visible);
     }
 
+    public void SetProperty(string propertyName, GodotVariant value)
+    {
+        _commands.SetProperty(Id, propertyName, value);
+    }
+
     public void Destroy()
     {
         _commands.Destroy(Id);

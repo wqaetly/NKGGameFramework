@@ -130,11 +130,71 @@ public sealed class GodotHostCommandBufferTests
         node.SetParent(GodotObjectId.Root);
         node.SetTransform2D(12.5, 30.25, rotation: 0.5, scaleX: 2, scaleY: 3);
         node.SetVisible(true);
+        node.SetProperty("color", GodotVariant.FromColor(new GodotColor(0.2, 0.7, 0.9)));
         node.Destroy();
 
         Assert.Equal(
-            "CREATE_NODE 10 Node2D Player\nSET_PARENT 10 0\nSET_TRANSFORM2D 10 12.5 30.25 0.5 2 3\nSET_VISIBLE 10 1\nDESTROY_OBJECT 10\nEND",
+            "CREATE_NODE 10 Node2D Player\nSET_PARENT 10 0\nSET_TRANSFORM2D 10 12.5 30.25 0.5 2 3\nSET_VISIBLE 10 1\nSET_PROPERTY 10 color COLOR 0.2 0.7 0.9 1\nDESTROY_OBJECT 10\nEND",
             buffer.BuildText());
+    }
+
+    [Fact]
+    public void Command_buffer_writes_property_variants()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.SetProperty(10, "color", GodotVariant.FromColor(new GodotColor(0.2, 0.7, 0.9, 0.5)));
+        buffer.SetProperty(
+            10,
+            "polygon",
+            GodotVariant.FromPackedVector2Array(
+            [
+                new GodotVector2(0, -36),
+                new GodotVector2(-10, 8)
+            ]));
+
+        Assert.Equal(
+            "SET_PROPERTY 10 color COLOR 0.2 0.7 0.9 0.5\nSET_PROPERTY 10 polygon PACKED_VECTOR2_ARRAY 2 0 -36 -10 8\nEND",
+            buffer.BuildText());
+    }
+
+    [Fact]
+    public void Command_buffer_encodes_property_variants()
+    {
+        var buffer = new GodotHostCommandBuffer();
+
+        buffer.SetProperty(10, "color", GodotVariant.FromColor(new GodotColor(0.2, 0.7, 0.9, 0.5)));
+        buffer.SetProperty(
+            10,
+            "polygon",
+            GodotVariant.FromPackedVector2Array(
+            [
+                new GodotVector2(0, -36),
+                new GodotVector2(-10, 8)
+            ]));
+
+        using var reader = new BinaryReader(new MemoryStream(buffer.BuildBytes()));
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal("color", ReadString(reader));
+        Assert.Equal(1, reader.ReadByte());
+        Assert.Equal(0.2, reader.ReadDouble());
+        Assert.Equal(0.7, reader.ReadDouble());
+        Assert.Equal(0.9, reader.ReadDouble());
+        Assert.Equal(0.5, reader.ReadDouble());
+
+        Assert.Equal(8, reader.ReadByte());
+        Assert.Equal(10, reader.ReadInt32());
+        Assert.Equal("polygon", ReadString(reader));
+        Assert.Equal(2, reader.ReadByte());
+        Assert.Equal(2, reader.ReadInt32());
+        Assert.Equal(0, reader.ReadDouble());
+        Assert.Equal(-36, reader.ReadDouble());
+        Assert.Equal(-10, reader.ReadDouble());
+        Assert.Equal(8, reader.ReadDouble());
+
+        Assert.Equal(255, reader.ReadByte());
     }
 
     private static string ReadString(BinaryReader reader)

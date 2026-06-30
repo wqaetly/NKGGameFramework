@@ -32,6 +32,7 @@ public:
     int32_t get_bullet_count() const;
     int32_t get_max_bullet_count() const;
     double get_player_x() const;
+    bool run_generic_property_smoke();
 
 protected:
     static void _bind_methods();

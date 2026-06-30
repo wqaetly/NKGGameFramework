@@ -35,4 +35,9 @@ public sealed class GodotHostCommands
     {
         _buffer.SetVisible(id.Value, visible);
     }
+
+    internal void SetProperty(GodotObjectId id, string propertyName, GodotVariant value)
+    {
+        _buffer.SetProperty(id.Value, propertyName, value);
+    }
 }

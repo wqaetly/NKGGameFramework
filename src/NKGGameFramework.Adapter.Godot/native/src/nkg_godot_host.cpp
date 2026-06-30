@@ -3,6 +3,8 @@
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
@@ -88,6 +90,9 @@ bool NkgGodotHost::apply_commands(
     };
     handlers.set_visible = [this, &applied](const NkgGodotHostCommandReader::SetVisibleCommand& command) {
         applied = apply_set_visible(command) && applied;
+    };
+    handlers.set_property = [this, &applied](const NkgGodotHostCommandReader::SetPropertyCommand& command) {
+        applied = apply_set_property(command) && applied;
     };
 
     const bool read = command_reader.read(p_commands, handlers);
@@ -208,6 +213,39 @@ bool NkgGodotHost::apply_set_visible(const NkgGodotHostCommandReader::SetVisible
 
     item->set_visible(p_command.visible);
     return true;
+}
+
+bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetPropertyCommand& p_command)
+{
+    Object* object = objects.get_object(make_object_key(p_command.id));
+    Polygon2D* polygon = Object::cast_to<Polygon2D>(object);
+    if (polygon == nullptr)
+    {
+        return false;
+    }
+
+    if (p_command.property_name == "color" && p_command.value.kind == NkgGodotHostCommandReader::VariantKind::Color)
+    {
+        polygon->set_color(Color(
+            p_command.value.r,
+            p_command.value.g,
+            p_command.value.b,
+            p_command.value.a));
+        return true;
+    }
+
+    if (p_command.property_name == "polygon" && p_command.value.kind == NkgGodotHostCommandReader::VariantKind::PackedVector2Array)
+    {
+        PackedVector2Array points;
+        for (const auto& point : p_command.value.vector2_array)
+        {
+            points.push_back(Vector2(point.x, point.y));
+        }
+        polygon->set_polygon(points);
+        return true;
+    }
+
+    return false;
 }
 
 Object* NkgGodotHost::create_object_by_type(const std::string& p_type_name) const

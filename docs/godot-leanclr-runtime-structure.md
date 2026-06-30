@@ -185,7 +185,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible` 的最小对象命令，同时继续通过回调把样例专用的 snapshot 节点创建和更新策略留给 `NkgLeanClrPlaneHost`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令，同时继续通过回调把样例专用的 snapshot 节点创建和更新策略留给 `NkgLeanClrPlaneHost`。`SetProperty` 当前只覆盖样例迁移所需的 `Polygon2D.color` 和 `Polygon2D.polygon`。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
@@ -212,7 +212,7 @@ Managed simulation step: fixed 144Hz
 
 当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 direct byte buffer ABI；native host 调用 `StepSessionCommandBytes()` 获得 managed `byte[]`，再由 `NkgGodotHostCommandReader` 解码成 typed frame/node commands。`StepSession()` 仍保留 `NKGCB1` base64 string envelope，作为 GDScript smoke 和调试兼容路径。
 
-`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible` 命令。飞机样例当前仍使用 snapshot-style `NODE2D` path，因为 `Polygon2D` 的 polygon/color 还需要后续 `SetProperty` / Variant payload 支持。
+`NKGGameFramework.Adapter.Godot` managed 侧已经提供最小 `GodotHostCommands` / `GodotNode` facade，用于生成 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 命令。Variant payload 当前覆盖 `Color` 和 `PackedVector2Array`。飞机样例仍使用 snapshot-style `NODE2D` path，下一步应迁移 visual 输出。
 
 ## Build And Verification Flow
 
@@ -261,7 +261,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 补 `SetProperty` / Variant payload，并让样例逐步输出通用 object command。
+- 让样例逐步输出通用 object command，并继续扩大 Variant/property 覆盖。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

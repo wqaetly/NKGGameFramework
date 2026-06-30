@@ -14,6 +14,7 @@ constexpr uint8_t DESTROY_OBJECT_COMMAND = 4;
 constexpr uint8_t SET_PARENT_COMMAND = 5;
 constexpr uint8_t SET_TRANSFORM2D_COMMAND = 6;
 constexpr uint8_t SET_VISIBLE_COMMAND = 7;
+constexpr uint8_t SET_PROPERTY_COMMAND = 8;
 constexpr uint8_t END_COMMAND = 255;
 
 std::string to_std_string(const godot::String& value)
@@ -118,6 +119,50 @@ public:
         value.assign(reinterpret_cast<const char*>(data.data() + position), static_cast<size_t>(length));
         position += static_cast<size_t>(length);
         return true;
+    }
+
+    bool read_variant(godot::NkgGodotHostCommandReader::VariantValue& value)
+    {
+        uint8_t kind = 0;
+        if (!read_u8(kind))
+        {
+            return false;
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::Color))
+        {
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::Color;
+            return read_f64(value.r) &&
+                read_f64(value.g) &&
+                read_f64(value.b) &&
+                read_f64(value.a);
+        }
+
+        if (kind == static_cast<uint8_t>(godot::NkgGodotHostCommandReader::VariantKind::PackedVector2Array))
+        {
+            int32_t count = 0;
+            if (!read_i32(count) || count < 0)
+            {
+                return false;
+            }
+
+            value.kind = godot::NkgGodotHostCommandReader::VariantKind::PackedVector2Array;
+            value.vector2_array.clear();
+            value.vector2_array.reserve(static_cast<size_t>(count));
+            for (int32_t index = 0; index < count; index++)
+            {
+                godot::NkgGodotHostCommandReader::Vector2Value point;
+                if (!read_f64(point.x) || !read_f64(point.y))
+                {
+                    return false;
+                }
+                value.vector2_array.push_back(point);
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
 private:
@@ -279,6 +324,23 @@ bool NkgGodotHostCommandReader::read(
             continue;
         }
 
+        if (opcode == SET_PROPERTY_COMMAND)
+        {
+            SetPropertyCommand command;
+            if (!cursor.read_i32(command.id) ||
+                !cursor.read_string(command.property_name) ||
+                !cursor.read_variant(command.value))
+            {
+                return false;
+            }
+
+            if (p_handlers.set_property)
+            {
+                p_handlers.set_property(command);
+            }
+            continue;
+        }
+
         return false;
     }
 
@@ -394,6 +456,46 @@ bool NkgGodotHostCommandReader::read(
             if (p_handlers.set_visible)
             {
                 p_handlers.set_visible(command);
+            }
+            continue;
+        }
+
+        if (tag == "SET_PROPERTY")
+        {
+            SetPropertyCommand command;
+            std::string variant_kind;
+            stream >> command.id >> command.property_name >> variant_kind;
+            if (variant_kind == "COLOR")
+            {
+                command.value.kind = VariantKind::Color;
+                stream >> command.value.r >> command.value.g >> command.value.b >> command.value.a;
+            }
+            else if (variant_kind == "PACKED_VECTOR2_ARRAY")
+            {
+                int32_t count = 0;
+                command.value.kind = VariantKind::PackedVector2Array;
+                stream >> count;
+                if (count < 0)
+                {
+                    return false;
+                }
+                command.value.vector2_array.clear();
+                command.value.vector2_array.reserve(static_cast<size_t>(count));
+                for (int32_t index = 0; index < count; index++)
+                {
+                    Vector2Value point;
+                    stream >> point.x >> point.y;
+                    command.value.vector2_array.push_back(point);
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            if (p_handlers.set_property)
+            {
+                p_handlers.set_property(command);
             }
             continue;
         }

@@ -94,6 +94,11 @@ func _process(delta: float) -> bool:
         quit(6)
         return true
 
+    if !main_scene.run_generic_property_smoke():
+        printerr("NKG_MAIN_SCENE_SMOKE generic_property_smoke_failed")
+        quit(22)
+        return true
+
     debug_port = main_scene.get_debug_port()
     if debug_port <= 0:
         printerr("NKG_MAIN_SCENE_SMOKE debug_port_missing")
