@@ -1,12 +1,15 @@
 #include "nkg_godot_host.h"
 
 #include <godot_cpp/classes/canvas_item.hpp>
+#include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/string_name.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 namespace godot
@@ -259,22 +262,15 @@ bool NkgGodotHost::apply_set_property(const NkgGodotHostCommandReader::SetProper
 
 Object* NkgGodotHost::create_object_by_type(const std::string& p_type_name) const
 {
-    if (p_type_name == "Node2D")
+    auto* class_db = ClassDBSingleton::get_singleton();
+    const StringName class_name(p_type_name.c_str());
+    if (class_db == nullptr || !class_db->can_instantiate(class_name))
     {
-        return memnew(Node2D);
+        return nullptr;
     }
 
-    if (p_type_name == "Polygon2D")
-    {
-        return memnew(Polygon2D);
-    }
-
-    if (p_type_name == "Label")
-    {
-        return memnew(Label);
-    }
-
-    return nullptr;
+    const Variant instance = class_db->instantiate(class_name);
+    return instance.operator Object*();
 }
 
 void NkgGodotHost::release_object(Object* p_object) const

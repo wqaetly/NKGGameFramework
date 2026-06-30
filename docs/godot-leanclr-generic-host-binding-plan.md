@@ -43,7 +43,7 @@ C# / LeanCLR gameplay code
 
 - Host API 仍有样例专用部分：输入映射、飞机图形创建、HUD 和 plane-specific frame counters。
 - C# 到 C++ 已从内部 snapshot string 推进为 direct `byte[]` binary command buffer。
-- 已有 Object/Resource registry 基础、第一批通用 Godot object command opcode、最小 native command applier、managed facade 和最小 Variant payload；还没有完整 Variant marshalling 和生成式 API 覆盖。
+- 已有 Object/Resource registry 基础、第一批通用 Godot object command opcode、ClassDB-backed native object creation、managed facade 和最小 Variant payload；还没有完整 Variant marshalling 和生成式 API 覆盖。
 - Variant marshalling 目前覆盖 `Color`、`PackedVector2Array` 和 `string` 的最小属性设置路径。
 - 没有生成器。
 - 没有信号、方法调用、属性读写、资源加载、场景实例化等通用能力。
@@ -230,7 +230,7 @@ SceneTree
 - 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小通路。
 - 已完成部分：C# 侧提供最小 `GodotHostCommands` / `GodotNode` 手写 facade。
 - 已完成部分：打飞机样例 visual 输出已改用通用 `CreateNode` / `SetProperty` / `SetTransform2D` 命令，native host 不再负责 plane-specific Polygon2D 创建。
-- 待完成：扩大 native 创建类型、属性/方法/Variant 支持，并继续收敛剩余 plane-specific HUD/input/status 胶水。
+- 待完成：扩大属性/方法/Variant 支持，并继续收敛剩余 plane-specific HUD/input/status 胶水。
 
 验收：
 

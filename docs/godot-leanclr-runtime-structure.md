@@ -187,7 +187,7 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotResourceRegistry` 是 Godot resource registry 基础。它用稳定 id 管理 `Ref<Resource>`，为后续 `LoadResource`、`InstantiateScene` 和 typed resource handle 命令预留 native 承载点。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令。`SetProperty` 当前覆盖 `Polygon2D.color`、`Polygon2D.polygon` 和 `Label.text`。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令。`CreateNode` 通过 Godot `ClassDB` 实例化 type name；`SetProperty` 当前覆盖 `Polygon2D.color`、`Polygon2D.polygon` 和 `Label.text`。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
