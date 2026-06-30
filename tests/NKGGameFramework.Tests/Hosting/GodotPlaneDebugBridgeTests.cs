@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using NKGGameFramework.Adapter.Godot;
 using NKGGameFramework.Diagnostics;
 using NKGGameFramework.GodotPlaneSample;
 
@@ -9,6 +10,18 @@ namespace NKGGameFramework.Tests.Hosting;
 public sealed class GodotPlaneDebugBridgeTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [Fact]
+    public void Godot_debug_endpoint_bridge_uses_godot_runtime_defaults()
+    {
+        var options = GodotDebugEndpointBridge.CreateDispatcherOptions();
+
+        Assert.Equal("/_nkg/debug", options.EndpointPrefix);
+        Assert.False(options.DefaultWaitForSnapshotFrame);
+        Assert.True(options.EnableMutations);
+        Assert.Same(GameDebugController.Shared, options.Control);
+        Assert.Same(GameDebugFramePublisher.Shared, options.Frames);
+    }
 
     [Fact]
     public void Godot_bridge_routes_full_webdebug_endpoints_through_diagnostics_dispatcher()

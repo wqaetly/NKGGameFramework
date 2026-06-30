@@ -1,4 +1,5 @@
 using System.Globalization;
+using NKGGameFramework.Adapter.Godot;
 using NKGGameFramework.Diagnostics;
 
 namespace NKGGameFramework.GodotPlaneSample;
@@ -7,7 +8,7 @@ public static class PlaneGameBridge
 {
     private const double StepSeconds = 1.0d / PlaneGameRules.SimulationHz;
     private static PlaneGame? s_session;
-    private static GameDebugEndpointTextBridge? s_debug;
+    private static GodotDebugEndpointBridge? s_debug;
     private static int s_moveX;
     private static int s_moveY;
     private static bool s_fire;
@@ -80,19 +81,14 @@ public static class PlaneGameBridge
         return game;
     }
 
-    private static GameDebugEndpointTextBridge CreateDebugBridge(PlaneGame game)
+    private static GodotDebugEndpointBridge CreateDebugBridge(PlaneGame game)
     {
         var session = new GameDebugSession()
             .Register(game.Runtime)
             .Register(game.World);
-        return new GameDebugEndpointTextBridge(new GameDebugEndpointDispatcherOptions
+        return new GodotDebugEndpointBridge(new GodotDebugEndpointBridgeOptions
         {
-            EndpointPrefix = "/_nkg/debug",
-            DefaultWaitForSnapshotFrame = false,
-            EnableMutations = true,
             Session = session,
-            Control = GameDebugController.Shared,
-            Frames = GameDebugFramePublisher.Shared,
         });
     }
 

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NKGGameFramework\NKGGameFramework.csproj" />
+    <ProjectReference Include="..\NKGGameFramework.Diagnostics\NKGGameFramework.Diagnostics.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

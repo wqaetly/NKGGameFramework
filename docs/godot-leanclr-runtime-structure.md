@@ -160,7 +160,7 @@ System.Net debug transport
 
 `leanclr_bcl/net10.0` 是 Godot 运行时传给 LeanCLR 的 BCL 程序集目录。当前桌面 smoke 由 `tools/stage-leanclr-bcl.ps1` 从 Godot managed 输出目录读取 AssemblyRef 闭包，再从本机 `Microsoft.NETCore.App\10.x` 复制实际需要的 runtime assemblies；Godot 运行时不再探测本机 shared framework，也不启动 CoreCLR/.NET host。后续面向发布和移动端时，应将这个目录替换为随包携带的 LeanCLR minimal net10 BCL/profile 产物，并按真实 workload 裁剪。
 
-当前 Godot/LeanCLR WebDebug 复用 `NKGGameFramework.Diagnostics` 的 `GameDebugEndpointDispatcher`，由同一套 Diagnostics 类型和服务处理 health、snapshot、stream 轮询快照、control、mutation、dump recording、dump analysis 和 dump playback。Godot native 层只负责 desktop loopback HTTP/SSE transport、二进制 body 透传和主线程安全点调度，不引用 `NKGGameFramework.Hosting`，也不要求 LeanCLR 实现 `System.Net` server。
+当前 Godot/LeanCLR WebDebug 通过 `NKGGameFramework.Adapter.Godot` 的 `GodotDebugEndpointBridge` 复用 `NKGGameFramework.Diagnostics` 的 `GameDebugEndpointDispatcher`，由同一套 Diagnostics 类型和服务处理 health、snapshot、stream 轮询快照、control、mutation、dump recording、dump analysis 和 dump playback。Godot native 层只负责 desktop loopback HTTP/SSE transport、二进制 body 透传和主线程安全点调度，不引用 `NKGGameFramework.Hosting`，也不要求 LeanCLR 实现 `System.Net` server。
 
 ## Native Bridge Boundary
 
