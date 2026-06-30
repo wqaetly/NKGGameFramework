@@ -2,10 +2,8 @@
 
 #include <cstdint>
 #include <cstring>
-#include <sstream>
 #include <vector>
 
-#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -15,6 +13,8 @@
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
+
+#include "nkg_godot_status_fields.h"
 
 namespace godot
 {
@@ -308,27 +308,13 @@ void NkgLeanClrPlaneHost::pump_input()
 {
     bridge->clear_input();
 
-    auto* input = Input::get_singleton();
-    if (input->is_action_pressed("ui_left"))
-    {
-        bridge->press_left();
-    }
-    if (input->is_action_pressed("ui_right"))
-    {
-        bridge->press_right();
-    }
-    if (input->is_action_pressed("ui_up"))
-    {
-        bridge->press_up();
-    }
-    if (input->is_action_pressed("ui_down"))
-    {
-        bridge->press_down();
-    }
-    if (input->is_action_pressed("ui_accept"))
-    {
-        bridge->press_fire();
-    }
+    input_pump.pump_pressed_actions({
+        {"ui_left", [this]() { bridge->press_left(); }},
+        {"ui_right", [this]() { bridge->press_right(); }},
+        {"ui_up", [this]() { bridge->press_up(); }},
+        {"ui_down", [this]() { bridge->press_down(); }},
+        {"ui_accept", [this]() { bridge->press_fire(); }},
+    });
 }
 
 void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
@@ -372,33 +358,10 @@ void NkgLeanClrPlaneHost::refresh_session_status()
         return;
     }
 
-    const String status = bridge->get_status();
-    const auto utf8 = status.utf8();
-    std::istringstream stream(std::string(utf8.get_data(), utf8.length()));
-    std::string token;
-    while (stream >> token)
-    {
-        const size_t separator = token.find('=');
-        if (separator == std::string::npos)
-        {
-            continue;
-        }
-
-        const std::string key = token.substr(0, separator);
-        const std::string value = token.substr(separator + 1);
-        if (key == "player_x")
-        {
-            player_x = std::stod(value);
-        }
-        else if (key == "bullets")
-        {
-            bullet_count = std::stoi(value);
-        }
-        else if (key == "objects")
-        {
-            visual_object_count = std::stoi(value);
-        }
-    }
+    const NkgGodotStatusFields status(bridge->get_status());
+    status.try_get_double("player_x", player_x);
+    status.try_get_int("bullets", bullet_count);
+    status.try_get_int("objects", visual_object_count);
 }
 
 void NkgLeanClrPlaneHost::update_hud()

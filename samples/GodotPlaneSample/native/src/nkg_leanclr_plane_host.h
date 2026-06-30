@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include "nkg_godot_host.h"
+#include "nkg_godot_input_pump.h"
 #include "nkg_leanclr_plane_bridge.h"
 
 namespace godot
@@ -49,6 +50,7 @@ private:
 
     Ref<NkgLeanClrPlaneBridge> bridge;
     NkgGodotHost host;
+    NkgGodotInputPump input_pump;
     Label* hud_label = nullptr;
     String bridge_status = "boot";
     String managed_dir = "res://../NKGGameFramework.GodotPlaneSample/bin/Release/net10.0";

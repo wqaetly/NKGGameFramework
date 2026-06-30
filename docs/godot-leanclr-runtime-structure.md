@@ -9,7 +9,7 @@ NKGGameFramework/
   src/
     NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization、轻量 debug DTO/control/frame
     NKGGameFramework.Adapter.Godot/      # Godot managed contracts，不引用 GodotSharp
-      native/src/                       # Godot native adapter：LeanCLR runtime/managed bridge、debug transport、host command reader、host/object/resource registry
+      native/src/                       # Godot native adapter：LeanCLR runtime/managed bridge、debug transport、host command reader、host/object/resource registry、input/status helpers
     NKGGameFramework.Hosting/            # HTTP/SSE debug host，本样例不引用
     NKGGameFramework.Diagnostics/        # snapshot provider、mutation、dump、analysis、transport-independent WebDebug endpoint dispatcher
 
@@ -189,10 +189,12 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 object/resource registry 串成可复用主流程；当前已经能应用 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小对象命令。`CreateNode` 通过 Godot `ClassDB` 实例化 type name；`SetProperty` 当前覆盖 `Polygon2D.color`、`Polygon2D.polygon` 和 `Label.text`。
 
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotInputPump` 和 `NkgGodotStatusFields` 是当前样例 host 复用的 Godot input/status helper。前者负责从 Godot `Input` action 执行回调，后者负责解析 managed `key=value` status 字符串。
+
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
 - 作为 `scenes/main.tscn` 的 root 节点参与 Godot 主循环。
-- 读取 Godot 输入：方向键控制飞机，`ui_accept` 发射子弹。
+- 配置 Godot 输入动作绑定：方向键控制飞机，`ui_accept` 发射子弹。
 - 调用 `NkgLeanClrPlaneBridge` 推进 managed session。
 - 通过 `NkgGodotHost` 启动/pump desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
 - 通过 `NkgGodotHost` 应用 managed command buffer。
@@ -263,7 +265,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 继续扩大 Variant/property 覆盖，并收敛剩余 sample host HUD/status/input 胶水。
+- 继续扩大 Variant/property 覆盖，并收敛剩余 sample host HUD/status 胶水。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。
