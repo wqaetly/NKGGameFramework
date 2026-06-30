@@ -94,7 +94,7 @@ void NkgLeanClrPlaneHost::_draw()
     for (int32_t i = 0; i < 90; i++)
     {
         const double x = static_cast<double>((i * 47) % static_cast<int32_t>(ARENA_WIDTH * DISPLAY_SCALE));
-        const double y = static_cast<double>((i * 83 + sync_tick * (1 + i % 3)) % static_cast<int32_t>(ARENA_HEIGHT * DISPLAY_SCALE));
+        const double y = static_cast<double>((i * 83 + visuals.frame() * (1 + i % 3)) % static_cast<int32_t>(ARENA_HEIGHT * DISPLAY_SCALE));
         draw_circle(Vector2(x, y), 1.0 + static_cast<double>(i % 2), Color(0.7, 0.82, 0.92, 0.35));
     }
 }
@@ -223,7 +223,7 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
         return;
     }
 
-    sync_tick++;
+    visuals.begin_frame();
     bullet_count = 0;
 
     std::istringstream stream(to_std_string(p_snapshot));
@@ -262,7 +262,7 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
         }
     }
 
-    remove_stale_visuals();
+    visuals.remove_stale_nodes();
     if (bullet_count > max_bullet_count)
     {
         max_bullet_count = bullet_count;
@@ -272,15 +272,13 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
 void NkgLeanClrPlaneHost::sync_visual(const String& p_kind, int32_t p_id, double p_x, double p_y)
 {
     const std::string key = make_key(p_kind, p_id);
-    auto found = visuals.find(key);
-    if (found == visuals.end())
+    Node2D* visual = visuals.sync_node(key, [this, &p_kind, p_id]() -> Node2D* {
+        return create_visual(p_kind, p_id);
+    });
+    if (visual != nullptr)
     {
-        auto* visual = create_visual(p_kind, p_id);
-        found = visuals.emplace(key, VisualObject{visual, p_kind, sync_tick}).first;
+        visual->set_position(Vector2(p_x * DISPLAY_SCALE, p_y * DISPLAY_SCALE));
     }
-
-    found->second.last_seen = sync_tick;
-    found->second.node->set_position(Vector2(p_x * DISPLAY_SCALE, p_y * DISPLAY_SCALE));
 }
 
 Polygon2D* NkgLeanClrPlaneHost::create_visual(const String& p_kind, int32_t p_id)
@@ -291,33 +289,6 @@ Polygon2D* NkgLeanClrPlaneHost::create_visual(const String& p_kind, int32_t p_id
     visual->set_color(color_for_kind(p_kind));
     add_child(visual);
     return visual;
-}
-
-void NkgLeanClrPlaneHost::remove_stale_visuals()
-{
-    std::vector<std::string> dead_keys;
-    for (const auto& item : visuals)
-    {
-        if (item.second.last_seen != sync_tick)
-        {
-            dead_keys.push_back(item.first);
-        }
-    }
-
-    for (const auto& key : dead_keys)
-    {
-        auto found = visuals.find(key);
-        if (found == visuals.end())
-        {
-            continue;
-        }
-
-        if (found->second.node != nullptr)
-        {
-            found->second.node->queue_free();
-        }
-        visuals.erase(found);
-    }
 }
 
 void NkgLeanClrPlaneHost::update_hud()
