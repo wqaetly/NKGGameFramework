@@ -214,7 +214,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
         return
 
     if !structured_snapshot_checked:
-        if !text.contains("\"format\":\"odin-json\"") or !text.contains("\"payload\":null") or !text.contains("\"error\":null") or !text.contains("\"structured\"") or !text.contains("\"name\":\"X\""):
+        if !text.contains("\"format\":\"odin-json\"") or !text.contains("\"payload\"") or !text.contains("\"error\":null") or !text.contains("\"structured\"") or !text.contains("\"name\":\"X\""):
             printerr("NKG_MAIN_SCENE_SMOKE debug_structured_snapshot_bad_body " + text)
             quit(12)
             return

@@ -1,17 +1,14 @@
 #pragma once
 
-#include <string>
-#include <vector>
-
 #include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+
+#include "nkg_leanclr_runtime_bridge.h"
 
 namespace leanclr::metadata
 {
 class RtMethodInfo;
-class RtModuleDef;
 } // namespace leanclr::metadata
 
 namespace godot
@@ -45,14 +42,8 @@ protected:
 
 private:
     bool bind_managed_methods();
-    bool invoke_void(const leanclr::metadata::RtMethodInfo* p_method);
-    String invoke_string(const leanclr::metadata::RtMethodInfo* p_method);
-    String invoke_string_arg(const leanclr::metadata::RtMethodInfo* p_method, const String& p_arg);
-    void set_error(const String& p_message);
 
-    PackedStringArray library_dirs;
-    String assembly_name;
-    leanclr::metadata::RtModuleDef* module = nullptr;
+    NkgLeanClrRuntimeBridge runtime;
     const leanclr::metadata::RtMethodInfo* reset_method = nullptr;
     const leanclr::metadata::RtMethodInfo* clear_input_method = nullptr;
     const leanclr::metadata::RtMethodInfo* press_left_method = nullptr;
@@ -63,7 +54,6 @@ private:
     const leanclr::metadata::RtMethodInfo* step_method = nullptr;
     const leanclr::metadata::RtMethodInfo* debug_request_method = nullptr;
     const leanclr::metadata::RtMethodInfo* status_method = nullptr;
-    String last_error;
     bool ready = false;
 };
 

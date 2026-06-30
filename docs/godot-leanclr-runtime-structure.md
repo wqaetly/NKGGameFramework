@@ -31,6 +31,7 @@ NKGGameFramework/
         build-gdextension.ps1
         src/
           nkg_leanclr_plane_bridge.*     # LeanCLR 调用器
+          nkg_leanclr_runtime_bridge.*   # 通用 LeanCLR runtime / assembly / method invocation 中间层
           nkg_leanclr_plane_host.*       # Godot 对象胶水层，创建/更新 Polygon2D/Label
           register_types.*               # 注册 NkgLeanClrPlaneBridge / NkgLeanClrPlaneHost
       tools/
@@ -164,14 +165,16 @@ System.Net debug transport
 
 ## Native Bridge Boundary
 
-`NkgLeanClrPlaneBridge` 是底层 LeanCLR 调用器。它负责：
+`NkgLeanClrRuntimeBridge` 是底层 LeanCLR runtime 调用器。它负责：
 
 - 接收 managed DLL 和 BCL 程序集搜索目录。
 - 初始化 LeanCLR runtime。
 - 注册 LeanCLR assembly loader。
-- 加载 `NKGGameFramework.GodotPlaneSample.dll`。
-- 绑定 `PlaneGameBridge` 的静态无参方法。
+- 加载指定 managed assembly。
+- 查找并调用 managed 静态方法。
 - 把 managed `string` 返回值转换为 Godot `String`。
+
+`NkgLeanClrPlaneBridge` 是样例专用 bridge facade。它负责绑定 `PlaneGameBridge` 的输入、session 和 debug 方法，并把这些方法暴露成 Godot `RefCounted` API。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 

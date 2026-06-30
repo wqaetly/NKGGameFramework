@@ -27,6 +27,7 @@ add_library(nkg_leanclr_bridge SHARED
     src/nkg_debug_http_server.cpp
     src/nkg_leanclr_plane_bridge.cpp
     src/nkg_leanclr_plane_host.cpp
+    src/nkg_leanclr_runtime_bridge.cpp
     src/register_types.cpp
 )
 
