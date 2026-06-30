@@ -19,19 +19,13 @@ constexpr double DISPLAY_SCALE = 2.0;
 constexpr double ARENA_WIDTH = 640.0;
 constexpr double ARENA_HEIGHT = 360.0;
 constexpr double MANAGED_STEP_SECONDS = 1.0 / 144.0;
-
-std::string to_std_string(const String& value)
-{
-    const auto utf8 = value.utf8();
-    return std::string(utf8.get_data(), utf8.length());
-}
 } // namespace
 
 NkgLeanClrPlaneHost::NkgLeanClrPlaneHost() = default;
 
 NkgLeanClrPlaneHost::~NkgLeanClrPlaneHost()
 {
-    debug_transport.stop();
+    host.stop_debug_transport();
 }
 
 void NkgLeanClrPlaneHost::_bind_methods()
@@ -93,7 +87,7 @@ void NkgLeanClrPlaneHost::_draw()
     for (int32_t i = 0; i < 90; i++)
     {
         const double x = static_cast<double>((i * 47) % static_cast<int32_t>(ARENA_WIDTH * DISPLAY_SCALE));
-        const double y = static_cast<double>((i * 83 + visuals.frame() * (1 + i % 3)) % static_cast<int32_t>(ARENA_HEIGHT * DISPLAY_SCALE));
+        const double y = static_cast<double>((i * 83 + host.get_frame() * (1 + i % 3)) % static_cast<int32_t>(ARENA_HEIGHT * DISPLAY_SCALE));
         draw_circle(Vector2(x, y), 1.0 + static_cast<double>(i % 2), Color(0.7, 0.82, 0.92, 0.35));
     }
 }
@@ -105,12 +99,12 @@ String NkgLeanClrPlaneHost::get_bridge_status() const
 
 int32_t NkgLeanClrPlaneHost::get_debug_port() const
 {
-    return static_cast<int32_t>(debug_transport.get_port());
+    return static_cast<int32_t>(host.get_debug_port());
 }
 
 int32_t NkgLeanClrPlaneHost::get_object_count() const
 {
-    return static_cast<int32_t>(visuals.size());
+    return static_cast<int32_t>(host.get_node_count());
 }
 
 int32_t NkgLeanClrPlaneHost::get_bullet_count() const
@@ -162,19 +156,19 @@ void NkgLeanClrPlaneHost::initialize_debug_server()
         return;
     }
 
-    if (!debug_transport.start(static_cast<uint16_t>(debug_port)))
+    if (!host.start_debug_transport(static_cast<uint16_t>(debug_port)))
     {
-        bridge_status += " debug server failed: " + String(debug_transport.get_last_error().c_str());
+        bridge_status += " debug server failed: " + String(host.get_debug_last_error().c_str());
         return;
     }
 
-    bridge_status += " debug http://127.0.0.1:" + String::num_int64(debug_transport.get_port());
+    bridge_status += " debug http://127.0.0.1:" + String::num_int64(host.get_debug_port());
 }
 
 void NkgLeanClrPlaneHost::process_debug_transport()
 {
     const bool bridge_ready = bridge.is_valid() && bridge->is_ready();
-    debug_transport.process_pending_requests(bridge_ready, [this](const String& request) {
+    host.process_debug_transport(bridge_ready, [this](const String& request) {
         return bridge->handle_debug_request(request);
     });
 }
@@ -182,7 +176,7 @@ void NkgLeanClrPlaneHost::process_debug_transport()
 void NkgLeanClrPlaneHost::publish_debug_stream_snapshots()
 {
     const bool bridge_ready = bridge.is_valid() && bridge->is_ready();
-    debug_transport.publish_stream_snapshots(bridge_ready, [this](const String& request) {
+    host.publish_debug_stream_snapshots(bridge_ready, [this](const String& request) {
         return bridge->handle_debug_request(request);
     });
 }
@@ -222,17 +216,19 @@ void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
         return;
     }
 
-    visuals.begin_frame();
     bullet_count = 0;
 
-    command_reader.read(
+    const bool applied = host.apply_commands(
         p_commands,
         [this](const NkgGodotHostCommandReader::FrameCommand& command) {
             score = command.primary_value;
             lives = command.secondary_value;
         },
         [this](const NkgGodotHostCommandReader::Node2DCommand& command) {
-            sync_visual(String(command.kind.c_str()), command.id, command.x, command.y);
+            return create_visual(String(command.kind.c_str()), command.id);
+        },
+        [this](const NkgGodotHostCommandReader::Node2DCommand& command, Node2D* visual) {
+            visual->set_position(Vector2(command.x * DISPLAY_SCALE, command.y * DISPLAY_SCALE));
             if (command.kind == "PLAYER")
             {
                 player_x = command.x;
@@ -243,22 +239,15 @@ void NkgLeanClrPlaneHost::apply_commands(const std::vector<uint8_t>& p_commands)
             }
         });
 
-    visuals.remove_stale_nodes();
+    if (!applied)
+    {
+        bridge_status = "invalid command buffer";
+        return;
+    }
+
     if (bullet_count > max_bullet_count)
     {
         max_bullet_count = bullet_count;
-    }
-}
-
-void NkgLeanClrPlaneHost::sync_visual(const String& p_kind, int32_t p_id, double p_x, double p_y)
-{
-    const std::string key = make_key(p_kind, p_id);
-    Node2D* visual = visuals.sync_node(key, [this, &p_kind, p_id]() -> Node2D* {
-        return create_visual(p_kind, p_id);
-    });
-    if (visual != nullptr)
-    {
-        visual->set_position(Vector2(p_x * DISPLAY_SCALE, p_y * DISPLAY_SCALE));
     }
 }
 
@@ -281,9 +270,9 @@ void NkgLeanClrPlaneHost::update_hud()
 
     hud_label->set_text(
         "Controls: arrows move  Space/Enter fire\nLeanCLR " + bridge_status +
-        "\nWebDebug http://127.0.0.1:" + String::num_int64(debug_transport.get_port()) +
+        "\nWebDebug http://127.0.0.1:" + String::num_int64(host.get_debug_port()) +
         "\nscore " + String::num_int64(score) + "  lives " + String::num_int64(lives) +
-        "  enemies/bullets " + String::num_int64(static_cast<int64_t>(visuals.size())));
+        "  enemies/bullets " + String::num_int64(static_cast<int64_t>(host.get_node_count())));
 }
 
 PackedVector2Array NkgLeanClrPlaneHost::make_polygon(const String& p_kind) const
@@ -334,11 +323,6 @@ Color NkgLeanClrPlaneHost::color_for_kind(const String& p_kind) const
     }
 
     return Color(1.0, 0.93, 0.36);
-}
-
-std::string NkgLeanClrPlaneHost::make_key(const String& p_kind, int32_t p_id) const
-{
-    return to_std_string(p_kind) + ":" + std::to_string(p_id);
 }
 
 } // namespace godot

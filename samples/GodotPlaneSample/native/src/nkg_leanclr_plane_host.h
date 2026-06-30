@@ -8,9 +8,7 @@
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "nkg_godot_debug_transport.h"
-#include "nkg_godot_host_command_reader.h"
-#include "nkg_godot_node_registry.h"
+#include "nkg_godot_host.h"
 #include "nkg_leanclr_plane_bridge.h"
 
 namespace godot
@@ -45,17 +43,13 @@ private:
     void publish_debug_stream_snapshots();
     void pump_input();
     void apply_commands(const std::vector<uint8_t>& p_commands);
-    void sync_visual(const String& p_kind, int32_t p_id, double p_x, double p_y);
     Polygon2D* create_visual(const String& p_kind, int32_t p_id);
     void update_hud();
     PackedVector2Array make_polygon(const String& p_kind) const;
     Color color_for_kind(const String& p_kind) const;
-    std::string make_key(const String& p_kind, int32_t p_id) const;
 
     Ref<NkgLeanClrPlaneBridge> bridge;
-    NkgGodotDebugTransport debug_transport;
-    NkgGodotHostCommandReader command_reader;
-    NkgGodotNodeRegistry visuals;
+    NkgGodotHost host;
     Label* hud_label = nullptr;
     String bridge_status = "boot";
     String managed_dir = "res://../NKGGameFramework.GodotPlaneSample/bin/Release/net10.0";

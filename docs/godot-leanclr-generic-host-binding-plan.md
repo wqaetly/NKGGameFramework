@@ -33,7 +33,8 @@ C# / LeanCLR gameplay code
 - `GodotDebugEndpointBridge` / `NkgGodotDebugTransport`：Godot debug endpoint 默认策略和 native HTTP/SSE pump 已沉淀到 Adapter.Godot。
 - `GodotHostCommandBuffer` / `NkgGodotHostCommandReader`：managed 侧输出 direct `byte[]` binary command buffer，native 侧解码成 typed frame/node command；`NKGCB1` string envelope 仅保留为调试兼容路径。
 - `NkgGodotNodeRegistry`：按稳定 key 管理 `Node2D` 生命周期，处理本帧同步和 stale node 清理。
-- `NkgLeanClrPlaneHost`：Godot 场景 root，读取输入、调用 C#、创建和更新 `Polygon2D` / `Label`。
+- `NkgGodotHost`：组合 native debug transport、command reader 和 `Node2D` registry，承接通用 host 命令应用主流程。
+- `NkgLeanClrPlaneHost`：Godot 场景 root，保留样例输入、HUD、飞机图形创建和颜色策略。
 - `PlaneGameBridge`：C# 侧的输入和 ECS session 入口。
 - 项目内 staged BCL：`samples/GodotPlaneSample/leanclr_bcl/net10.0`。
 
@@ -41,7 +42,7 @@ C# / LeanCLR gameplay code
 
 - Host API 仍有样例专用部分：输入映射、飞机图形创建、HUD 和 plane-specific frame counters。
 - C# 到 C++ 已从内部 snapshot string 推进为 direct `byte[]` binary command buffer。
-- 已有最小 `Node2D` registry；还没有完整 Object/Resource registry。
+- 已有最小 `Node2D` host；还没有完整 Object/Resource registry。
 - 没有 Variant marshalling 体系。
 - 没有生成器。
 - 没有信号、方法调用、属性读写、资源加载、场景实例化等通用能力。
@@ -223,8 +224,8 @@ SceneTree
 
 ### Phase 1: Generic Core Host
 
-- 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgGodotDebugTransport`、`NkgGodotNodeRegistry`、`GodotHostCommandBuffer` 已进入 Adapter.Godot。
-- 待完成：从 `NkgLeanClrPlaneHost` 继续抽出通用 `NkgGodotHost`。
+- 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgGodotDebugTransport`、`NkgGodotNodeRegistry`、`GodotHostCommandBuffer`、`NkgGodotHost` 已进入 Adapter.Godot。
+- 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、HUD 和视觉策略。
 - 待完成：建立完整 `ObjectRegistry` 和 `ResourceRegistry`。
 - 待完成：支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`。
 - 待完成：C# 侧提供手写 facade。
@@ -310,11 +311,11 @@ SceneTree
 
 ## Recommended Next Step
 
-下一次继续做这条线时，优先推进通用 `NkgGodotHost`：
+下一次继续做这条线时，优先推进完整 Object/Resource registry：
 
 ```text
-把 NkgLeanClrPlaneHost 拆成通用 NkgGodotHost，
-让打飞机样例只保留输入、HUD 和飞机形状策略。
+把当前 Node2D-only NkgGodotHost 扩展成 Object/Resource registry，
+支持 CreateNode / DestroyObject / SetParent / SetTransform2D / SetVisible。
 ```
 
 这一步完成后，当前样例才会从“通过通用中间层承载的项目专用 host”进一步进入“可复用 Godot host binding”的轨道。

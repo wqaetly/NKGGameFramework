@@ -5,7 +5,7 @@ This is a first desktop smoke path for connecting Godot to NKG through LeanCLR w
 Current shape:
 
 - `NKGGameFramework.GodotPlaneSample` owns the plane-game logic in managed C# and uses NKG `RuntimeContext`, `World`, `Scene`, ECS systems and Godot adapter contracts.
-- Godot 4.7 loads `NkgLeanClrPlaneHost` through GDExtension. The host embeds LeanCLR in-process, reads Godot input, calls managed `PlaneGameBridge.StepSession()` once per frame, and directly creates/updates Godot `Polygon2D` and `Label` objects.
+- Godot 4.7 loads `NkgLeanClrPlaneHost` through GDExtension. The host embeds LeanCLR in-process, reads Godot input, calls managed `PlaneGameBridge.StepSessionCommandBytes()` on fixed simulation ticks, and applies the byte command buffer through the reusable native `NkgGodotHost`.
 - The native GDExtension owns the desktop loopback WebDebug HTTP/SSE transport. Managed code only handles NKG debug commands and payloads; it does not open sockets.
 - WebDebug uses `NKGGameFramework.Diagnostics` through the shared endpoint dispatcher. The native GDExtension only owns the desktop loopback HTTP/SSE transport; health, snapshot, stream, control, mutation, dump recording, dump analysis and dump playback all stay in managed Diagnostics code.
 - The sample uses a 1280x720 Godot viewport backed by a 640x360 gameplay arena, a 144 FPS / 144Hz fixed simulation target, deliberately slower player movement, readable enemy waves, and paced firing for a more presentable demo.
@@ -44,4 +44,4 @@ Native build inputs are kept outside this repository by default:
 
 `tools/ensure-godot-4.7.ps1` downloads the official Godot 4.7 stable Windows build and clones/updates official `godot-cpp` when those local cache entries are missing.
 
-The next integration step is to split the remaining plane-specific host flow into a reusable `NkgGodotHost` or generated host-service binding, then extend the same bridge to mobile/Web export templates.
+The next integration step is to extend `NkgGodotHost` from the current Node2D command path into a fuller Object/Resource registry or generated host-service binding, then extend the same bridge to mobile/Web export templates.

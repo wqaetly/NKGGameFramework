@@ -9,7 +9,7 @@ NKGGameFramework/
   src/
     NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization、轻量 debug DTO/control/frame
     NKGGameFramework.Adapter.Godot/      # Godot managed contracts，不引用 GodotSharp
-      native/src/                       # Godot native adapter：LeanCLR runtime bridge、debug transport、host command reader、node registry
+      native/src/                       # Godot native adapter：LeanCLR runtime bridge、debug transport、host command reader、host/node registry
     NKGGameFramework.Hosting/            # HTTP/SSE debug host，本样例不引用
     NKGGameFramework.Diagnostics/        # snapshot provider、mutation、dump、analysis、transport-independent WebDebug endpoint dispatcher
 
@@ -32,7 +32,7 @@ NKGGameFramework/
         build-gdextension.ps1
         src/
           nkg_leanclr_plane_bridge.*     # 样例专用 LeanCLR bridge facade
-          nkg_leanclr_plane_host.*       # Godot 对象胶水层，创建/更新 Polygon2D/Label
+          nkg_leanclr_plane_host.*       # Godot 场景 root，保留样例输入、HUD 和视觉策略
           register_types.*               # 注册 NkgLeanClrPlaneBridge / NkgLeanClrPlaneHost
       tools/
         run-godot-plane.ps1              # 一键 build + stage BCL + run / headless check
@@ -83,9 +83,9 @@ flowchart TD
     Bridge --> BindMethods["Bind PlaneGameBridge input + session methods"]
     Host --> Input["Read Godot input: ui arrows + ui_accept"]
     Input --> Bridge
-    BindMethods --> ManagedStep["Call ClearInput / Press* / StepSession"]
+    BindMethods --> ManagedStep["Call ClearInput / Press* / StepSessionCommandBytes"]
     ManagedStep --> NkgRuntime["NKG RuntimeContext + World + Scene + ECS systems"]
-    NkgRuntime --> Snapshot["GodotHostCommandBuffer NKGCB1 binary commands"]
+    NkgRuntime --> Snapshot["GodotHostCommandBuffer byte[] commands"]
     NkgRuntime --> DebugSnapshot["Diagnostics WebDebug endpoint dispatcher"]
     Snapshot --> Host
     Host --> GodotObjects["Create/update Godot Polygon2D and Label objects"]
@@ -118,8 +118,8 @@ sequenceDiagram
         Host->>Host: accumulate delta and step managed at 144Hz
         Host->>Bridge: ClearInput()
         Host->>Bridge: PressLeft/Right/Up/Down/Fire()
-        Host->>Bridge: StepSession()
-        Bridge->>Managed: StepSession()
+        Host->>Bridge: StepSessionCommandBytes()
+        Bridge->>Managed: StepSessionCommandBytes()
         Managed->>NKG: apply input + RuntimeContext.Update + World.Update
         NKG-->>Managed: ECS player/enemy/bullet state
         Managed-->>Bridge: byte[] binary command buffer
@@ -179,18 +179,20 @@ System.Net debug transport
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
 
-`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 `NKGCB1` binary envelope，并兼容旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHostCommandReader` 是临时 host command reader。它优先解析 `GodotHostCommandBuffer` 输出的 direct byte buffer，并兼容 `NKGCB1` binary envelope、旧 `FRAME` / `NODE2D` text buffer 与 `STATE` / `PLAYER` / `ENEMY` / `BULLET` 快照格式。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotNodeRegistry` 是最小 Godot object host registry。它负责按稳定 key 管理 `Node2D`、标记每帧可见对象，并在安全点 `queue_free` 本帧未出现的节点。飞机样例仍然决定具体创建 `Polygon2D` 的形状、颜色和位置。
+
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotHost` 是当前通用 native host 组合层。它把 debug transport pump、host command reader 和 `Node2D` registry 串成可复用主流程，并通过回调把样例专用的节点创建和更新策略留给 `NkgLeanClrPlaneHost`。
 
 `NkgLeanClrPlaneHost` 是 Godot 场景中的对象胶水层。它负责：
 
 - 作为 `scenes/main.tscn` 的 root 节点参与 Godot 主循环。
 - 读取 Godot 输入：方向键控制飞机，`ui_accept` 发射子弹。
 - 调用 `NkgLeanClrPlaneBridge` 推进 managed session。
-- 通过 `NkgGodotDebugTransport` 启动 desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
-- 解析 managed snapshot。
-- 创建、更新和销毁 Godot `Polygon2D` 对象来表示玩家、敌人、子弹。
+- 通过 `NkgGodotHost` 启动/pump desktop loopback WebDebug HTTP/SSE server，并在主线程安全点调用 `HandleDebugRequest()`。
+- 通过 `NkgGodotHost` 应用 managed command buffer。
+- 创建和配置 Godot `Polygon2D` 对象来表示玩家、敌人、子弹。
 - 更新 HUD `Label`。
 
 当前展示参数：
@@ -255,7 +257,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 把 plane-specific host 主流程继续拆成通用 `NkgGodotHost`，并扩展完整 Object/Resource registry。
+- 扩展 `NkgGodotHost` 的完整 Object/Resource registry。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。
