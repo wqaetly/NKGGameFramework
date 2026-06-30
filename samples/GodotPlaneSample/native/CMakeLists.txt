@@ -31,6 +31,7 @@ add_library(nkg_leanclr_bridge SHARED
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_host_command_reader.cpp"
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_object_registry.cpp"
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_godot_resource_registry.cpp"
+    "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_leanclr_managed_bridge.cpp"
     "${NKG_GODOT_ADAPTER_NATIVE_DIR}/src/nkg_leanclr_runtime_bridge.cpp"
     src/nkg_leanclr_plane_bridge.cpp
     src/nkg_leanclr_plane_host.cpp

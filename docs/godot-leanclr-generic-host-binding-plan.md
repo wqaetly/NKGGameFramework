@@ -29,7 +29,8 @@ C# / LeanCLR gameplay code
 当前样例已经有：
 
 - `NkgLeanClrRuntimeBridge`：通用 LeanCLR 调用器，负责加载 managed assembly、查找并调用 managed 方法。
-- `NkgLeanClrPlaneBridge`：样例专用 facade，负责把 `PlaneGameBridge` 的输入、session 和 debug 方法暴露给 Godot。
+- `NkgLeanClrManagedBridge`：通用 LeanCLR managed bridge lifecycle，负责 configure/initialize/ready 和 invoke 封装。
+- `NkgLeanClrPlaneBridge`：样例专用 facade，负责把 `PlaneGameBridge` 的输入、session 和 debug 方法表暴露给 Godot。
 - `GodotDebugEndpointBridge` / `NkgGodotDebugTransport`：Godot debug endpoint 默认策略和 native HTTP/SSE pump 已沉淀到 Adapter.Godot。
 - `GodotHostCommandBuffer` / `NkgGodotHostCommandReader`：managed 侧输出 direct `byte[]` binary command buffer，native 侧解码成 typed frame/node command；`NKGCB1` string envelope 仅保留为调试兼容路径。
 - `NkgGodotObjectRegistry` / `NkgGodotResourceRegistry`：提供 Godot object/resource registry 基础；当前 `Node2D` 同步通过 object registry 的 convenience path 承接。
@@ -224,7 +225,7 @@ SceneTree
 
 ### Phase 1: Generic Core Host
 
-- 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgGodotDebugTransport`、`NkgGodotObjectRegistry`、`NkgGodotResourceRegistry`、`GodotHostCommandBuffer`、`NkgGodotHost` 已进入 Adapter.Godot。
+- 已完成部分：`NkgLeanClrRuntimeBridge`、`NkgLeanClrManagedBridge`、`NkgGodotDebugTransport`、`NkgGodotObjectRegistry`、`NkgGodotResourceRegistry`、`GodotHostCommandBuffer`、`NkgGodotHost` 已进入 Adapter.Godot。
 - 已完成部分：`NkgLeanClrPlaneHost` 已改为通过 `NkgGodotHost` 应用 command buffer，样例侧只保留输入、HUD 和视觉策略。
 - 已完成部分：command buffer / native reader / `NkgGodotHost` 支持 `CreateNode`、`DestroyObject`、`SetParent`、`SetTransform2D`、`SetVisible`、`SetProperty` 的最小通路。
 - 已完成部分：C# 侧提供最小 `GodotHostCommands` / `GodotNode` 手写 facade。

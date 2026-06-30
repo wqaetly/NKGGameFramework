@@ -7,7 +7,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "nkg_leanclr_runtime_bridge.h"
+#include "nkg_leanclr_managed_bridge.h"
 
 namespace leanclr::metadata
 {
@@ -45,9 +45,10 @@ protected:
     static void _bind_methods();
 
 private:
-    bool bind_managed_methods();
+    bool ensure_ready();
+    bool bind_managed_methods(NkgLeanClrRuntimeBridge& p_runtime);
 
-    NkgLeanClrRuntimeBridge runtime;
+    NkgLeanClrManagedBridge managed;
     const leanclr::metadata::RtMethodInfo* reset_method = nullptr;
     const leanclr::metadata::RtMethodInfo* clear_input_method = nullptr;
     const leanclr::metadata::RtMethodInfo* press_left_method = nullptr;
@@ -59,7 +60,6 @@ private:
     const leanclr::metadata::RtMethodInfo* step_bytes_method = nullptr;
     const leanclr::metadata::RtMethodInfo* debug_request_method = nullptr;
     const leanclr::metadata::RtMethodInfo* status_method = nullptr;
-    bool ready = false;
 };
 
 } // namespace godot

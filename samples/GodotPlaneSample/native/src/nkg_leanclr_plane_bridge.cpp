@@ -7,7 +7,7 @@ namespace godot
 
 NkgLeanClrPlaneBridge::NkgLeanClrPlaneBridge()
 {
-    runtime.configure(PackedStringArray(), "NKGGameFramework.GodotPlaneSample");
+    managed.configure(PackedStringArray(), "NKGGameFramework.GodotPlaneSample", "NKGGameFramework.GodotPlaneSample");
 }
 
 NkgLeanClrPlaneBridge::~NkgLeanClrPlaneBridge() = default;
@@ -32,126 +32,127 @@ void NkgLeanClrPlaneBridge::_bind_methods()
 
 void NkgLeanClrPlaneBridge::configure(const PackedStringArray& p_library_dirs, const String& p_assembly_name)
 {
-    runtime.configure(p_library_dirs, p_assembly_name.is_empty() ? String("NKGGameFramework.GodotPlaneSample") : p_assembly_name);
+    managed.configure(p_library_dirs, p_assembly_name, "NKGGameFramework.GodotPlaneSample");
 }
 
 bool NkgLeanClrPlaneBridge::initialize_runtime()
 {
-    ready = false;
-    if (!runtime.initialize_runtime())
+    if (!managed.initialize_runtime([this](NkgLeanClrRuntimeBridge& runtime) {
+            return bind_managed_methods(runtime);
+        }))
     {
         return false;
     }
 
-    if (!bind_managed_methods())
+    if (!managed.invoke_void(reset_method))
     {
+        managed.clear_ready();
         return false;
     }
 
-    ready = runtime.invoke_void(reset_method);
-    return ready;
+    return true;
 }
 
 void NkgLeanClrPlaneBridge::reset_session()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(reset_method);
+    managed.invoke_void(reset_method);
 }
 
 void NkgLeanClrPlaneBridge::clear_input()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(clear_input_method);
+    managed.invoke_void(clear_input_method);
 }
 
 void NkgLeanClrPlaneBridge::press_left()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(press_left_method);
+    managed.invoke_void(press_left_method);
 }
 
 void NkgLeanClrPlaneBridge::press_right()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(press_right_method);
+    managed.invoke_void(press_right_method);
 }
 
 void NkgLeanClrPlaneBridge::press_up()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(press_up_method);
+    managed.invoke_void(press_up_method);
 }
 
 void NkgLeanClrPlaneBridge::press_down()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(press_down_method);
+    managed.invoke_void(press_down_method);
 }
 
 void NkgLeanClrPlaneBridge::press_fire()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return;
     }
 
-    runtime.invoke_void(press_fire_method);
+    managed.invoke_void(press_fire_method);
 }
 
 String NkgLeanClrPlaneBridge::step_session()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return String();
     }
 
-    return runtime.invoke_string(step_method);
+    return managed.invoke_string(step_method);
 }
 
 std::vector<uint8_t> NkgLeanClrPlaneBridge::step_session_command_bytes()
 {
     std::vector<uint8_t> buffer;
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return buffer;
     }
 
-    runtime.invoke_byte_array(step_bytes_method, buffer);
+    managed.invoke_byte_array(step_bytes_method, buffer);
     return buffer;
 }
 
 String NkgLeanClrPlaneBridge::handle_debug_request(const String& p_request)
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
         return String("500\nInternal Server Error\napplication/json; charset=utf-8\n{\"message\":\"LeanCLR bridge is not ready.\"}");
     }
 
-    return runtime.invoke_string_arg(
+    return managed.invoke_string_arg(
         debug_request_method,
         p_request,
         "500\nInternal Server Error\napplication/json; charset=utf-8\n{\"message\":\"LeanCLR managed debug invocation failed.\"}");
@@ -159,25 +160,32 @@ String NkgLeanClrPlaneBridge::handle_debug_request(const String& p_request)
 
 String NkgLeanClrPlaneBridge::get_status()
 {
-    if (!ready && !initialize_runtime())
+    if (!ensure_ready())
     {
-        return runtime.get_last_error();
+        return managed.get_last_error();
     }
 
-    return runtime.invoke_string(status_method);
+    return managed.invoke_string(status_method);
 }
 
 String NkgLeanClrPlaneBridge::get_last_error() const
 {
-    return runtime.get_last_error();
+    return managed.get_last_error();
 }
 
 bool NkgLeanClrPlaneBridge::is_ready() const
 {
-    return ready;
+    return managed.is_ready();
 }
 
-bool NkgLeanClrPlaneBridge::bind_managed_methods()
+bool NkgLeanClrPlaneBridge::ensure_ready()
+{
+    return managed.ensure_ready([this](NkgLeanClrRuntimeBridge& runtime) {
+        return bind_managed_methods(runtime);
+    });
+}
+
+bool NkgLeanClrPlaneBridge::bind_managed_methods(NkgLeanClrRuntimeBridge& runtime)
 {
     constexpr const char* type_name = "NKGGameFramework.GodotPlaneSample.PlaneGameBridge";
     reset_method = runtime.find_static_method(type_name, "ResetSession", 0);

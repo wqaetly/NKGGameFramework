@@ -9,7 +9,7 @@ NKGGameFramework/
   src/
     NKGGameFramework/                    # 引擎无关核心：RuntimeContext、ECS、Gameplay、Nodes、Serialization、轻量 debug DTO/control/frame
     NKGGameFramework.Adapter.Godot/      # Godot managed contracts，不引用 GodotSharp
-      native/src/                       # Godot native adapter：LeanCLR runtime bridge、debug transport、host command reader、host/object/resource registry
+      native/src/                       # Godot native adapter：LeanCLR runtime/managed bridge、debug transport、host command reader、host/object/resource registry
     NKGGameFramework.Hosting/            # HTTP/SSE debug host，本样例不引用
     NKGGameFramework.Diagnostics/        # snapshot provider、mutation、dump、analysis、transport-independent WebDebug endpoint dispatcher
 
@@ -175,7 +175,9 @@ System.Net debug transport
 - 查找并调用 managed 静态方法。
 - 把 managed `string` 返回值转换为 Godot `String`。
 
-`NkgLeanClrPlaneBridge` 是样例专用 bridge facade。它负责绑定 `PlaneGameBridge` 的输入、session 和 debug 方法，并把这些方法暴露成 Godot `RefCounted` API。
+`src/NKGGameFramework.Adapter.Godot/native/src/NkgLeanClrManagedBridge` 是通用 managed bridge lifecycle 包装。它负责配置 runtime、初始化、绑定 managed 方法表、维护 ready 状态，并把 void/string/byte[]/string-arg invoke 封装成样例 bridge 可复用的入口。
+
+`NkgLeanClrPlaneBridge` 是样例专用 bridge facade。它负责绑定 `PlaneGameBridge` 的输入、session 和 debug 方法表，并把这些方法暴露成 Godot `RefCounted` API。
 
 `src/NKGGameFramework.Adapter.Godot/native/src/NkgGodotDebugTransport` 是 Godot native debug transport pump。它负责启动 `NkgDebugHttpServer`、把 HTTP 请求包装成 managed text bridge 请求、在 Godot 主线程安全点调用 managed debug handler，并为 stream client 广播 snapshot。
 
