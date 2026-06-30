@@ -26,7 +26,7 @@ func _init() -> void:
         return
 
     var line: String = bridge.step_session()
-    if !line.begins_with("STATE "):
+    if !line.begins_with("FRAME "):
         printerr("NKG_NATIVE_SMOKE bad_state " + line)
         quit(5)
         return

@@ -85,7 +85,7 @@ flowchart TD
     Input --> Bridge
     BindMethods --> ManagedStep["Call ClearInput / Press* / StepSession"]
     ManagedStep --> NkgRuntime["NKG RuntimeContext + World + Scene + ECS systems"]
-    NkgRuntime --> Snapshot["STATE + PLAYER/ENEMY/BULLET render snapshot"]
+    NkgRuntime --> Snapshot["GodotHostCommandBuffer FRAME + NODE2D commands"]
     NkgRuntime --> DebugSnapshot["Diagnostics WebDebug endpoint dispatcher"]
     Snapshot --> Host
     Host --> GodotObjects["Create/update Godot Polygon2D and Label objects"]
@@ -122,8 +122,8 @@ sequenceDiagram
         Bridge->>Managed: StepSession()
         Managed->>NKG: apply input + RuntimeContext.Update + World.Update
         NKG-->>Managed: ECS player/enemy/bullet state
-        Managed-->>Bridge: "STATE ... PLAYER ... ENEMY ... BULLET ..."
-        Bridge-->>Host: snapshot string
+        Managed-->>Bridge: "FRAME ... NODE2D ..."
+        Bridge-->>Host: host command text buffer
         Host->>Obj: create/update/destroy Polygon2D objects
         Host->>Obj: update HUD Label
     end
@@ -155,7 +155,7 @@ System.Net debug transport
 | `ClearInput()` | 清空本帧输入 |
 | `PressLeft()` / `PressRight()` / `PressUp()` / `PressDown()` | 写入本帧移动输入 |
 | `PressFire()` | 写入本帧开火输入 |
-| `StepSession()` | 推进一帧 NKG runtime/ECS，并返回对象 snapshot |
+| `StepSession()` | 推进一帧 NKG runtime/ECS，并返回 Godot host command text buffer |
 | `GetSessionStatus()` | 返回分数、生命和结束状态 |
 | `HandleDebugRequest()` | 处理 native transport 转发的 WebDebug health/snapshot/stream/control/mutation/dump 请求 |
 
@@ -203,7 +203,7 @@ Pace: slow showcase tuning
 Managed simulation step: fixed 144Hz
 ```
 
-当前仍然保留了 C# 到 C++ 的内部 snapshot string，这是为了先跑通 LeanCLR 调用和对象胶水层；它不再暴露给 GDScript，也不再由 Godot 脚本解析。下一步应把这段替换成 typed native ABI、命令缓冲或生成式 host-service binding。
+当前 C# 到 C++ 已通过 `GodotHostCommandBuffer` 收敛为 `FRAME` / `NODE2D` host command text buffer；它仍是文本 ABI，目的是先把样例手写 snapshot 字符串沉淀为 adapter API。下一步应把 text buffer 的传输替换成 typed native payload、二进制 command buffer 或生成式 host-service binding。
 
 ## Build And Verification Flow
 
@@ -252,7 +252,7 @@ Godot 4.7 process
 
 ## Next Structural Steps
 
-- 把内部 snapshot string 替换成 typed native payload 或 command buffer。
+- 把 `GodotHostCommandBuffer` 的 text transport 替换成 typed native payload 或 binary command buffer。
 - 用 Godot `extension_api.json` 生成更系统化的 host-service bindings。
 - 扩展资源句柄：Texture、PackedScene、AudioStream、Animation 等。
 - 将 build/export script 扩展到 Android/iOS/Web export template。

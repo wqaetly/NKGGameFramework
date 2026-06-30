@@ -1,5 +1,4 @@
-using System.Globalization;
-using System.Text;
+using NKGGameFramework.Adapter.Godot;
 using NKGGameFramework.Core;
 using NKGGameFramework.Ecs;
 
@@ -77,23 +76,22 @@ internal sealed class PlaneGame : IDisposable
     public string CreateSnapshot()
     {
         var state = State;
-        var builder = new StringBuilder(1024);
-        builder.Append(CultureInfo.InvariantCulture, $"STATE {state.Frame} {state.Score} {state.Lives} {(IsGameOver ? 1 : 0)}\n");
+        var commands = new GodotHostCommandBuffer();
+        commands.BeginFrame(state.Frame, state.Score, state.Lives, IsGameOver);
 
-        AppendEntity(builder, "PLAYER", _player, ReadPosition(_player));
+        AppendEntity(commands, "PLAYER", _player, ReadPosition(_player));
 
         _scene.Query<EnemyTag, Position>().ForEach((ref EnemyTag _, ref Position position, Entity entity) =>
         {
-            AppendEntity(builder, "ENEMY", entity, position);
+            AppendEntity(commands, "ENEMY", entity, position);
         });
 
         _scene.Query<BulletTag, Position>().ForEach((ref BulletTag _, ref Position position, Entity entity) =>
         {
-            AppendEntity(builder, "BULLET", entity, position);
+            AppendEntity(commands, "BULLET", entity, position);
         });
 
-        builder.Append("END");
-        return builder.ToString();
+        return commands.Build();
     }
 
     public void Dispose()
@@ -102,9 +100,9 @@ internal sealed class PlaneGame : IDisposable
         _runtime.Dispose();
     }
 
-    private static void AppendEntity(StringBuilder builder, string kind, Entity entity, Position position)
+    private static void AppendEntity(GodotHostCommandBuffer commands, string kind, Entity entity, Position position)
     {
-        builder.Append(CultureInfo.InvariantCulture, $"{kind} {entity.Id.Value} {position.X:0.###} {position.Y:0.###}\n");
+        commands.UpsertNode2D(kind, entity.Id.Value, position.X, position.Y);
     }
 
     private static Position ReadPosition(Entity entity)

@@ -230,11 +230,30 @@ void NkgLeanClrPlaneHost::apply_snapshot(const String& p_snapshot)
     std::string tag;
     while (stream >> tag)
     {
-        if (tag == "STATE")
+        if (tag == "FRAME" || tag == "STATE")
         {
             int32_t frame = 0;
             int32_t game_over = 0;
             stream >> frame >> score >> lives >> game_over;
+            continue;
+        }
+
+        if (tag == "NODE2D")
+        {
+            std::string kind;
+            int32_t id = 0;
+            double x = 0;
+            double y = 0;
+            stream >> kind >> id >> x >> y;
+            sync_visual(String(kind.c_str()), id, x, y);
+            if (kind == "PLAYER")
+            {
+                player_x = x;
+            }
+            else if (kind == "BULLET")
+            {
+                bullet_count++;
+            }
             continue;
         }
 
