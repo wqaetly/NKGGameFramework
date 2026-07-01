@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:skill": "vite --host 127.0.0.1 --mode skill",
+    "test": "node --test --experimental-strip-types src/*.test.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
