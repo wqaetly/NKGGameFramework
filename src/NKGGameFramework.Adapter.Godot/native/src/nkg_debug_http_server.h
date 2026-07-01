@@ -41,7 +41,7 @@ public:
     bool pop_pending_request(PendingRequest& request);
     void complete_request(uint64_t id, const Response& response);
 
-    std::vector<std::string> get_stream_snapshot_targets() const;
+    std::vector<std::string> get_stream_snapshot_targets();
     void broadcast_snapshot(const std::string& snapshot_target, const std::string& json_body);
 
     static Response parse_managed_response(const std::string& value);
@@ -54,6 +54,7 @@ private:
     void handle_client(uintptr_t client_socket);
     bool enqueue_request(const std::string& method, const std::string& target, const std::string& body, Response& response);
     void add_stream_client(uintptr_t client_socket, const std::string& target);
+    void prune_closed_stream_clients_locked();
     void close_all_stream_clients();
     void set_error(const std::string& message);
 

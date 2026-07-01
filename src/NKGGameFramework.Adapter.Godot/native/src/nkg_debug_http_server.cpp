@@ -1,6 +1,8 @@
 #include "nkg_debug_http_server.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <memory>
@@ -18,6 +20,7 @@ using nkg_socket_t = SOCKET;
 constexpr nkg_socket_t NKG_INVALID_SOCKET = INVALID_SOCKET;
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -29,7 +32,14 @@ namespace
 {
 constexpr int MAX_HEADER_BYTES = 64 * 1024;
 constexpr int MAX_BODY_BYTES = 128 * 1024 * 1024;
+constexpr size_t MAX_STREAM_CLIENTS = 16;
 constexpr const char* ENDPOINT_PREFIX = "/_nkg/debug";
+
+#ifdef MSG_NOSIGNAL
+constexpr int NKG_SEND_FLAGS = MSG_NOSIGNAL;
+#else
+constexpr int NKG_SEND_FLAGS = 0;
+#endif
 
 nkg_socket_t as_socket(uintptr_t value)
 {
@@ -55,6 +65,35 @@ void close_socket(nkg_socket_t socket)
 #endif
 }
 
+int get_last_socket_error()
+{
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+bool is_would_block_error(int error)
+{
+#ifdef _WIN32
+    return error == WSAEWOULDBLOCK;
+#else
+    return error == EAGAIN || error == EWOULDBLOCK;
+#endif
+}
+
+bool set_socket_non_blocking(nkg_socket_t socket)
+{
+#ifdef _WIN32
+    u_long mode = 1;
+    return ioctlsocket(socket, FIONBIO, &mode) == 0;
+#else
+    const int flags = fcntl(socket, F_GETFL, 0);
+    return flags >= 0 && fcntl(socket, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+}
+
 bool send_all(nkg_socket_t socket, const std::string& data)
 {
     const char* cursor = data.data();
@@ -62,7 +101,7 @@ bool send_all(nkg_socket_t socket, const std::string& data)
     while (remaining > 0)
     {
         const int chunk = remaining > 64 * 1024 ? 64 * 1024 : static_cast<int>(remaining);
-        const int sent = send(socket, cursor, chunk, 0);
+        const int sent = send(socket, cursor, chunk, NKG_SEND_FLAGS);
         if (sent <= 0)
         {
             return false;
@@ -70,6 +109,43 @@ bool send_all(nkg_socket_t socket, const std::string& data)
 
         cursor += sent;
         remaining -= static_cast<size_t>(sent);
+    }
+
+    return true;
+}
+
+bool send_all_non_blocking(nkg_socket_t socket, const std::string& data)
+{
+    const char* cursor = data.data();
+    size_t remaining = data.size();
+    while (remaining > 0)
+    {
+        const int chunk = remaining > 64 * 1024 ? 64 * 1024 : static_cast<int>(remaining);
+        const int sent = send(socket, cursor, chunk, NKG_SEND_FLAGS);
+        if (sent <= 0)
+        {
+            return false;
+        }
+
+        cursor += sent;
+        remaining -= static_cast<size_t>(sent);
+    }
+
+    return true;
+}
+
+bool stream_socket_is_alive(nkg_socket_t socket)
+{
+    char buffer;
+    const int received = recv(socket, &buffer, 1, MSG_PEEK);
+    if (received == 0)
+    {
+        return false;
+    }
+
+    if (received < 0)
+    {
+        return is_would_block_error(get_last_socket_error());
     }
 
     return true;
@@ -433,11 +509,12 @@ void NkgDebugHttpServer::complete_request(uint64_t id, const Response& response)
     state->completed_cv.notify_one();
 }
 
-std::vector<std::string> NkgDebugHttpServer::get_stream_snapshot_targets() const
+std::vector<std::string> NkgDebugHttpServer::get_stream_snapshot_targets()
 {
     std::vector<std::string> targets;
     std::unordered_set<std::string> unique;
     std::lock_guard<std::mutex> lock(stream_mutex);
+    prune_closed_stream_clients_locked();
     for (const auto& client : stream_clients)
     {
         if (unique.insert(client.snapshot_target).second)
@@ -453,13 +530,14 @@ void NkgDebugHttpServer::broadcast_snapshot(const std::string& snapshot_target, 
 {
     const std::string event = "event: snapshot\n" + std::string("data: ") + json_body + "\n\n";
     std::lock_guard<std::mutex> lock(stream_mutex);
+    prune_closed_stream_clients_locked();
     auto write = stream_clients.begin();
     for (auto read = stream_clients.begin(); read != stream_clients.end(); ++read)
     {
         bool keep = true;
         if (read->snapshot_target == snapshot_target)
         {
-            keep = send_all(as_socket(read->socket), event);
+            keep = send_all_non_blocking(as_socket(read->socket), event);
         }
 
         if (keep)
@@ -600,8 +678,39 @@ bool NkgDebugHttpServer::enqueue_request(const std::string& method, const std::s
 
 void NkgDebugHttpServer::add_stream_client(uintptr_t client_socket, const std::string& target)
 {
+    const nkg_socket_t socket = as_socket(client_socket);
+    if (!set_socket_non_blocking(socket))
+    {
+        close_socket(socket);
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(stream_mutex);
+    prune_closed_stream_clients_locked();
     stream_clients.push_back(StreamClient{client_socket, target});
+    while (stream_clients.size() > MAX_STREAM_CLIENTS)
+    {
+        close_socket(as_socket(stream_clients.front().socket));
+        stream_clients.erase(stream_clients.begin());
+    }
+}
+
+void NkgDebugHttpServer::prune_closed_stream_clients_locked()
+{
+    auto write = stream_clients.begin();
+    for (auto read = stream_clients.begin(); read != stream_clients.end(); ++read)
+    {
+        if (stream_socket_is_alive(as_socket(read->socket)))
+        {
+            *write++ = *read;
+        }
+        else
+        {
+            close_socket(as_socket(read->socket));
+        }
+    }
+
+    stream_clients.erase(write, stream_clients.end());
 }
 
 void NkgDebugHttpServer::close_all_stream_clients()
