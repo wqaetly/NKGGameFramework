@@ -215,13 +215,13 @@ public sealed class GameDebugDumpRecorder : IDisposable
         {
             var frame = recordedFrames[index];
             frames[index] = frame.Message;
-            if (frame.Blocks is not { } blocks)
+            if (frame.Blocks is not { } worlds)
             {
                 continue;
             }
 
             blockFrames ??= new List<GameDebugDumpFrameBlocks>();
-            blockFrames.Add(SerializeCapturedFrameBlocks(index, blocks));
+            blockFrames.Add(new GameDebugDumpFrameBlocks(index, worlds));
         }
 
         var dump = new GameDebugDumpDocument(
@@ -431,7 +431,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
             var captured = CaptureFrame(work);
             var elapsed = GetElapsedMilliseconds(started);
             var allocatedBytes = GetAllocatedByteDelta(allocatedBefore, TryGetAllocatedBytesForCurrentThread());
-            var (storeCount, entityRowCount) = CountCapturedBlocks(captured.Blocks);
+            var (storeCount, entityRowCount) = CountSerializedBlocks(captured.Blocks);
             lock (_gate)
             {
                 work.Recording.AddFrame(captured);
@@ -459,12 +459,14 @@ public sealed class GameDebugDumpRecorder : IDisposable
             work.Frame,
             CreateDumpCaptureOptions(),
             includeBlocks: _session is not null);
+        var blocks = captured.Blocks is null
+            ? null
+            : SerializeCapturedFrameBlocks(captured.Blocks);
 
-        return new GameDebugDumpRecordedFrame(captured.Message, captured.Blocks);
+        return new GameDebugDumpRecordedFrame(captured.Message, blocks);
     }
 
-    private static GameDebugDumpFrameBlocks SerializeCapturedFrameBlocks(
-        int index,
+    private static GameDebugDumpWorldBlocks[] SerializeCapturedFrameBlocks(
         CapturedDumpFrameBlocks frame)
     {
         var worlds = new GameDebugDumpWorldBlocks[frame.Worlds.Length];
@@ -488,7 +490,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
             worlds[worldIndex] = new GameDebugDumpWorldBlocks(world.Name, scenes);
         }
 
-        return new GameDebugDumpFrameBlocks(index, worlds);
+        return worlds;
     }
 
     private string SaveDump(GameDebugDumpDocument dump, string dumpDirectory)
@@ -714,7 +716,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
             : null;
     }
 
-    private static (int StoreCount, int EntityRowCount) CountCapturedBlocks(CapturedDumpFrameBlocks? blocks)
+    private static (int StoreCount, int EntityRowCount) CountSerializedBlocks(GameDebugDumpWorldBlocks[]? blocks)
     {
         if (blocks is null)
         {
@@ -723,7 +725,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
         var storeCount = 0;
         var entityRowCount = 0;
-        foreach (var world in blocks.Worlds)
+        foreach (var world in blocks)
         {
             foreach (var scene in world.Scenes)
             {
@@ -890,7 +892,7 @@ public sealed class GameDebugDumpRecorder : IDisposable
 
     private sealed record GameDebugDumpRecordedFrame(
         GameDebugSnapshotMessage Message,
-        CapturedDumpFrameBlocks? Blocks);
+        GameDebugDumpWorldBlocks[]? Blocks);
 
     private sealed record DumpCaptureWork(
         ActiveDumpRecording Recording,

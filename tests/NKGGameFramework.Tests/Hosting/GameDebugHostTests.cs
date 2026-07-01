@@ -510,14 +510,15 @@ public sealed class GameDebugHostTests
                 .Add(new PositionComponent(0, 0));
             var buffSource = scene.CreateEntity();
             var buffTarget = scene.CreateEntity();
-            BuffManager.Apply(buffSource, buffTarget, new BuffDefinition
+            var buffDefinition = new BuffDefinition
             {
                 Id = "burn",
                 DisplayName = "Burn",
                 EffectKey = "dot",
                 Duration = TimeSpan.FromSeconds(5),
                 MaxStacks = 3,
-            }, level: 2, stacks: 2);
+            };
+            BuffManager.Apply(buffSource, buffTarget, buffDefinition, level: 2, stacks: 2);
             runtime.RegisterModule(new FrameMutationModule(scene, tracked));
             await using var host = await GameDebugHost.StartAsync(options =>
             {
@@ -541,6 +542,7 @@ public sealed class GameDebugHostTests
             Assert.Equal(0, start.State.FrameCount);
 
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1));
+            BuffManager.Apply(buffSource, buffTarget, buffDefinition, level: 2, stacks: 1);
             runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 2));
 
             var stopResponse = await client.PostAsJsonAsync(
@@ -637,7 +639,17 @@ public sealed class GameDebugHostTests
             Assert.Equal(2, double.Parse(componentX.Value!, CultureInfo.InvariantCulture));
 
             var buffComponentType = typeof(BuffCollectionComponent);
-            var buffComponentDetail = await client.GetFromJsonAsync<ComponentDebugSnapshot>(
+            var firstBuffComponentDetail = await client.GetFromJsonAsync<ComponentDebugSnapshot>(
+                "/_nkg/debug/dump/playback/component" +
+                $"?playbackId={playback.Id}" +
+                "&frameIndex=0" +
+                $"&worldName={Uri.EscapeDataString(world.Name)}" +
+                $"&sceneName={Uri.EscapeDataString(scene.Name)}" +
+                $"&entityId={buffTarget.Id.Value}" +
+                $"&componentTypeFullName={Uri.EscapeDataString(buffComponentType.FullName!)}" +
+                $"&componentAssemblyName={Uri.EscapeDataString(buffComponentType.Assembly.GetName().Name!)}",
+                JsonOptions);
+            var secondBuffComponentDetail = await client.GetFromJsonAsync<ComponentDebugSnapshot>(
                 "/_nkg/debug/dump/playback/component" +
                 $"?playbackId={playback.Id}" +
                 "&frameIndex=1" +
@@ -647,14 +659,17 @@ public sealed class GameDebugHostTests
                 $"&componentTypeFullName={Uri.EscapeDataString(buffComponentType.FullName!)}" +
                 $"&componentAssemblyName={Uri.EscapeDataString(buffComponentType.Assembly.GetName().Name!)}",
                 JsonOptions);
-            Assert.NotNull(buffComponentDetail);
+            Assert.NotNull(firstBuffComponentDetail);
+            Assert.NotNull(secondBuffComponentDetail);
             Assert.True(
-                buffComponentDetail.Value.Structured is not null,
-                buffComponentDetail.Value.Error ?? "BuffCollectionComponent structured value was not returned.");
-            Assert.Equal(nameof(BuffCollectionComponent), buffComponentDetail.Type.Name);
-            var buffs = FindChild(buffComponentDetail.Value.Structured!, "_buffs");
+                secondBuffComponentDetail.Value.Structured is not null,
+                secondBuffComponentDetail.Value.Error ?? "BuffCollectionComponent structured value was not returned.");
+            Assert.Equal(nameof(BuffCollectionComponent), secondBuffComponentDetail.Type.Name);
+            var buffs = FindChild(secondBuffComponentDetail.Value.Structured!, "_buffs");
             Assert.Equal("list", buffs.Kind);
             Assert.Single(buffs.Children);
+            Assert.Equal("2", FindDescendant(firstBuffComponentDetail.Value.Structured!, nameof(BuffInstance.Stacks)).Value);
+            Assert.Equal("3", FindDescendant(secondBuffComponentDetail.Value.Structured!, nameof(BuffInstance.Stacks)).Value);
 
             using var uploadContent = new ByteArrayContent(await File.ReadAllBytesAsync(savedPath));
             uploadContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -1137,6 +1152,44 @@ public sealed class GameDebugHostTests
     private static ComponentValueDebugNode FindChild(ComponentValueDebugNode node, string name)
     {
         return Assert.Single(node.Children, child => child.Name == name);
+    }
+
+    private static ComponentValueDebugNode FindDescendant(ComponentValueDebugNode node, string name)
+    {
+        if (StringComparer.Ordinal.Equals(node.Name, name))
+        {
+            return node;
+        }
+
+        foreach (var child in node.Children)
+        {
+            var found = TryFindDescendant(child, name);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException($"Expected descendant '{name}' was not found.");
+    }
+
+    private static ComponentValueDebugNode? TryFindDescendant(ComponentValueDebugNode node, string name)
+    {
+        if (StringComparer.Ordinal.Equals(node.Name, name))
+        {
+            return node;
+        }
+
+        foreach (var child in node.Children)
+        {
+            var found = TryFindDescendant(child, name);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     private static GameDebugDumpDocument CreateSyntheticDump(int frameCount)
