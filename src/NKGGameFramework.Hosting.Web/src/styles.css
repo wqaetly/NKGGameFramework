@@ -153,6 +153,12 @@ h2 {
   flex-wrap: wrap;
 }
 
+.recording-metrics {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .connection-form {
   display: flex;
   align-items: center;

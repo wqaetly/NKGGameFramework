@@ -10,9 +10,21 @@ public sealed record GameDebugSnapshotMessage(
     GameDebugSnapshot Snapshot,
     GameDebugControlState Control);
 
+public enum GameDebugSnapshotCaptureProfile
+{
+    Custom,
+    LivePreview,
+    StepEditable,
+    SingleFramePreview,
+    DumpRecording,
+    DumpPlaybackPreview,
+}
+
 public sealed record GameDebugSnapshotCaptureOptions
 {
     public static GameDebugSnapshotCaptureOptions Default { get; } = new();
+
+    public GameDebugSnapshotCaptureProfile Profile { get; init; }
 
     public string? WorldName { get; init; }
 
@@ -31,6 +43,16 @@ public sealed record GameDebugSnapshotCaptureOptions
     public bool IncludeComponentPayloads { get; init; } = true;
 
     public bool IncludeStructuredComponentValues { get; init; } = true;
+
+    public bool IncludeRuntimeDetails { get; init; } = true;
+
+    public bool IncludeSceneSystems { get; init; } = true;
+
+    public bool IncludeComponentStoreSummaries { get; init; } = true;
+
+    public bool IncludeEntitySummaries { get; init; } = true;
+
+    public bool IncludeComponentGraphs { get; init; } = true;
 }
 
 public sealed record GameDebugComponentValueSerializationOptions

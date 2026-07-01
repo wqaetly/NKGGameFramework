@@ -14,7 +14,8 @@ public sealed record GameDebugDumpAnalysisReport(
     IReadOnlyList<GameDebugDumpAnalysisEntry> Fields,
     IReadOnlyList<GameDebugDumpAnalysisEntry> Components,
     IReadOnlyList<GameDebugDumpAnalysisEntry> Entities,
-    IReadOnlyList<GameDebugDumpAnalysisEntry> Scenes);
+    IReadOnlyList<GameDebugDumpAnalysisEntry> Scenes,
+    GameDebugDumpRecordingMetrics? RecordingMetrics = null);
 
 public sealed record GameDebugDumpAnalysisSizeBreakdown(
     long TotalBytes,
@@ -60,6 +61,17 @@ public static class GameDebugDumpAnalyzer
         builder.AppendLine($"Frames: {report.FrameCount}");
         builder.AppendLine($"Serialized bytes: {report.SerializedBytes}");
         builder.AppendLine($"Total accounted bytes: {report.Total.TotalBytes} (payload {report.Total.PayloadBytes}, structured {report.Total.StructuredBytes})");
+        if (report.RecordingMetrics is { } metrics)
+        {
+            builder.AppendLine(
+                "Recording: " +
+                $"{metrics.CapturedFrameCount}/{metrics.PublishedFrameCount} captured, " +
+                $"{metrics.MaxFrameCallbackMilliseconds:0.###} ms max callback, " +
+                $"{metrics.MaxCaptureMilliseconds:0.###} ms max capture, " +
+                $"{metrics.MaxCapturedStoreCount} max stores, " +
+                $"{metrics.MaxCapturedEntityRowCount} max entity rows");
+        }
+
         AppendSection(builder, "Types", report.Types, limit);
         AppendSection(builder, "Fields", report.Fields, limit);
         AppendSection(builder, "Components", report.Components, limit);
@@ -151,7 +163,8 @@ public static class GameDebugDumpAnalyzer
             Sort(fields),
             Sort(components),
             Sort(entities),
-            Sort(scenes));
+            Sort(scenes),
+            dump.Metrics);
     }
 
     private static GameDebugDumpAnalysisReport AnalyzeBlocks(GameDebugDumpDocument dump, long serializedBytes)
@@ -205,7 +218,8 @@ public static class GameDebugDumpAnalyzer
             Sort(fields),
             Sort(components),
             Sort(entities),
-            Sort(scenes));
+            Sort(scenes),
+            dump.Metrics);
     }
 
     private static void AnalyzeStoreBlock(

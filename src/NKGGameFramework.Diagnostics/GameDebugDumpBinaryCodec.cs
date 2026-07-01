@@ -2,7 +2,7 @@ namespace NKGGameFramework.Diagnostics;
 
 internal static class GameDebugDumpBinaryCodec
 {
-    private const int Version = 1;
+    private const int Version = 4;
 
     public static byte[] Serialize(GameDebugDumpDocument dump)
     {
@@ -51,9 +51,9 @@ internal static class GameDebugDumpBinaryCodec
         WriteTimestamp(writer, dump.CreatedAt);
         WriteTimestamp(writer, dump.StartedAt);
         WriteTimestamp(writer, dump.EndedAt);
-        writer.Write(dump.DroppedFrameCount);
         WriteList(writer, dump.Frames, WriteSnapshotMessage);
         WriteNullableList(writer, dump.BlockFrames, WriteDumpFrameBlocks);
+        WriteNullable(writer, dump.Metrics, WriteRecordingMetrics);
     }
 
     private static GameDebugDumpDocument ReadDumpDocument(BinaryReader reader)
@@ -65,9 +65,52 @@ internal static class GameDebugDumpBinaryCodec
             ReadTimestamp(reader),
             ReadTimestamp(reader),
             ReadTimestamp(reader),
-            reader.ReadInt32(),
             ReadList(reader, ReadSnapshotMessage),
-            ReadNullableList(reader, ReadDumpFrameBlocks));
+            ReadNullableList(reader, ReadDumpFrameBlocks),
+            ReadNullable(reader, ReadRecordingMetrics));
+    }
+
+    private static void WriteRecordingMetrics(BinaryWriter writer, GameDebugDumpRecordingMetrics metrics)
+    {
+        writer.Write(metrics.PublishedFrameCount);
+        writer.Write(metrics.CapturedFrameCount);
+        writer.Write(metrics.PendingCaptureCount);
+        writer.Write(metrics.LastFrameCallbackMilliseconds);
+        writer.Write(metrics.MaxFrameCallbackMilliseconds);
+        writer.Write(metrics.AverageFrameCallbackMilliseconds);
+        writer.Write(metrics.LastCaptureMilliseconds);
+        writer.Write(metrics.MaxCaptureMilliseconds);
+        writer.Write(metrics.AverageCaptureMilliseconds);
+        writer.Write(metrics.LastCapturedStoreCount);
+        writer.Write(metrics.LastCapturedEntityRowCount);
+        writer.Write(metrics.MaxCapturedStoreCount);
+        writer.Write(metrics.MaxCapturedEntityRowCount);
+        writer.Write(metrics.TotalCapturedStoreCount);
+        writer.Write(metrics.TotalCapturedEntityRowCount);
+        WriteNullableLong(writer, metrics.LastCaptureAllocatedBytes);
+        WriteNullableLong(writer, metrics.TotalCaptureAllocatedBytes);
+    }
+
+    private static GameDebugDumpRecordingMetrics ReadRecordingMetrics(BinaryReader reader)
+    {
+        return new GameDebugDumpRecordingMetrics(
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadDouble(),
+            reader.ReadDouble(),
+            reader.ReadDouble(),
+            reader.ReadDouble(),
+            reader.ReadDouble(),
+            reader.ReadDouble(),
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadInt64(),
+            reader.ReadInt64(),
+            ReadNullableLong(reader),
+            ReadNullableLong(reader));
     }
 
     private static void WriteSnapshotMessage(BinaryWriter writer, GameDebugSnapshotMessage message)
@@ -503,6 +546,7 @@ internal static class GameDebugDumpBinaryCodec
         writer.Write(block.Format);
         WriteByteArray(writer, block.Payload);
         WriteNullableString(writer, block.Error);
+        writer.Write(block.Version);
     }
 
     private static GameDebugDumpComponentStoreBlock ReadDumpComponentStoreBlock(BinaryReader reader)
@@ -512,7 +556,8 @@ internal static class GameDebugDumpBinaryCodec
             ReadIntArray(reader),
             reader.ReadString(),
             ReadByteArray(reader),
-            ReadNullableString(reader));
+            ReadNullableString(reader),
+            reader.ReadInt64());
     }
 
     private static void WriteTypeInfo(BinaryWriter writer, DebugTypeInfo type)
@@ -566,6 +611,20 @@ internal static class GameDebugDumpBinaryCodec
     private static double? ReadNullableDouble(BinaryReader reader)
     {
         return reader.ReadBoolean() ? reader.ReadDouble() : null;
+    }
+
+    private static void WriteNullableLong(BinaryWriter writer, long? value)
+    {
+        writer.Write(value.HasValue);
+        if (value.HasValue)
+        {
+            writer.Write(value.Value);
+        }
+    }
+
+    private static long? ReadNullableLong(BinaryReader reader)
+    {
+        return reader.ReadBoolean() ? reader.ReadInt64() : null;
     }
 
     private static void WriteByteArray(BinaryWriter writer, byte[] value)

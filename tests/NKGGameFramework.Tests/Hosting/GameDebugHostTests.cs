@@ -576,6 +576,8 @@ public sealed class GameDebugHostTests
 
             Assert.True(analysisResponse.IsSuccessStatusCode);
             Assert.NotNull(blockReport);
+            Assert.NotNull(blockReport.RecordingMetrics);
+            Assert.Equal(2, blockReport.RecordingMetrics.CapturedFrameCount);
             Assert.True(blockReport.Total.PayloadBytes > 0);
             Assert.True(blockReport.Total.StructuredBytes > 0);
             Assert.Contains(blockReport.Fields, entry => entry.DisplayName == $"{nameof(PositionComponent)}.X");
@@ -589,7 +591,7 @@ public sealed class GameDebugHostTests
             Assert.True(openResponse.IsSuccessStatusCode);
             Assert.NotNull(playback);
             Assert.Equal("nkg.debug.dump", playback.Format);
-            Assert.Equal(2, playback.Version);
+            Assert.Equal(4, playback.Version);
             Assert.Equal(2, playback.Frames.Count);
             Assert.All(playback.Frames, frame => Assert.Equal(nameof(RuntimeContext), frame.Frame.Source));
             Assert.All(playback.Frames, frame =>
@@ -763,7 +765,6 @@ public sealed class GameDebugHostTests
             var recording = recorder.GetState();
             Assert.True(recording.IsRecording);
             Assert.Equal(5, recording.FrameCount);
-            Assert.Equal(0, recording.DroppedFrameCount);
 
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
 
@@ -773,7 +774,6 @@ public sealed class GameDebugHostTests
             Assert.Equal(GameDebugDumpFile.FileExtension, Path.GetExtension(savedPath));
             var playback = recorder.OpenPlayback(new GameDebugDumpPlaybackOpenRequest(savedPath));
 
-            Assert.Equal(0, playback.DroppedFrameCount);
             Assert.Equal(5, playback.Frames.Count);
             Assert.Equal(1, playback.Frames[0].Frame.Frame);
             Assert.Equal(2, playback.Frames[1].Frame.Frame);
@@ -802,51 +802,43 @@ public sealed class GameDebugHostTests
     }
 
     [Fact]
-    public void Dump_recorder_can_bound_recorded_frames_and_reports_dropped_count()
+    public async Task Dump_recorder_captures_frames_off_the_frame_publisher_callback()
     {
         GameDebugController.Shared.Reset();
         GameDebugFramePublisher.Shared.Reset();
+        using var snapshotProvider = new BlockingSnapshotProvider();
         string? savedPath = null;
 
         try
         {
             using var runtime = new RuntimeContext();
             using var recorder = new GameDebugDumpRecorder(
-                new EmptySnapshotProvider(),
+                snapshotProvider,
                 GameDebugController.Shared,
                 GameDebugFramePublisher.Shared,
-                new GameDebugOptions
-                {
-                    MaxRecordedDumpFrames = 2,
-                });
+                new GameDebugOptions());
 
-            var start = recorder.Execute(new GameDebugDumpRecordingRequest("start", "bounded-window-test"));
+            var start = recorder.Execute(new GameDebugDumpRecordingRequest("start", "async-capture-test"));
             Assert.True(start.Succeeded);
 
-            for (var frame = 1; frame <= 5; frame++)
-            {
-                runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame));
-            }
+            var update = Task.Run(() => runtime.Update(GameFrameTime.FromSeconds(0.016, 0.016, frame: 1)));
 
-            var recording = recorder.GetState();
-            Assert.True(recording.IsRecording);
-            Assert.Equal(2, recording.FrameCount);
-            Assert.Equal(3, recording.DroppedFrameCount);
+            await update.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(snapshotProvider.CaptureStarted.Wait(TimeSpan.FromSeconds(1)));
 
+            snapshotProvider.ReleaseCapture();
             var stop = recorder.Execute(new GameDebugDumpRecordingRequest("stop"));
 
             Assert.True(stop.Succeeded);
             savedPath = WaitForDumpPath(recorder);
-            Assert.False(string.IsNullOrWhiteSpace(savedPath));
             var playback = recorder.OpenPlayback(new GameDebugDumpPlaybackOpenRequest(savedPath));
 
-            Assert.Equal(3, playback.DroppedFrameCount);
-            Assert.Equal(2, playback.Frames.Count);
-            Assert.Equal(4, playback.Frames[0].Frame.Frame);
-            Assert.Equal(5, playback.Frames[1].Frame.Frame);
+            Assert.Single(playback.Frames);
+            Assert.Equal(1, playback.Frames[0].Frame.Frame);
         }
         finally
         {
+            snapshotProvider.ReleaseCapture();
             if (!string.IsNullOrWhiteSpace(savedPath) && File.Exists(savedPath))
             {
                 File.Delete(savedPath);
@@ -872,6 +864,8 @@ public sealed class GameDebugHostTests
         Assert.Equal(dump.Format, reopened.Format);
         Assert.Equal(dump.Version, reopened.Version);
         Assert.Equal(dump.Frames.Count, reopened.Frames.Count);
+        Assert.NotNull(reopened.Metrics);
+        Assert.Equal(90, reopened.Metrics.CapturedFrameCount);
         Assert.Equal(1, reopened.Frames[0].Frame.Frame);
         Assert.Equal(61, reopened.Frames[60].Frame.Frame);
         Assert.Equal(90, reopened.Frames[89].Frame.Frame);
@@ -901,12 +895,16 @@ public sealed class GameDebugHostTests
         var table = GameDebugDumpAnalyzer.ToTable(report, limit: 3);
 
         Assert.Equal(3, report.FrameCount);
+        Assert.NotNull(report.RecordingMetrics);
+        Assert.Equal(3, report.RecordingMetrics.CapturedFrameCount);
         Assert.True(report.Total.PayloadBytes > 0);
         Assert.True(report.Total.StructuredBytes > 0);
         Assert.Contains(report.Types, entry => entry.DisplayName == nameof(PositionComponent));
         Assert.Contains(report.Fields, entry => entry.DisplayName == $"{nameof(PositionComponent)}.X");
         Assert.Contains("payloadBytes", json, StringComparison.Ordinal);
+        Assert.Contains("recordingMetrics", json, StringComparison.Ordinal);
         Assert.Contains("structuredBytes", json, StringComparison.Ordinal);
+        Assert.Contains("Recording:", table, StringComparison.Ordinal);
         Assert.Contains("Payload", table, StringComparison.Ordinal);
         Assert.Contains(nameof(PositionComponent), table, StringComparison.Ordinal);
     }
@@ -931,8 +929,38 @@ public sealed class GameDebugHostTests
         Assert.True(response.IsSuccessStatusCode);
         Assert.NotNull(report);
         Assert.Equal(3, report.FrameCount);
+        Assert.NotNull(report.RecordingMetrics);
+        Assert.Equal(3, report.RecordingMetrics.CapturedFrameCount);
         Assert.True(report.Total.PayloadBytes > 0);
         Assert.Contains(report.Types, entry => entry.DisplayName == nameof(PositionComponent));
+    }
+
+    [Fact]
+    public void Snapshot_capture_profiles_map_to_debug_scenarios()
+    {
+        var live = GameDebugEndpointDispatcher.CreateSnapshotCaptureOptions("?profile=livePreview");
+        Assert.Equal(GameDebugSnapshotCaptureProfile.LivePreview, live.Profile);
+        Assert.False(live.IncludeComponentPayloads);
+        Assert.False(live.IncludeStructuredComponentValues);
+        Assert.True(live.IncludeEntitySummaries);
+
+        var editable = GameDebugEndpointDispatcher.CreateSnapshotCaptureOptions("?profile=stepEditable");
+        Assert.Equal(GameDebugSnapshotCaptureProfile.StepEditable, editable.Profile);
+        Assert.True(editable.IncludeComponentPayloads);
+        Assert.True(editable.IncludeStructuredComponentValues);
+        Assert.True(editable.IncludeComponentGraphs);
+
+        var dump = GameDebugEndpointDispatcher.CreateSnapshotCaptureOptions("?profile=dumpRecording");
+        Assert.Equal(GameDebugSnapshotCaptureProfile.DumpRecording, dump.Profile);
+        Assert.False(dump.IncludeRuntimeDetails);
+        Assert.False(dump.IncludeSceneSystems);
+        Assert.False(dump.IncludeComponentStoreSummaries);
+        Assert.False(dump.IncludeEntitySummaries);
+        Assert.False(dump.IncludeComponentGraphs);
+
+        var overridePayload = GameDebugEndpointDispatcher.CreateSnapshotCaptureOptions(
+            "?profile=livePreview&includePayload=true");
+        Assert.True(overridePayload.IncludeComponentPayloads);
     }
 
     [Fact]
@@ -1020,6 +1048,31 @@ public sealed class GameDebugHostTests
         }
     }
 
+    private sealed class BlockingSnapshotProvider : IGameDebugSnapshotProvider, IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new();
+
+        public ManualResetEventSlim CaptureStarted { get; } = new();
+
+        public GameDebugSnapshot Capture(GameDebugSnapshotCaptureOptions? options = null)
+        {
+            CaptureStarted.Set();
+            Assert.True(_release.Wait(TimeSpan.FromSeconds(5)));
+            return new GameDebugSnapshot(DateTimeOffset.UtcNow, [], []);
+        }
+
+        public void ReleaseCapture()
+        {
+            _release.Set();
+        }
+
+        public void Dispose()
+        {
+            _release.Dispose();
+            CaptureStarted.Dispose();
+        }
+    }
+
     private static string CreateSnapshotPath(
         World world,
         Scene scene,
@@ -1095,13 +1148,30 @@ public sealed class GameDebugHostTests
 
         return new GameDebugDumpDocument(
             "nkg.debug.dump",
-            1,
+            4,
             "synthetic-dump",
             now,
             now,
             now.AddMilliseconds(frameCount),
-            0,
-            frames);
+            frames,
+            Metrics: new GameDebugDumpRecordingMetrics(
+                frameCount,
+                frameCount,
+                PendingCaptureCount: 0,
+                LastFrameCallbackMilliseconds: 0.1,
+                MaxFrameCallbackMilliseconds: 0.2,
+                AverageFrameCallbackMilliseconds: 0.15,
+                LastCaptureMilliseconds: 1.1,
+                MaxCaptureMilliseconds: 1.4,
+                AverageCaptureMilliseconds: 1.2,
+                LastCapturedStoreCount: 1,
+                LastCapturedEntityRowCount: 1,
+                MaxCapturedStoreCount: 1,
+                MaxCapturedEntityRowCount: 1,
+                TotalCapturedStoreCount: frameCount,
+                TotalCapturedEntityRowCount: frameCount,
+                LastCaptureAllocatedBytes: 128,
+                TotalCaptureAllocatedBytes: 128L * frameCount));
     }
 
     private static GameDebugSnapshotMessage CreateSyntheticFrame(int frame, DateTimeOffset capturedAt)

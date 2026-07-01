@@ -13,6 +13,7 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
     private readonly IGameDebugSnapshotProvider _snapshots;
     private readonly IGameDebugMutationHandler _mutations;
     private readonly GameDebugDumpRecorder _dumps;
+    private readonly GameDebugFrameCapturePipeline _captures;
     private readonly bool _ownsDumps;
     private bool _disposed;
 
@@ -34,12 +35,11 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
         {
             debugOptions.DumpDirectory = options.DumpDirectory;
         }
-        debugOptions.MaxRecordedDumpFrames = options.MaxRecordedDumpFrames;
-        debugOptions.DumpRecordingFrameStride = options.DumpRecordingFrameStride;
 
         var serializer = options.ComponentValueSerializer ?? new OdinGameDebugComponentValueSerializer();
         _snapshots = options.Snapshots ?? new GameDebugSnapshotProvider(session, serializer);
         _mutations = options.Mutations ?? new GameDebugMutationHandler(session, debugOptions, serializer);
+        _captures = new GameDebugFrameCapturePipeline(_snapshots, _control, session, _debugStateGate);
         if (options.Dumps is { } dumps)
         {
             _dumps = dumps;
@@ -120,10 +120,7 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
         GameDebugFrameInfo frame,
         GameDebugSnapshotCaptureOptions captureOptions)
     {
-        return ExecuteDebugOperation(() => new GameDebugSnapshotMessage(
-            frame,
-            _snapshots.Capture(captureOptions),
-            _control.GetState()));
+        return _captures.CaptureSnapshotMessage(frame, captureOptions);
     }
 
     public GameDebugSnapshotMessage CaptureCurrentSnapshotMessage(
@@ -430,7 +427,9 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
     public static GameDebugSnapshotCaptureOptions CreateSnapshotCaptureOptions(
         IReadOnlyDictionary<string, string> query)
     {
-        return new GameDebugSnapshotCaptureOptions
+        var profile = GetCaptureProfile(query);
+        var options = ApplyCaptureProfile(new GameDebugSnapshotCaptureOptions(), profile);
+        return options with
         {
             WorldName = GetString(query, "world") ?? GetString(query, "worldName"),
             SceneName = GetString(query, "scene") ?? GetString(query, "sceneName"),
@@ -443,20 +442,74 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
             EntityLimit = NormalizeLimit(GetInt(query, "entityLimit") ?? GetInt(query, "limit")),
             IncludeComponentPayloads = GetBool(query, "includePayload")
                 ?? GetBool(query, "includeComponentPayloads")
-                ?? true,
+                ?? options.IncludeComponentPayloads,
             IncludeStructuredComponentValues = GetBool(query, "includeStructured")
                 ?? GetBool(query, "includeStructuredComponentValues")
-                ?? true,
+                ?? options.IncludeStructuredComponentValues,
+            IncludeRuntimeDetails = GetBool(query, "includeRuntimeDetails")
+                ?? options.IncludeRuntimeDetails,
+            IncludeSceneSystems = GetBool(query, "includeSceneSystems")
+                ?? options.IncludeSceneSystems,
+            IncludeComponentStoreSummaries = GetBool(query, "includeComponentStoreSummaries")
+                ?? options.IncludeComponentStoreSummaries,
+            IncludeEntitySummaries = GetBool(query, "includeEntitySummaries")
+                ?? options.IncludeEntitySummaries,
+            IncludeComponentGraphs = GetBool(query, "includeComponentGraphs")
+                ?? options.IncludeComponentGraphs,
         };
     }
 
     public static GameDebugSnapshotCaptureOptions CreateStreamSnapshotCaptureOptions(
         GameDebugSnapshotCaptureOptions captureOptions)
     {
-        return captureOptions with
+        return ApplyCaptureProfile(captureOptions, GameDebugSnapshotCaptureProfile.LivePreview) with
         {
             IncludeComponentPayloads = false,
             IncludeStructuredComponentValues = false,
+        };
+    }
+
+    private static GameDebugSnapshotCaptureOptions ApplyCaptureProfile(
+        GameDebugSnapshotCaptureOptions options,
+        GameDebugSnapshotCaptureProfile profile)
+    {
+        return profile switch
+        {
+            GameDebugSnapshotCaptureProfile.LivePreview => options with
+            {
+                Profile = profile,
+                IncludeComponentPayloads = false,
+                IncludeStructuredComponentValues = false,
+            },
+            GameDebugSnapshotCaptureProfile.SingleFramePreview => options with
+            {
+                Profile = profile,
+                IncludeComponentPayloads = false,
+                IncludeStructuredComponentValues = false,
+            },
+            GameDebugSnapshotCaptureProfile.StepEditable => options with
+            {
+                Profile = profile,
+                IncludeComponentPayloads = true,
+                IncludeStructuredComponentValues = true,
+                IncludeRuntimeDetails = true,
+                IncludeSceneSystems = true,
+                IncludeComponentStoreSummaries = true,
+                IncludeEntitySummaries = true,
+                IncludeComponentGraphs = true,
+            },
+            GameDebugSnapshotCaptureProfile.DumpRecording or GameDebugSnapshotCaptureProfile.DumpPlaybackPreview => options with
+            {
+                Profile = profile,
+                IncludeComponentPayloads = false,
+                IncludeStructuredComponentValues = false,
+                IncludeRuntimeDetails = false,
+                IncludeSceneSystems = false,
+                IncludeComponentStoreSummaries = false,
+                IncludeEntitySummaries = false,
+                IncludeComponentGraphs = false,
+            },
+            _ => options,
         };
     }
 
@@ -621,6 +674,26 @@ public sealed class GameDebugEndpointDispatcher : IDisposable
         }
 
         return builder.ToString();
+    }
+
+    private static GameDebugSnapshotCaptureProfile GetCaptureProfile(IReadOnlyDictionary<string, string> query)
+    {
+        var value = GetString(query, "profile") ?? GetString(query, "captureProfile");
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return GameDebugSnapshotCaptureProfile.Custom;
+        }
+
+        return value.Trim() switch
+        {
+            "livePreview" => GameDebugSnapshotCaptureProfile.LivePreview,
+            "stepEditable" => GameDebugSnapshotCaptureProfile.StepEditable,
+            "singleFramePreview" => GameDebugSnapshotCaptureProfile.SingleFramePreview,
+            "dumpRecording" => GameDebugSnapshotCaptureProfile.DumpRecording,
+            "dumpPlaybackPreview" => GameDebugSnapshotCaptureProfile.DumpPlaybackPreview,
+            _ when Enum.TryParse<GameDebugSnapshotCaptureProfile>(value, ignoreCase: true, out var profile) => profile,
+            _ => GameDebugSnapshotCaptureProfile.Custom,
+        };
     }
 
     private static bool? GetBool(IReadOnlyDictionary<string, string> query, string key)

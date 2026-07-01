@@ -57,7 +57,8 @@ public sealed class Scene : IDisposable
                 stores.Add(new EcsComponentStoreDebugView(
                     store.ComponentType,
                     store.Count,
-                    store.EntityIds.ToArray()));
+                    store.EntityIds.ToArray(),
+                    store.Version));
             }
 
             return stores;
@@ -65,17 +66,34 @@ public sealed class Scene : IDisposable
     }
 
     public IReadOnlyList<EcsComponentStoreDumpBlock> ComponentStoreDumpBlocks
+        => CreateComponentStoreDumpBlocks();
+
+    public IReadOnlyList<EcsComponentStoreDumpBlock> CreateComponentStoreDumpBlocks(
+        Predicate<EcsComponentStoreDebugView>? storePredicate = null)
     {
-        get
+        var blocks = new List<EcsComponentStoreDumpBlock>(_componentStores.Count);
+        foreach (var store in _componentStores.Values)
         {
-            var blocks = new List<EcsComponentStoreDumpBlock>(_componentStores.Count);
-            foreach (var store in _componentStores.Values)
+            if (storePredicate is null)
             {
                 blocks.Add(store.CreateDumpBlock());
+                continue;
             }
 
-            return blocks;
+            var view = new EcsComponentStoreDebugView(
+                store.ComponentType,
+                store.Count,
+                store.EntityIds.ToArray(),
+                store.Version);
+            if (!storePredicate(view))
+            {
+                continue;
+            }
+
+            blocks.Add(store.CreateDumpBlock());
         }
+
+        return blocks;
     }
 
     internal bool IsQueryActive => _queryDepth > 0;
@@ -205,6 +223,33 @@ public sealed class Scene : IDisposable
         }
 
         return components;
+    }
+
+    public EcsEntityComponentsDebugView GetComponentsDebugView(
+        Entity entity,
+        Predicate<Type>? visibleTypePredicate = null)
+    {
+        EnsureEntity(entity);
+
+        var componentTypes = new List<Type>();
+        var visibleComponents = new List<EcsComponentDebugView>();
+        foreach (var store in _componentStores.Values)
+        {
+            if (!store.Has(entity.Id.Value))
+            {
+                continue;
+            }
+
+            componentTypes.Add(store.ComponentType);
+            if (visibleTypePredicate is null || visibleTypePredicate(store.ComponentType))
+            {
+                visibleComponents.Add(new EcsComponentDebugView(
+                    store.ComponentType,
+                    store.GetBoxed(entity.Id.Value)));
+            }
+        }
+
+        return new EcsEntityComponentsDebugView(componentTypes, visibleComponents);
     }
 
     public IReadOnlyList<Type> GetComponentTypes(Entity entity)

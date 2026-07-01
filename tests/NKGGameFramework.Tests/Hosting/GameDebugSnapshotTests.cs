@@ -273,6 +273,35 @@ public sealed class GameDebugSnapshotTests
     }
 
     [Fact]
+    public void Capture_detail_filter_keeps_entity_when_component_type_is_absent()
+    {
+        using var world = new World("debug-world");
+        var scene = world.CreateScene("battle");
+        var entity = scene.CreateEntity()
+            .Add(new PositionComponent(1, 2));
+        var session = new GameDebugSession().Register(world);
+        var snapshots = new GameDebugSnapshotProvider(
+            session,
+            new OdinGameDebugComponentValueSerializer());
+
+        var snapshot = snapshots.Capture(new GameDebugSnapshotCaptureOptions
+        {
+            WorldName = world.Name,
+            SceneName = scene.Name,
+            EntityId = entity.Id.Value,
+            ComponentTypeFullName = typeof(VelocityComponent).FullName,
+            ComponentAssemblyName = typeof(VelocityComponent).Assembly.GetName().Name,
+            IncludeComponentPayloads = true,
+            IncludeStructuredComponentValues = true,
+        });
+
+        var sceneSnapshot = Assert.Single(Assert.Single(snapshot.Worlds).Scenes);
+        var entitySnapshot = Assert.Single(sceneSnapshot.Entities);
+        Assert.Equal(entity.Id.Value, entitySnapshot.Id);
+        Assert.Empty(entitySnapshot.Components);
+    }
+
+    [Fact]
     public void Mutations_write_any_component_value_through_odin_payload()
     {
         using var world = new World("debug-world");

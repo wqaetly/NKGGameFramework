@@ -100,8 +100,7 @@ internal static class GameDebugEndpointLeanJson
         AppendJsonString(builder, FormatTimestamp(value.StartedAt));
         builder.Append(",\"endedAt\":");
         AppendJsonString(builder, FormatTimestamp(value.EndedAt));
-        builder.Append(",\"droppedFrameCount\":").Append(value.DroppedFrameCount.ToString(CultureInfo.InvariantCulture))
-            .Append(",\"frames\":[");
+        builder.Append(",\"frames\":[");
         for (var i = 0; i < value.Frames.Count; i++)
         {
             if (i > 0)
@@ -140,6 +139,8 @@ internal static class GameDebugEndpointLeanJson
         AppendAnalysisEntries(builder, value.Entities);
         builder.Append(",\"scenes\":");
         AppendAnalysisEntries(builder, value.Scenes);
+        builder.Append(",\"recordingMetrics\":");
+        AppendRecordingMetrics(builder, value.RecordingMetrics);
         builder.Append('}');
         return ToUtf8(builder);
     }
@@ -625,7 +626,6 @@ internal static class GameDebugEndpointLeanJson
             builder.Append("null");
         }
         builder.Append(",\"frameCount\":").Append(state.FrameCount.ToString(CultureInfo.InvariantCulture))
-            .Append(",\"droppedFrameCount\":").Append(state.DroppedFrameCount.ToString(CultureInfo.InvariantCulture))
             .Append(",\"lastDumpName\":");
         AppendNullableJsonString(builder, state.LastDumpName);
         builder.Append(",\"lastDumpPath\":");
@@ -633,7 +633,50 @@ internal static class GameDebugEndpointLeanJson
         builder.Append(",\"isFinalizing\":").Append(state.IsFinalizing ? "true" : "false")
             .Append(",\"lastDumpError\":");
         AppendNullableJsonString(builder, state.LastDumpError);
+        builder.Append(",\"metrics\":");
+        AppendRecordingMetrics(builder, state.Metrics);
         builder.Append('}');
+    }
+
+    private static void AppendRecordingMetrics(StringBuilder builder, GameDebugDumpRecordingMetrics? metrics)
+    {
+        if (metrics is null)
+        {
+            builder.Append("null");
+            return;
+        }
+
+        builder.Append("{\"publishedFrameCount\":").Append(metrics.PublishedFrameCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"capturedFrameCount\":").Append(metrics.CapturedFrameCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"pendingCaptureCount\":").Append(metrics.PendingCaptureCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"lastFrameCallbackMilliseconds\":").Append(metrics.LastFrameCallbackMilliseconds.ToString("G17", CultureInfo.InvariantCulture))
+            .Append(",\"maxFrameCallbackMilliseconds\":").Append(metrics.MaxFrameCallbackMilliseconds.ToString("G17", CultureInfo.InvariantCulture))
+            .Append(",\"averageFrameCallbackMilliseconds\":").Append(metrics.AverageFrameCallbackMilliseconds.ToString("G17", CultureInfo.InvariantCulture))
+            .Append(",\"lastCaptureMilliseconds\":").Append(metrics.LastCaptureMilliseconds.ToString("G17", CultureInfo.InvariantCulture))
+            .Append(",\"maxCaptureMilliseconds\":").Append(metrics.MaxCaptureMilliseconds.ToString("G17", CultureInfo.InvariantCulture))
+            .Append(",\"averageCaptureMilliseconds\":").Append(metrics.AverageCaptureMilliseconds.ToString("G17", CultureInfo.InvariantCulture))
+            .Append(",\"lastCapturedStoreCount\":").Append(metrics.LastCapturedStoreCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"lastCapturedEntityRowCount\":").Append(metrics.LastCapturedEntityRowCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"maxCapturedStoreCount\":").Append(metrics.MaxCapturedStoreCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"maxCapturedEntityRowCount\":").Append(metrics.MaxCapturedEntityRowCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"totalCapturedStoreCount\":").Append(metrics.TotalCapturedStoreCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"totalCapturedEntityRowCount\":").Append(metrics.TotalCapturedEntityRowCount.ToString(CultureInfo.InvariantCulture))
+            .Append(",\"lastCaptureAllocatedBytes\":");
+        AppendNullableLong(builder, metrics.LastCaptureAllocatedBytes);
+        builder.Append(",\"totalCaptureAllocatedBytes\":");
+        AppendNullableLong(builder, metrics.TotalCaptureAllocatedBytes);
+        builder.Append('}');
+    }
+
+    private static void AppendNullableLong(StringBuilder builder, long? value)
+    {
+        if (value is { } number)
+        {
+            builder.Append(number.ToString(CultureInfo.InvariantCulture));
+            return;
+        }
+
+        builder.Append("null");
     }
 
     private static void AppendAnalysisEntries(StringBuilder builder, IReadOnlyList<GameDebugDumpAnalysisEntry> entries)

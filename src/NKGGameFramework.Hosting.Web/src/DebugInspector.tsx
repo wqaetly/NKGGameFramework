@@ -55,6 +55,7 @@ import type {
   GameDebugDumpAnalysisReport,
   GameDebugDumpPlaybackFrame,
   GameDebugDumpPlaybackManifest,
+  GameDebugDumpRecordingMetrics,
   GameDebugDumpRecordingState,
   GameDebugFrameInfo,
   GameDebugSnapshotMessage,
@@ -238,7 +239,7 @@ const TIMELINE_CONTENT_HEIGHT_PX = 128;
 const DUMP_FILE_PICKER_ID = 'nkg-debug-dumps';
 const DUMP_ANALYSIS_FILE_PICKER_ID = 'nkg-debug-dump-analysis';
 const DUMP_ANALYSIS_PANEL_ID = 'dump-analysis';
-const SUPPORTED_DUMP_DOCUMENT_VERSIONS = new Set([1, 2]);
+const SUPPORTED_DUMP_DOCUMENT_VERSIONS = new Set([4]);
 const WEB_DUMP_DIRECTORY =
   typeof __NKG_WEB_DUMP_DIRECTORY__ === 'string' && __NKG_WEB_DUMP_DIRECTORY__.trim()
     ? __NKG_WEB_DUMP_DIRECTORY__
@@ -390,6 +391,7 @@ export function App() {
 
     try {
       const next = await fetchDebugSnapshotMessage(signal, {
+        profile: 'singleFramePreview',
         includePayload: false,
         includeStructured: false,
         waitForFrame: options.waitForFrame,
@@ -517,6 +519,7 @@ export function App() {
       }
 
       const detailMessage = await fetchDebugSnapshotMessage(options.signal, {
+        profile: 'stepEditable',
         worldName: target.worldName,
         sceneName: target.sceneName,
         entityId: target.entityId,
@@ -622,6 +625,7 @@ export function App() {
 
     while (true) {
       const message = await fetchDebugSnapshotMessage(undefined, {
+        profile: 'livePreview',
         includePayload: false,
         includeStructured: false,
         waitForFrame: false,
@@ -703,6 +707,23 @@ export function App() {
       });
     return () => controller.abort();
   }, [debugApiBaseUrl]);
+
+  useEffect(() => {
+    if (dumpRecording?.isRecording !== true) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const controller = new AbortController();
+      fetchDumpRecordingState(controller.signal)
+        .then(setDumpRecording)
+        .catch(() => {
+          controller.abort();
+        });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [debugApiBaseUrl, dumpRecording?.isRecording]);
 
   useEffect(() => {
     if (!dumpMode || !dump) {
@@ -800,6 +821,7 @@ export function App() {
     }
 
     const stream = createDebugSnapshotStream({
+      profile: 'livePreview',
       includePayload: false,
       includeStructured: false,
     });
@@ -1291,6 +1313,13 @@ export function App() {
   );
 
   const isDumpFinalizing = dumpRecording?.isFinalizing === true;
+  const dumpRecordingMetrics = dumpRecording?.metrics ?? null;
+  const dumpRecordingMetricsSummary = dumpRecordingMetrics
+    ? formatRecordingMetricsSummary(dumpRecordingMetrics)
+    : null;
+  const dumpRecordingMetricsTitle = dumpRecordingMetrics
+    ? formatRecordingMetricsTitle(dumpRecordingMetrics)
+    : undefined;
   const playbackPaused = dumpMode ? !dumpPlaying : control?.isPaused ?? false;
   const playbackCommand: GameDebugControlCommand = playbackPaused ? 'play' : 'pause';
   const playbackLabel = playbackPaused ? 'Play' : 'Pause';
@@ -1383,7 +1412,7 @@ export function App() {
             onClick={() => void toggleDumpRecording()}
             disabled={dumpBusy || isDumpFinalizing}
             title={dumpRecording?.isRecording
-              ? 'Stop dump recording'
+              ? dumpRecordingMetricsTitle ?? 'Stop dump recording'
               : isDumpFinalizing
                 ? 'Saving dump recording'
                 : 'Start dump recording'}
@@ -1391,6 +1420,11 @@ export function App() {
             {dumpRecording?.isRecording ? <Square size={16} /> : <Circle size={16} />}
             {dumpRecording?.isRecording ? 'Stop Rec' : isDumpFinalizing ? 'Saving' : 'Record'}
           </button>
+          {dumpRecording?.isRecording && dumpRecordingMetricsSummary ? (
+            <span className="recording-metrics" title={dumpRecordingMetricsTitle}>
+              {dumpRecordingMetricsSummary}
+            </span>
+          ) : null}
           {dumpMode ? (
             <button
               className="icon-button"
@@ -1597,7 +1631,6 @@ function DumpTimeline({
   const chartRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const chartDraggingRef = useRef(false);
-  const droppedFrameCount = dump?.droppedFrameCount ?? 0;
   const cursorLeft = getTimelineSampleCenterPercent(samples, activeIndex, timelineWeightTotal);
   const timelineContentWidth = timelineViewportWidth > 0
     ? Math.max(timelineViewportWidth, Math.round(timelineViewportWidth * timelineZoom))
@@ -1801,7 +1834,6 @@ function DumpTimeline({
             <span>{currentSample ? formatFps(currentSample.fps) : 'FPS -'}</span>
             <span>{currentSample ? formatMilliseconds(currentSample.milliseconds) : 'Frame -'}</span>
             <span>{playbackState}</span>
-            {droppedFrameCount > 0 ? <em>{droppedFrameCount} dropped</em> : null}
           </div>
           <div className="dump-timeline-zoom" aria-label="Profiler zoom">
             <span>{zoomLabel}</span>
@@ -2117,6 +2149,31 @@ function DumpAnalysisDockPanel(_props: DockPanelProps) {
             <DumpReportMetric label="Structured" value={formatBytes(report.total.structuredBytes)} tone="structured" />
             <DumpReportMetric label="Frames" value={String(report.frameCount)} />
           </div>
+
+          {report.recordingMetrics ? (
+            <div className="dump-report-summary">
+              <DumpReportMetric
+                label="Captured"
+                value={`${report.recordingMetrics.capturedFrameCount}/${report.recordingMetrics.publishedFrameCount}`}
+              />
+              <DumpReportMetric
+                label="Max Callback"
+                value={formatCompactMilliseconds(report.recordingMetrics.maxFrameCallbackMilliseconds)}
+              />
+              <DumpReportMetric
+                label="Max Capture"
+                value={formatCompactMilliseconds(report.recordingMetrics.maxCaptureMilliseconds)}
+              />
+              <DumpReportMetric
+                label="Max Stores"
+                value={String(report.recordingMetrics.maxCapturedStoreCount)}
+              />
+              <DumpReportMetric
+                label="Max Rows"
+                value={String(report.recordingMetrics.maxCapturedEntityRowCount)}
+              />
+            </div>
+          ) : null}
 
           <section className="dump-report-section">
             <div className="dump-report-section-title">
@@ -3086,6 +3143,37 @@ function formatBytes(value: number) {
 
   const precision = unitIndex === 0 || size >= 100 ? 0 : 1;
   return `${size.toFixed(precision)} ${units[unitIndex]}`;
+}
+
+function formatRecordingMetricsSummary(metrics: GameDebugDumpRecordingMetrics) {
+  return [
+    `${metrics.capturedFrameCount}/${metrics.publishedFrameCount} frames`,
+    `${metrics.pendingCaptureCount} pending`,
+    `${formatCompactMilliseconds(metrics.averageCaptureMilliseconds)} cap avg`,
+    `${metrics.lastCapturedStoreCount} stores`,
+    `${metrics.lastCapturedEntityRowCount} rows`,
+  ].join(' · ');
+}
+
+function formatRecordingMetricsTitle(metrics: GameDebugDumpRecordingMetrics) {
+  const allocated = metrics.lastCaptureAllocatedBytes === null
+    ? 'n/a'
+    : formatBytes(metrics.lastCaptureAllocatedBytes);
+  return [
+    `Published frames: ${metrics.publishedFrameCount}`,
+    `Captured frames: ${metrics.capturedFrameCount}`,
+    `Pending captures: ${metrics.pendingCaptureCount}`,
+    `Frame callback last/max/avg: ${formatCompactMilliseconds(metrics.lastFrameCallbackMilliseconds)} / ${formatCompactMilliseconds(metrics.maxFrameCallbackMilliseconds)} / ${formatCompactMilliseconds(metrics.averageFrameCallbackMilliseconds)}`,
+    `Capture last/max/avg: ${formatCompactMilliseconds(metrics.lastCaptureMilliseconds)} / ${formatCompactMilliseconds(metrics.maxCaptureMilliseconds)} / ${formatCompactMilliseconds(metrics.averageCaptureMilliseconds)}`,
+    `Last copied stores/entity rows: ${metrics.lastCapturedStoreCount} / ${metrics.lastCapturedEntityRowCount}`,
+    `Max copied stores/entity rows: ${metrics.maxCapturedStoreCount} / ${metrics.maxCapturedEntityRowCount}`,
+    `Total copied stores/entity rows: ${metrics.totalCapturedStoreCount} / ${metrics.totalCapturedEntityRowCount}`,
+    `Last capture allocated bytes: ${allocated}`,
+  ].join('\n');
+}
+
+function formatCompactMilliseconds(value: number) {
+  return `${value.toFixed(value < 10 ? 2 : 1)} ms`;
 }
 
 function areEntitySnapshotsEqual(left: EntityDebugSnapshot, right: EntityDebugSnapshot) {

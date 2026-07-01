@@ -20,6 +20,7 @@ export type DebugApiConnection = {
 };
 
 export interface DebugSnapshotRequestOptions {
+  profile?: DebugSnapshotCaptureProfile;
   worldName?: string;
   sceneName?: string;
   entityId?: number;
@@ -31,6 +32,13 @@ export interface DebugSnapshotRequestOptions {
   includeStructured?: boolean;
   waitForFrame?: boolean;
 }
+
+export type DebugSnapshotCaptureProfile =
+  | 'livePreview'
+  | 'stepEditable'
+  | 'singleFramePreview'
+  | 'dumpRecording'
+  | 'dumpPlaybackPreview';
 
 export const DEFAULT_DEBUG_API_CONNECTION: DebugApiConnection = {
   host: '127.0.0.1',
@@ -54,6 +62,7 @@ export async function fetchDebugSnapshotMessage(
   options?: DebugSnapshotRequestOptions,
 ): Promise<GameDebugSnapshotMessage> {
   const url = createDebugApiUrl('/_nkg/debug/snapshot');
+  appendQuery(url, 'profile', options?.profile);
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
   appendQuery(url, 'entityId', options?.entityId);
@@ -81,6 +90,7 @@ export async function fetchDebugSnapshotMessage(
 
 export function createDebugSnapshotStream(options?: DebugSnapshotRequestOptions): EventSource {
   const url = createDebugApiUrl('/_nkg/debug/stream');
+  appendQuery(url, 'profile', options?.profile);
   appendQuery(url, 'worldName', options?.worldName);
   appendQuery(url, 'sceneName', options?.sceneName);
   appendQuery(url, 'entityId', options?.entityId);

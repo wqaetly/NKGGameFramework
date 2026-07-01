@@ -36,9 +36,6 @@ public sealed class GodotDebugEndpointBridge : IDisposable
             DefaultWaitForSnapshotFrame = options.DefaultWaitForSnapshotFrame,
             EnableMutations = options.EnableMutations,
             DumpDirectory = options.DumpDirectory,
-            MaxRecordedDumpFrames = options.MaxRecordedDumpFrames,
-            DumpRecordingFrameStride = options.DumpRecordingFrameStride,
-            Session = options.Session,
             Control = options.Control ?? GameDebugController.Shared,
             Frames = options.Frames ?? GameDebugFramePublisher.Shared,
             ComponentValueSerializer = options.ComponentValueSerializer,
@@ -56,10 +53,6 @@ public sealed class GodotDebugEndpointBridgeOptions
     public bool EnableMutations { get; set; } = true;
 
     public string? DumpDirectory { get; set; }
-
-    public int? MaxRecordedDumpFrames { get; set; }
-
-    public int DumpRecordingFrameStride { get; set; } = 1;
 
     public GameDebugSession? Session { get; set; }
 

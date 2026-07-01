@@ -6,9 +6,7 @@ public static class GameDebugDumpFile
 {
     public const string FileExtension = ".nkgdump";
     public const string ContainerMagicText = "NKGDUMP4\n";
-    private const string LegacyJsonContainerMagicText = "NKGDUMP3\n";
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes(ContainerMagicText);
-    private static readonly byte[] LegacyJsonMagic = Encoding.ASCII.GetBytes(LegacyJsonContainerMagicText);
 
     public static byte[] Serialize(GameDebugDumpDocument dump)
     {
@@ -36,22 +34,12 @@ public static class GameDebugDumpFile
             return GameDebugDumpBinaryCodec.Deserialize(documentPayload);
         }
 
-        if (HasLegacyJsonMagic(payload))
-        {
-            throw new InvalidDataException("Legacy NKGDUMP3 gzip JSON dumps are not supported by this runtime.");
-        }
-
         throw new InvalidDataException("The debug dump file was not a supported NKG dump.");
     }
 
     private static bool HasMagic(byte[] payload)
     {
         return HasMagic(payload, Magic);
-    }
-
-    private static bool HasLegacyJsonMagic(byte[] payload)
-    {
-        return HasMagic(payload, LegacyJsonMagic);
     }
 
     private static bool HasMagic(byte[] payload, byte[] magic)

@@ -137,7 +137,6 @@ public static class PlaneGameBridge
         return new GodotDebugEndpointBridge(new GodotDebugEndpointBridgeOptions
         {
             Session = session,
-            DumpRecordingFrameStride = 4,
         });
     }
 

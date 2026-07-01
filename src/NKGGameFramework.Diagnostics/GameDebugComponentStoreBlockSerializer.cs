@@ -22,7 +22,8 @@ internal static class GameDebugComponentStoreBlockSerializer
                     block.Values,
                     DataFormat.Binary,
                     GameDebugOdinSerialization.CreateSerializationContext()),
-                Error: null);
+                Error: null,
+                Version: block.Version);
         }
         catch (Exception exception)
         {
@@ -39,7 +40,8 @@ internal static class GameDebugComponentStoreBlockSerializer
                 block.EntityIds,
                 Format,
                 [],
-                exception.Message);
+                exception.Message,
+                Version: block.Version);
         }
     }
 
@@ -165,7 +167,8 @@ internal static class GameDebugComponentStoreBlockSerializer
             block.EntityIds,
             StructuredFormat,
             GameDebugDumpBinaryCodec.SerializeComponentValues(values),
-            Error: null);
+            Error: null,
+            Version: block.Version);
     }
 
     public static bool TryGetValue(

@@ -6,6 +6,8 @@ internal interface IComponentStore
 
     int Count { get; }
 
+    long Version { get; }
+
     IReadOnlyList<int> EntityIds { get; }
 
     EcsComponentStoreDumpBlock CreateDumpBlock();
@@ -31,6 +33,8 @@ internal sealed class ComponentStore<TComponent> : IComponentStore
 
     public int Count => _entityIds.Count;
 
+    public long Version { get; private set; }
+
     public IReadOnlyList<int> EntityIds => _entityIds;
 
     public EcsComponentStoreDumpBlock CreateDumpBlock()
@@ -45,7 +49,8 @@ internal sealed class ComponentStore<TComponent> : IComponentStore
         return new EcsComponentStoreDumpBlock(
             typeof(TComponent),
             entityIds,
-            values);
+            values,
+            Version);
     }
 
     public bool Has(int entityId)
@@ -80,6 +85,7 @@ internal sealed class ComponentStore<TComponent> : IComponentStore
         }
 
         _components[entityId] = component;
+        Version++;
     }
 
     public bool Remove(int entityId)
@@ -99,6 +105,7 @@ internal sealed class ComponentStore<TComponent> : IComponentStore
         _positions[lastEntityId] = index;
         _entityIds.RemoveAt(lastIndex);
         _positions.Remove(entityId);
+        Version++;
         return true;
     }
 

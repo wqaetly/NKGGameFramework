@@ -220,7 +220,6 @@ export interface GameDebugDumpPlaybackManifest {
   createdAt: string;
   startedAt: string;
   endedAt: string;
-  droppedFrameCount: number;
   frames: GameDebugDumpPlaybackFrame[];
 }
 
@@ -251,11 +250,31 @@ export interface GameDebugDumpRecordingState {
   isRecording: boolean;
   startedAt: string | null;
   frameCount: number;
-  droppedFrameCount: number;
   lastDumpName: string | null;
   lastDumpPath: string | null;
   isFinalizing: boolean;
   lastDumpError: string | null;
+  metrics: GameDebugDumpRecordingMetrics | null;
+}
+
+export interface GameDebugDumpRecordingMetrics {
+  publishedFrameCount: number;
+  capturedFrameCount: number;
+  pendingCaptureCount: number;
+  lastFrameCallbackMilliseconds: number;
+  maxFrameCallbackMilliseconds: number;
+  averageFrameCallbackMilliseconds: number;
+  lastCaptureMilliseconds: number;
+  maxCaptureMilliseconds: number;
+  averageCaptureMilliseconds: number;
+  lastCapturedStoreCount: number;
+  lastCapturedEntityRowCount: number;
+  maxCapturedStoreCount: number;
+  maxCapturedEntityRowCount: number;
+  totalCapturedStoreCount: number;
+  totalCapturedEntityRowCount: number;
+  lastCaptureAllocatedBytes: number | null;
+  totalCaptureAllocatedBytes: number | null;
 }
 
 export interface GameDebugDumpRecordingResult {
@@ -276,6 +295,7 @@ export interface GameDebugDumpAnalysisReport {
   components: GameDebugDumpAnalysisEntry[];
   entities: GameDebugDumpAnalysisEntry[];
   scenes: GameDebugDumpAnalysisEntry[];
+  recordingMetrics: GameDebugDumpRecordingMetrics | null;
 }
 
 export interface GameDebugDumpAnalysisSizeBreakdown {

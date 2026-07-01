@@ -9,9 +9,9 @@ public sealed record GameDebugDumpDocument(
     DateTimeOffset CreatedAt,
     DateTimeOffset StartedAt,
     DateTimeOffset EndedAt,
-    int DroppedFrameCount,
     IReadOnlyList<GameDebugSnapshotMessage> Frames,
-    IReadOnlyList<GameDebugDumpFrameBlocks>? BlockFrames = null);
+    IReadOnlyList<GameDebugDumpFrameBlocks>? BlockFrames = null,
+    GameDebugDumpRecordingMetrics? Metrics = null);
 
 public sealed record GameDebugDumpFrameBlocks(
     int Index,
@@ -30,7 +30,8 @@ public sealed record GameDebugDumpComponentStoreBlock(
     int[] EntityIds,
     string Format,
     byte[] Payload,
-    string? Error);
+    string? Error,
+    long Version = 0);
 
 public sealed record GameDebugDumpRecordingRequest(
     string Command,
@@ -41,11 +42,30 @@ public sealed record GameDebugDumpRecordingState(
     bool IsRecording,
     DateTimeOffset? StartedAt,
     int FrameCount,
-    int DroppedFrameCount,
     string? LastDumpName,
     string? LastDumpPath,
     bool IsFinalizing = false,
-    string? LastDumpError = null);
+    string? LastDumpError = null,
+    GameDebugDumpRecordingMetrics? Metrics = null);
+
+public sealed record GameDebugDumpRecordingMetrics(
+    int PublishedFrameCount,
+    int CapturedFrameCount,
+    int PendingCaptureCount,
+    double LastFrameCallbackMilliseconds,
+    double MaxFrameCallbackMilliseconds,
+    double AverageFrameCallbackMilliseconds,
+    double LastCaptureMilliseconds,
+    double MaxCaptureMilliseconds,
+    double AverageCaptureMilliseconds,
+    int LastCapturedStoreCount,
+    int LastCapturedEntityRowCount,
+    int MaxCapturedStoreCount,
+    int MaxCapturedEntityRowCount,
+    long TotalCapturedStoreCount,
+    long TotalCapturedEntityRowCount,
+    long? LastCaptureAllocatedBytes,
+    long? TotalCaptureAllocatedBytes);
 
 public sealed record GameDebugDumpRecordingResult(
     bool Succeeded,
@@ -63,7 +83,6 @@ public sealed record GameDebugDumpPlaybackManifest(
     DateTimeOffset CreatedAt,
     DateTimeOffset StartedAt,
     DateTimeOffset EndedAt,
-    int DroppedFrameCount,
     IReadOnlyList<GameDebugDumpPlaybackFrame> Frames);
 
 public sealed record GameDebugDumpPlaybackFrame(
